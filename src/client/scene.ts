@@ -31,7 +31,7 @@ export class RingScene {
   build(cfg: SimConfig, level: Level) {
     this.level.clear();
     this.inertial.clear();
-    const R = cfg.R, W = cfg.halfWidth, H = cfg.wallHeight, T = cfg.wallThickness, hull = cfg.hullThickness;
+    const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
     const segs = Math.min(720, Math.max(192, Math.round(R * 2.4)));
     this.starRadius = Math.max(4000, R * 12);
     this.scene.fog = new THREE.Fog(0x0b1020, R * 1.5, R * 7);
@@ -74,19 +74,9 @@ export class RingScene {
     }
     this.level.add(inst);
 
-    // Rim walls (inner faces, tops, outer faces) and the outer hull.
-    const wallMat = new THREE.MeshStandardMaterial({ map: this.textures.wall, side: THREE.DoubleSide, roughness: 0.7, metalness: 0.3 });
-    for (const sgn of [1, -1]) {
-      const inner = new THREE.Mesh(new THREE.RingGeometry(R - H, R, segs, 1), wallMat);
-      inner.position.z = sgn * W;
-      const outer = new THREE.Mesh(new THREE.RingGeometry(R - H, R + hull, segs, 1), new THREE.MeshStandardMaterial({ color: 0x3a404a, side: THREE.DoubleSide, roughness: 0.9 }));
-      outer.position.z = sgn * (W + T);
-      this.level.add(inner, outer);
-      const topGeo = new THREE.CylinderGeometry(R - H, R - H, T, segs, 1, true);
-      topGeo.rotateX(Math.PI / 2);
-      topGeo.translate(0, 0, sgn * (W + T / 2));
-      this.level.add(new THREE.Mesh(topGeo, new THREE.MeshStandardMaterial({ color: 0xc9a43a, side: THREE.DoubleSide, emissive: 0x332200 })));
-    }
+    // Rim walls, one piece per sector so heights can vary (low curbs = you can fall off).
+    this.buildWalls(cfg, level.wallPos, 1, segs);
+    this.buildWalls(cfg, level.wallNeg, -1, segs);
     const hullGeo = new THREE.CylinderGeometry(R + hull, R + hull, 2 * (W + T), segs, 1, true);
     hullGeo.rotateX(Math.PI / 2);
     this.level.add(new THREE.Mesh(hullGeo, new THREE.MeshStandardMaterial({ color: 0x2a2f38, roughness: 0.9, metalness: 0.5 })));
@@ -124,6 +114,45 @@ export class RingScene {
     }
 
     this.buildSky();
+  }
+
+  private buildWalls(cfg: SimConfig, heights: number[], sgn: number, segs: number) {
+    const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
+    const n = heights.length;
+    if (!n) return;
+    const step = (2 * Math.PI) / n;
+    const segsPer = Math.max(4, Math.ceil(segs / n));
+    const wallTex = this.textures.wall;
+    const tall = new THREE.MeshStandardMaterial({ map: wallTex, side: THREE.DoubleSide, roughness: 0.7, metalness: 0.3 });
+    const low = new THREE.MeshStandardMaterial({ color: 0x7a5a3a, side: THREE.DoubleSide, roughness: 0.7, emissive: 0x2a1000 });
+    const outerMat = new THREE.MeshStandardMaterial({ color: 0x3a404a, side: THREE.DoubleSide, roughness: 0.9 });
+    const topTall = new THREE.MeshStandardMaterial({ color: 0xc9a43a, side: THREE.DoubleSide, emissive: 0x332200 });
+    const topLow = new THREE.MeshStandardMaterial({ color: 0xff5a2a, side: THREE.DoubleSide, emissive: 0x551400 }); // hazard: edge of the world
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < n; i++) {
+      const h = heights[i];
+      const a0 = i * step;
+      const isLow = h < cfg.wallHeight * 0.5;
+      const inner = new THREE.Mesh(new THREE.RingGeometry(R - h, R, segsPer, 1, a0, step), isLow ? low : tall);
+      inner.position.z = sgn * W;
+      const outer = new THREE.Mesh(new THREE.RingGeometry(R - h, R + hull, segsPer, 1, a0, step), outerMat);
+      outer.position.z = sgn * (W + T);
+      // Cylinder theta 0 maps to ring angle -pi/2 after rotateX(pi/2).
+      const topGeo = new THREE.CylinderGeometry(R - h, R - h, T, segsPer, 1, true, a0 + Math.PI / 2, step);
+      topGeo.rotateX(Math.PI / 2);
+      topGeo.translate(0, 0, sgn * (W + T / 2));
+      this.level.add(inner, outer, new THREE.Mesh(topGeo, isLow ? topLow : topTall));
+      // End cap where this sector meets a lower neighbour.
+      for (const [j, edge] of [[(i + 1) % n, a0 + step], [(i + n - 1) % n, a0]] as const) {
+        const hj = heights[j];
+        if (hj >= h) continue;
+        const cap = new THREE.Mesh(new THREE.PlaneGeometry(T, h - hj).rotateY(Math.PI / 2), tall);
+        const holder = new THREE.Object3D();
+        holder.applyMatrix4(basisMatrix(m, edge, R - (h + hj) / 2, sgn * (W + T / 2)));
+        holder.add(cap);
+        this.level.add(holder);
+      }
+    }
   }
 
   private buildSky() {

@@ -27,9 +27,11 @@ export interface SimConfig {
   muzzleRifle: number;
   muzzlePistol: number;
   muzzleOvercharge: number;
-  muzzleGrenade: number;
+  muzzleGrenade: number; // throw speed (both grenade types)
   projectileLifetime: number; // seconds
-  grenadeFuse: number; // seconds after sticking
+  grenadeFuse: number; // sticky: seconds after sticking
+  bounceFuse: number; // bouncing: seconds after the throw
+  bounceRestitution: number;
   grenadeMaxFlight: number; // seconds before an unstuck grenade pops anyway
 
   // explosions
@@ -40,6 +42,9 @@ export interface SimConfig {
   knockbackFalloff: Falloff;
   liftBias: number; // 0 = purely radial from blast; >0 biases toward the axis ("up")
   selfDamageScale: number;
+
+  // world edge
+  fallKillDistance: number; // m beyond the ring's hull before a falling body is dead
 
   // players
   walkSpeed: number;
@@ -76,6 +81,8 @@ export const defaultConfig = (): SimConfig => ({
   muzzleGrenade: 16,
   projectileLifetime: 60,
   grenadeFuse: 1.2,
+  bounceFuse: 2.5,
+  bounceRestitution: 0.6,
   grenadeMaxFlight: 12,
 
   explosionRadius: 6,
@@ -86,10 +93,12 @@ export const defaultConfig = (): SimConfig => ({
   liftBias: 0.35,
   selfDamageScale: 0.3,
 
-  walkSpeed: 5,
-  sprintSpeed: 8.5,
-  jumpSpeed: 4.5,
-  groundAccel: 60,
+  fallKillDistance: 25,
+
+  walkSpeed: 9,
+  sprintSpeed: 15,
+  jumpSpeed: 8,
+  groundAccel: 90,
   slideDecel: 12,
   maxHealth: 100,
   maxShield: 70,
@@ -106,7 +115,8 @@ export const BTN_FIRE = 1;
 export const BTN_AIM = 2; // trajectory preview (client-only meaning, still sent)
 export const BTN_JUMP = 4;
 export const BTN_SPRINT = 8;
-export const BTN_GRENADE = 16; // hold to aim, release to throw
+export const BTN_GRENADE = 16; // sticky grenade: hold to aim, release to throw
+export const BTN_GRENADE2 = 32; // bouncing grenade: hold to aim, release to throw
 
 export const WEAPON_RIFLE = 0;
 export const WEAPON_PISTOL = 1;
@@ -159,7 +169,8 @@ export interface Player {
   pistolCharge: number; // 0..1
   pistolHoldTicks: number;
   fireReadyTick: number;
-  grenades: number;
+  grenades: number; // sticky
+  bounceGrenades: number;
   grenadeReadyTick: number;
   prevButtons: number;
   lastInput: InputCmd;
@@ -185,6 +196,9 @@ export interface Bolt {
   expireTick: number;
 }
 
+export type GrenadeKind = 'sticky' | 'bounce';
+export type ThrownKind = 'grenade' | 'bounceGrenade';
+
 export type StickTarget =
   | { kind: 'world' }
   | { kind: 'player'; id: number; offset: Vec3 } // offset in target's local (spin, up, axial) basis
@@ -193,6 +207,7 @@ export type StickTarget =
 export interface Grenade {
   id: number;
   type: 'grenade';
+  variant: GrenadeKind;
   owner: number;
   pos: Vec3;
   vel: Vec3;
@@ -200,7 +215,8 @@ export interface Grenade {
   radius: number;
   armed: boolean;
   stuck: StickTarget | null;
-  fuseTick: number; // -1 until stuck
+  contactNormal: Vec3 | null; // bouncing grenades rolling/resting on a surface
+  fuseTick: number; // sticky: -1 until stuck; bounce: set at throw
   spawnTick: number;
   expireTick: number;
 }
@@ -242,10 +258,14 @@ export interface SpawnPoint {
 export interface Level {
   boxes: Box[];
   spawns: SpawnPoint[];
+  /** Rim wall height per equal angular sector, for the +Z and -Z walls. */
+  wallPos: number[];
+  wallNeg: number[];
 }
 
 export type SimEvent =
-  | { type: 'fire'; owner: number; kind: BoltKind | 'grenade'; pos: Vec3 }
+  | { type: 'fire'; owner: number; kind: BoltKind | ThrownKind; pos: Vec3 }
+  | { type: 'grenadeBounce'; id: number; pos: Vec3; speed: number }
   | { type: 'impact'; pos: Vec3; kind: BoltKind; target: number }
   | { type: 'hit'; target: number; attacker: number; damage: number; shieldBroken: boolean }
   | { type: 'stick'; id: number; pos: Vec3; target: number }

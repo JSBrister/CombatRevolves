@@ -9,7 +9,7 @@ export const PLAYER_HALF_SEG = 0.5; // capsule segment half-length; total height
 export const PLAYER_STAND = PLAYER_HALF_SEG + PLAYER_RADIUS; // centre height above floor
 export const EYE_OFFSET = 0.7;
 export const PLAYER_MASS = 80;
-export const MAX_GRENADES = 4;
+export const MAX_GRENADES = 4; // of each type
 
 export interface WorldOptions {
   seed?: number;
@@ -17,6 +17,8 @@ export interface WorldOptions {
   obstacles?: boolean;
   props?: boolean;
   dummies?: boolean;
+  /** Rim walls with low and medium stretches (default true). False = full height all round. */
+  variedWalls?: boolean;
 }
 
 export function createState(opts: WorldOptions = {}): SimState {
@@ -27,7 +29,7 @@ export function createState(opts: WorldOptions = {}): SimState {
     rng: (opts.seed ?? 1234) >>> 0,
     nextId: 1,
     config,
-    level: { boxes: [], spawns: [] },
+    level: { boxes: [], spawns: [], wallPos: [], wallNeg: [] },
     players: [],
     bolts: [],
     grenades: [],
@@ -35,7 +37,7 @@ export function createState(opts: WorldOptions = {}): SimState {
     explosions: [],
     events: [],
   };
-  state.level = generateLevel(config, state, opts.obstacles ?? true, () => allocId(state));
+  state.level = generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true);
   if (opts.props ?? true) {
     for (let i = 0; i < 12; i++) {
       const a = ((i + 0.5) / 12) * Math.PI * 2 + rngRange(state, -0.1, 0.1);
@@ -81,7 +83,7 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
     health: state.config.maxHealth, shield: state.config.maxShield,
     lastDamageTick: -1e9, lastAttacker: -1,
     weapon: 0, rifleHeat: 0, rifleOverheatUntil: 0, pistolHeat: 0, pistolCharge: 0, pistolHoldTicks: 0,
-    fireReadyTick: 0, grenades: MAX_GRENADES, grenadeReadyTick: 0,
+    fireReadyTick: 0, grenades: MAX_GRENADES, bounceGrenades: MAX_GRENADES, grenadeReadyTick: 0,
     prevButtons: 0, lastInput: neutralInput(id, 0),
     kills: 0, deaths: 0,
   };

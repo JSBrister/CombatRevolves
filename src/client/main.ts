@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import {
   DT, EYE_OFFSET, WEAPON_HOVER, WEAPON_PISTOL, addPlayer, botInput, createState, localBasis, omegaOf,
   predictTrajectory, removePlayer, step, viewVectors,
-  type BoltKind, type InputCmd, type SimConfig, type SimEvent, type SimState, type Vec3,
+  type BoltKind, type InputCmd, type ThrownKind, type SimConfig, type SimEvent, type SimState, type Vec3,
 } from '../sim';
 import { Sfx } from './audio';
 import { BOLT_COLORS, EntityViews, type PosMap } from './entities';
@@ -99,7 +99,15 @@ fW.add(cfg, 'muzzleRifle', 5, 150, 1).name('rifle muzzle (m/s)');
 fW.add(cfg, 'muzzlePistol', 5, 150, 1).name('pistol muzzle');
 fW.add(cfg, 'muzzleOvercharge', 5, 150, 1).name('overcharge muzzle');
 fW.add(cfg, 'muzzleGrenade', 2, 60, 0.5).name('grenade throw');
-fW.add(cfg, 'grenadeFuse', 0.2, 5, 0.1).name('grenade fuse (s)');
+fW.add(cfg, 'grenadeFuse', 0.2, 5, 0.1).name('sticky fuse (s)');
+fW.add(cfg, 'bounceFuse', 0.2, 8, 0.1).name('bouncer fuse (s)');
+fW.add(cfg, 'bounceRestitution', 0, 1, 0.05).name('bouncer bounciness');
+const fP = gui.addFolder('Player');
+fP.add(cfg, 'walkSpeed', 1, 40, 0.5).name('run speed (m/s)');
+fP.add(cfg, 'sprintSpeed', 1, 60, 0.5).name('sprint speed (m/s)');
+fP.add(cfg, 'jumpSpeed', 0, 30, 0.5).name('jump speed (m/s)');
+fP.add(cfg, 'groundAccel', 10, 300, 5).name('ground accel (m/s²)');
+fP.add(cfg, 'fallKillDistance', 2, 200, 1).name('fall-off kill distance (m)');
 const fK = gui.addFolder('Explosions');
 fK.add(cfg, 'knockbackScale', 0, 5, 0.05).name('knockback scale');
 fK.add(cfg, 'knockbackSpeed', 0, 60, 0.5).name('point-blank Δv (m/s)');
@@ -167,6 +175,7 @@ function handleEvent(e: SimEvent) {
     case 'overheat': if (e.id === localId) sfx.overheat(); break;
     case 'jump': if (e.id === localId) sfx.jump(); break;
     case 'bodyImpact': sfx.thud(d(e.pos)); break;
+    case 'grenadeBounce': sfx.bounce(d(e.pos), e.speed); break;
   }
   hud.onEvent(state, e, localId);
 }
@@ -186,10 +195,11 @@ function simTick() {
   views.onTick(state);
 }
 
-function previewKind(): BoltKind | 'grenade' | null {
+function previewKind(): BoltKind | ThrownKind | null {
   const me = state.players.find((p) => p.id === localId);
   if (!me || !me.alive || !view.preview) return null;
   if (input.grenadeHeld && me.grenades > 0) return 'grenade';
+  if (input.bounceHeld && me.bounceGrenades > 0) return 'bounceGrenade';
   if (!input.aiming) return null;
   if (me.weapon === WEAPON_PISTOL) return me.pistolCharge >= 1 ? 'overcharge' : 'pistol';
   if (me.weapon === WEAPON_HOVER) return 'hover';

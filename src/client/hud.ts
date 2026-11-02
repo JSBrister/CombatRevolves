@@ -29,7 +29,8 @@ export class Hud {
     $('weapon-name').textContent = WEAPON_NAMES[me.weapon] + (me.weapon === 0 && state.tick < me.rifleOverheatUntil ? ' — OVERHEATED' : '');
     const heat = me.weapon === 0 ? me.rifleHeat : me.weapon === 1 ? me.pistolHeat : 0;
     $('heat-fill').style.width = `${heat * 100}%`;
-    $('grenades').textContent = '◆'.repeat(me.grenades) + '◇'.repeat(Math.max(0, 4 - me.grenades));
+    const pips = (n: number) => '◆'.repeat(n) + '◇'.repeat(Math.max(0, 4 - n));
+    $('grenades').innerHTML = `<span class="sticky">G ${pips(me.grenades)}</span>  <span class="bounce">F ${pips(me.bounceGrenades)}</span>`;
     const ch = $('charge');
     ch.style.opacity = me.pistolCharge > 0 ? '1' : '0';
     (ch.firstElementChild as HTMLElement).style.width = `${me.pistolCharge * 100}%`;
@@ -49,8 +50,10 @@ export class Hud {
     const name = (id: number) => state.players.find((p) => p.id === id)?.name ?? '?';
     if (e.type === 'hit' && e.attacker === localId && e.target !== localId) this.hitUntil = performance.now() + 150;
     if (e.type === 'kill') {
-      const how = e.cause === 'spaced' ? 'spaced' : e.cause === 'grenade' ? 'stuck' : e.cause;
-      const text = e.killer === e.victim ? `${name(e.victim)} <i>${how === 'spaced' ? 'drifted into the void' : 'outplayed themselves (' + how + ')'}</i>` : `${name(e.killer)} <i>[${how}]</i> ${name(e.victim)}`;
+      const how = e.cause === 'spaced' ? 'knocked off the ring' : e.cause === 'grenade' ? 'grenade' : e.cause;
+      const text = e.killer === e.victim
+        ? `${name(e.victim)} <i>${e.cause === 'spaced' ? 'fell off the ring' : 'outplayed themselves (' + how + ')'}</i>`
+        : `${name(e.killer)} <i>[${how}]</i> ${name(e.victim)}`;
       this.push(text);
     }
     if (e.type === 'stick' && e.target === localId) this.push('<span style="color:#ff6a3d">YOU ARE STUCK</span>');

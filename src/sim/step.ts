@@ -7,9 +7,9 @@ import { levelSdf, sphereTrace, spawnPosition } from './level';
 import { advanceFree, fictitiousAccel, integrate, localBasis, viewVectors } from './physics';
 import { rngInt } from './rng';
 import {
-  BTN_FIRE, BTN_GRENADE, BTN_JUMP, BTN_SPRINT, DT, omegaOf,
+  BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, omegaOf,
   WEAPON_HOVER, WEAPON_PISTOL, WEAPON_RIFLE,
-  type Bolt, type BoltKind, type Grenade, type InputCmd, type Player, type Prop, type SimConfig, type SimState,
+  type Bolt, type BoltKind, type Grenade, type GrenadeKind, type InputCmd, type Level, type ThrownKind, type Player, type Prop, type SimConfig, type SimState,
 } from './types';
 import { type Vec3, add, addScaled, clone, dist, dot, len, norm, rhoOf, scale, sub } from './vec';
 import {
@@ -32,12 +32,13 @@ const PISTOL_INTERVAL = 18;
 const PISTOL_CHARGE_DELAY = 30; // ticks of holding before charging starts
 const PISTOL_CHARGE_TIME = 0.9; // s
 
-export function muzzleSpeed(cfg: SimConfig, kind: BoltKind | 'grenade'): number {
+export function muzzleSpeed(cfg: SimConfig, kind: BoltKind | ThrownKind): number {
   switch (kind) {
     case 'rifle': return cfg.muzzleRifle;
     case 'pistol': return cfg.muzzlePistol;
     case 'overcharge': return cfg.muzzleOvercharge;
     case 'grenade': return cfg.muzzleGrenade;
+    case 'bounceGrenade': return cfg.muzzleGrenade;
     case 'hover': return 0;
   }
 }
@@ -55,7 +56,7 @@ export function muzzlePoint(p: Player, yaw = p.yaw, pitch = p.pitch, grenade = f
  * frame: v = v_player + muzzle * aim. The hover gun is the one exception: it
  * sets v = -omega x r so the bolt is at rest in the inertial frame.
  */
-export function launchVelocity(cfg: SimConfig, p: Player, kind: BoltKind | 'grenade', from: Vec3, yaw = p.yaw, pitch = p.pitch): Vec3 {
+export function launchVelocity(cfg: SimConfig, p: Player, kind: BoltKind | ThrownKind, from: Vec3, yaw = p.yaw, pitch = p.pitch): Vec3 {
   if (kind === 'hover') {
     const w = omegaOf(cfg);
     return [w * from[1], -w * from[0], 0];
@@ -76,10 +77,12 @@ export function spawnBolt(state: SimState, owner: number, kind: BoltKind, pos: V
   return b;
 }
 
-export function spawnGrenade(state: SimState, owner: number, pos: Vec3, vel: Vec3): Grenade {
+export function spawnGrenade(state: SimState, owner: number, pos: Vec3, vel: Vec3, variant: GrenadeKind = 'sticky'): Grenade {
   const g: Grenade = {
-    id: allocId(state), type: 'grenade', owner, pos: clone(pos), vel: clone(vel), launchVel: clone(vel),
-    radius: GRENADE_RADIUS, armed: owner < 0, stuck: null, fuseTick: -1,
+    id: allocId(state), type: 'grenade', variant, owner, pos: clone(pos), vel: clone(vel), launchVel: clone(vel),
+    radius: GRENADE_RADIUS, armed: owner < 0, stuck: null, contactNormal: null,
+    // sticky: fuse starts when it sticks; bouncing: fuse starts at the throw
+    fuseTick: variant === 'bounce' ? state.tick + secs(state.config.bounceFuse) : -1,
     spawnTick: state.tick, expireTick: state.tick + secs(state.config.projectileLifetime),
   };
   state.grenades.push(g);
@@ -258,40 +261,73 @@ function collidePlayers(state: SimState) {
 
 // =========================================================================== props
 
-function moveProp(state: SimState, pr: Prop, omega: number) {
-  const cfg = state.config;
-  const support = pr.contactNormal;
-  const n = clamp(Math.ceil((len(pr.vel) * DT) / (0.4 * pr.radius)), 1, 32);
-  const h = DT / n;
+export interface SphereBody {
+  pos: Vec3;
+  vel: Vec3;
+  radius: number;
+  contactNormal: Vec3 | null;
+}
+
+/**
+ * Move a bouncy sphere against the static level for one tick: sub-stepped
+ * integration (with a support force while resting/sliding), discrete push-out,
+ * restitution + Coulomb friction. Shared by props, bouncing grenades and the
+ * bouncing-grenade trajectory preview. Returns the largest impact speed.
+ */
+export function moveSphereBody(level: Level, cfg: SimConfig, omega: number, b: SphereBody, restitution: number, dt = DT): number {
+  const support = b.contactNormal;
+  const n = clamp(Math.ceil((len(b.vel) * dt) / (0.4 * b.radius)), 1, 32);
+  const h = dt / n;
   let contact: Vec3 | null = null;
+  let maxImpact = 0;
   for (let i = 0; i < n; i++) {
-    integrate(pr.pos, pr.vel, h, omega, cfg, support);
+    integrate(b.pos, b.vel, h, omega, cfg, support);
     for (let iter = 0; iter < 2; iter++) {
-      const hit = levelSdf(state.level, cfg, pr.pos);
-      const gap = hit.d - pr.radius;
+      const hit = levelSdf(level, cfg, b.pos);
+      const gap = hit.d - b.radius;
       if (gap >= 0.002) break;
       if (gap < 0) {
-        const before = pr.pos;
-        pr.pos = addScaled(pr.pos, hit.n, -gap);
-        conserveJacobi(pr.vel, before, pr.pos, omega, cfg);
+        const before = b.pos;
+        b.pos = addScaled(b.pos, hit.n, -gap);
+        conserveJacobi(b.vel, before, b.pos, omega, cfg);
       }
-      const vn = dot(pr.vel, hit.n);
-      if (vn < 0) bounce(state, pr, hit.n, vn, cfg);
+      const vn = dot(b.vel, hit.n);
+      if (vn < 0) {
+        maxImpact = Math.max(maxImpact, -vn);
+        reflect(b.vel, hit.n, vn, -vn > 1.5 ? restitution : 0, cfg.friction);
+      }
       // Only a resting/sliding contact supports the body next tick; one it is
       // bouncing away from must not cancel the centrifugal force.
-      if (Math.abs(dot(pr.vel, hit.n)) < 0.25) contact = hit.n;
+      if (Math.abs(dot(b.vel, hit.n)) < 0.25) contact = hit.n;
       if (gap >= 0) break;
     }
   }
   // rolling resistance while in contact
   if (contact) {
-    const vn = dot(pr.vel, contact);
-    const vt = sub(pr.vel, scale(contact, vn));
+    const vn = dot(b.vel, contact);
+    const vt = sub(b.vel, scale(contact, vn));
     const l = len(vt);
-    if (l > 0) pr.vel = add(scale(contact, vn), scale(vt, Math.max(0, l - 1.0 * DT) / l));
+    if (l > 0) b.vel = add(scale(contact, vn), scale(vt, Math.max(0, l - 1.0 * dt) / l));
   }
-  pr.contactNormal = contact;
-  despawnIfSpaced(state, pr.pos, pr.vel, () => (pr.radius = -1));
+  b.contactNormal = contact;
+  return maxImpact;
+}
+
+/** Reflect v (in place) off a surface with normal n, given vn = v.n < 0. Coulomb friction on the tangential part. */
+function reflect(v: Vec3, n: Vec3, vn: number, e: number, mu: number) {
+  const vt = sub(v, scale(n, vn));
+  const vtl = len(vt);
+  const jn = (1 + e) * -vn;
+  const f = vtl > 0 ? Math.max(0, vtl - mu * jn) / vtl : 0;
+  v[0] = vt[0] * f - n[0] * vn * e;
+  v[1] = vt[1] * f - n[1] * vn * e;
+  v[2] = vt[2] * f - n[2] * vn * e;
+}
+
+function moveProp(state: SimState, pr: Prop, omega: number) {
+  const impact = moveSphereBody(state.level, state.config, omega, pr, state.config.restitution);
+  if (impact > 3) state.events.push({ type: 'bodyImpact', id: pr.id, pos: clone(pr.pos), speed: impact });
+  despawnIfSpaced(state, pr.pos, pr.vel, () => (pr.radius = -1), state.config.fallKillDistance);
 }
 
 /**
@@ -306,16 +342,6 @@ function conserveJacobi(v: Vec3, from: Vec3, to: Vec3, omega: number, cfg: SimCo
   const dPot = omega * omega * (to[0] * to[0] + to[1] * to[1] - from[0] * from[0] - from[1] * from[1]);
   const k = Math.sqrt(Math.max(0, v2 + dPot) / v2);
   v[0] *= k; v[1] *= k; v[2] *= k;
-}
-
-function bounce(state: SimState, pr: Prop, n: Vec3, vn: number, cfg: SimConfig) {
-  const e = -vn > 1.5 ? cfg.restitution : 0;
-  const vt = sub(pr.vel, scale(n, vn));
-  const vtl = len(vt);
-  const jn = (1 + e) * -vn;
-  const f = vtl > 0 ? Math.max(0, vtl - cfg.friction * jn) / vtl : 0;
-  pr.vel = add(scale(vt, f), scale(n, -vn * e));
-  if (-vn > 3) state.events.push({ type: 'bodyImpact', id: pr.id, pos: clone(pr.pos), speed: -vn });
 }
 
 function collideProps(state: SimState) {
@@ -359,10 +385,17 @@ function collideProps(state: SimState) {
 }
 
 /** Bodies that leave the ring band moving away never come back (straight inertial lines). */
-function despawnIfSpaced(state: SimState, pos: Vec3, vel: Vec3, kill: () => void) {
+function despawnIfSpaced(state: SimState, pos: Vec3, vel: Vec3, kill: () => void, margin = 4) {
   const cfg = state.config;
-  const zLim = cfg.halfWidth + cfg.wallThickness + 4;
-  if ((Math.abs(pos[2]) > zLim && pos[2] * vel[2] > 0) || rhoOf(pos) > cfg.R + cfg.hullThickness + 4) kill();
+  const zLim = cfg.halfWidth + cfg.wallThickness + margin;
+  if ((Math.abs(pos[2]) > zLim && pos[2] * vel[2] > 0) || rhoOf(pos) > cfg.R + cfg.hullThickness + margin) kill();
+}
+
+/** Distance by which a point lies outside the ring band (0 if inside it). */
+export function distanceOffRing(cfg: SimConfig, pos: Vec3): number {
+  const dz = Math.abs(pos[2]) - (cfg.halfWidth + cfg.wallThickness);
+  const dr = rhoOf(pos) - (cfg.R + cfg.hullThickness);
+  return Math.max(0, dz, dr);
 }
 
 // =========================================================================== weapons
@@ -434,6 +467,12 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
     p.grenades--;
     p.grenadeReadyTick = tick + secs(0.6);
     state.events.push({ type: 'fire', owner: p.id, kind: 'grenade', pos: from });
+  } else if (released & BTN_GRENADE2 && p.bounceGrenades > 0 && tick >= p.grenadeReadyTick) {
+    const from = muzzlePoint(p, p.yaw, p.pitch, true);
+    spawnGrenade(state, p.id, from, launchVelocity(cfg, p, 'bounceGrenade', from), 'bounce');
+    p.bounceGrenades--;
+    p.grenadeReadyTick = tick + secs(0.6);
+    state.events.push({ type: 'fire', owner: p.id, kind: 'bounceGrenade', pos: from });
   }
   void omega;
 }
@@ -453,10 +492,10 @@ interface SweepHit {
   prop: Prop | null;
 }
 
-/** Sweep a small sphere over p0->p1 against level, players and props; earliest hit wins. */
-function sweep(state: SimState, p0: Vec3, p1: Vec3, radius: number, owner: number, armed: boolean): SweepHit | null {
+/** Sweep a small sphere over p0->p1 against level (optional), players and props; earliest hit wins. */
+function sweep(state: SimState, p0: Vec3, p1: Vec3, radius: number, owner: number, armed: boolean, withLevel = true): SweepHit | null {
   let best: SweepHit | null = null;
-  const lh = sphereTrace(state.level, state.config, p0, p1, radius);
+  const lh = withLevel ? sphereTrace(state.level, state.config, p0, p1, radius) : null;
   if (lh) best = { s: lh.s, pos: lh.pos, player: null, prop: null };
   const segLen = dist(p0, p1);
   for (const pl of state.players) {
@@ -529,6 +568,32 @@ function updateGrenades(state: SimState, omega: number) {
       } else if (st.kind === 'prop') {
         const pr = state.props.find((q) => q.id === st.id);
         if (pr) { g.pos = add(pr.pos, st.offset); g.vel = clone(pr.vel); } else g.stuck = null;
+      }
+    } else if (g.variant === 'bounce') {
+      if (g.spawnTick !== tick) {
+        const p0 = clone(g.pos);
+        const impact = moveSphereBody(state.level, cfg, omega, g, cfg.bounceRestitution);
+        if (impact > 1) state.events.push({ type: 'grenadeBounce', id: g.id, pos: clone(g.pos), speed: impact });
+        // ...then bounce off players and props (relative to their motion)
+        const hit = sweep(state, p0, g.pos, g.radius, g.owner, g.armed, false);
+        if (hit && (hit.player || hit.prop)) {
+          const centre = hit.player ? closestOnSeg(hit.pos, ...capsuleEnds(hit.player)).point : hit.prop!.pos;
+          const n = norm(sub(hit.pos, centre));
+          const vt = hit.player ? hit.player.vel : hit.prop!.vel;
+          const rel = sub(g.vel, vt);
+          const vn = dot(rel, n);
+          if (vn < 0) {
+            reflect(rel, n, vn, cfg.bounceRestitution, cfg.friction);
+            g.vel = add(vt, rel);
+            state.events.push({ type: 'grenadeBounce', id: g.id, pos: clone(hit.pos), speed: -vn });
+          }
+          g.pos = hit.pos;
+          g.contactNormal = null;
+        }
+        if (!g.armed && !stillInsideOwner(state, g.pos, g.radius, g.owner)) g.armed = true;
+        let dead = false;
+        despawnIfSpaced(state, g.pos, g.vel, () => (dead = true), cfg.fallKillDistance);
+        if (dead) continue;
       }
     } else if (g.spawnTick !== tick) {
       const p0 = clone(g.pos);
@@ -653,8 +718,8 @@ function updateVitals(state: SimState, p: Player) {
   if (p.alive) {
     if (state.tick - p.lastDamageTick > secs(cfg.shieldRegenDelay) && p.shield < cfg.maxShield)
       p.shield = Math.min(cfg.maxShield, p.shield + cfg.shieldRegenRate * DT);
-    let spaced = false;
-    despawnIfSpaced(state, p.pos, p.vel, () => (spaced = true));
+    // Fell (or was blasted) off the ring: dead once far enough from it.
+    const spaced = distanceOffRing(cfg, p.pos) > cfg.fallKillDistance;
     if (spaced) kill(state, p, p.lastAttacker >= 0 && state.tick - p.lastDamageTick < secs(15) ? p.lastAttacker : p.id, 'spaced');
     return;
   }
@@ -672,6 +737,7 @@ function updateVitals(state: SimState, p: Player) {
   p.groundNormal = localBasis(p.pos).up;
   p.rifleHeat = 0; p.rifleOverheatUntil = 0; p.pistolHeat = 0; p.pistolCharge = 0;
   p.grenades = MAX_GRENADES;
+  p.bounceGrenades = MAX_GRENADES;
   p.lastAttacker = -1;
   state.events.push({ type: 'respawn', id: p.id });
 }

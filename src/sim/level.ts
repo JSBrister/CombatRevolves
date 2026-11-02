@@ -35,6 +35,53 @@ function annulus(p: Vec3, rho: number, rMin: number, rMax: number, zMin: number,
   }
 }
 
+/**
+ * Like `annulus`, but limited to the angular sector [a0, a1]. Only used for a
+ * taller neighbouring wall sector, so the query point is outside the sector;
+ * the angular part is the exact distance to the sector's edge half-plane.
+ */
+function sectorAnnulus(p: Vec3, rho: number, theta: number, rMin: number, rMax: number, zMin: number, zMax: number, a0: number, a1: number, out: SdfHit) {
+  const cr = (rMin + rMax) / 2, hr = (rMax - rMin) / 2;
+  const cz = (zMin + zMax) / 2, hz = (zMax - zMin) / 2;
+  const ur = Math.max(Math.abs(rho - cr) - hr, 0);
+  const uz = Math.max(Math.abs(p[2] - cz) - hz, 0);
+  // angular distance to the nearer edge (point lies outside [a0, a1])
+  const d0 = Math.abs(wrapAngle(theta - a0)), d1 = Math.abs(wrapAngle(theta - a1));
+  const edge = d0 < d1 ? a0 : a1;
+  const dAng = Math.min(d0, d1, Math.PI / 2);
+  const ut = rho * Math.sin(dAng);
+  const d = Math.hypot(ur, uz, ut);
+  if (d >= out.d || d < 1e-9) return;
+  const ir = rho > 1e-9 ? 1 / rho : 0;
+  const nr = (ur / d) * Math.sign(rho - cr), nz = (uz / d) * Math.sign(p[2] - cz);
+  const side = Math.sign(wrapAngle(theta - edge)); // + = spinward of the edge
+  const nt = (ut / d) * side;
+  out.d = d;
+  out.n = [nr * p[0] * ir - nt * p[1] * ir, nr * p[1] * ir + nt * p[0] * ir, nz];
+}
+
+export const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+
+/** Sector index (0..n-1) containing ring angle theta. */
+export function sectorOf(theta: number, n: number): number {
+  const t = theta < 0 ? theta + 2 * Math.PI : theta;
+  return Math.min(n - 1, Math.floor((t / (2 * Math.PI)) * n));
+}
+
+/** Rim wall on one side: per-sector heights; neighbours that are taller are included with exact edges. */
+function rimWall(p: Vec3, rho: number, theta: number, heights: number[], R: number, rOut: number, zMin: number, zMax: number, out: SdfHit) {
+  const n = heights.length;
+  if (n === 0) return;
+  const i = sectorOf(theta, n);
+  const h = heights[i];
+  annulus(p, rho, R - h, rOut, zMin, zMax, out);
+  const step = (2 * Math.PI) / n;
+  for (const j of [(i + n - 1) % n, (i + 1) % n]) {
+    if (heights[j] <= h) continue;
+    sectorAnnulus(p, rho, theta, R - heights[j], rOut, zMin, zMax, j * step, (j + 1) * step, out);
+  }
+}
+
 function boxSdf(p: Vec3, b: Box, out: SdfHit) {
   const c = Math.cos(b.angle), s = Math.sin(b.angle);
   // local axes: spin = (-s, c, 0), up = (-c, -s, 0), axial = (0,0,1)
@@ -65,10 +112,11 @@ function boxSdf(p: Vec3, b: Box, out: SdfHit) {
 export function levelSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   const out: SdfHit = { d: Infinity, n: [0, 0, 1] };
   const rho = rhoOf(p);
-  const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, H = cfg.wallHeight, hull = cfg.hullThickness;
+  const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
   annulus(p, rho, R, R + hull, -(W + T), W + T, out); // floor / hull
-  annulus(p, rho, R - H, R + hull, W, W + T, out); // +Z rim wall
-  annulus(p, rho, R - H, R + hull, -(W + T), -W, out); // -Z rim wall
+  const theta = Math.atan2(p[1], p[0]);
+  rimWall(p, rho, theta, level.wallPos, R, R + hull, W, W + T, out); // +Z rim wall
+  rimWall(p, rho, theta, level.wallNeg, R, R + hull, -(W + T), -W, out); // -Z rim wall
   for (const b of level.boxes) boxSdf(p, b, out);
   return out;
 }
@@ -121,8 +169,27 @@ export function makeSpawns(cfg: SimConfig): SpawnPoint[] {
   return spawns;
 }
 
-export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacles: boolean, nextId: () => number): Level {
+/**
+ * Rim wall heights per sector: mostly full height, with stretches of low
+ * curb and medium wall you can jump or get blasted over (and fall off the ring).
+ */
+export function makeWalls(cfg: SimConfig, rng: { rng: number }, varied: boolean): { wallPos: number[]; wallNeg: number[] } {
+  const n = Math.max(8, Math.min(64, Math.round((2 * Math.PI * cfg.R) / 30)));
+  const side = () => {
+    const hs: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if (!varied) { hs.push(cfg.wallHeight); continue; }
+      const r = rngNext(rng);
+      hs.push(r < 0.5 ? cfg.wallHeight : r < 0.75 ? Math.min(cfg.wallHeight, 4) : Math.min(cfg.wallHeight, 1));
+    }
+    return hs;
+  };
+  return { wallPos: side(), wallNeg: side() };
+}
+
+export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacles: boolean, nextId: () => number, variedWalls = true): Level {
   const spawns = makeSpawns(cfg);
+  const walls = makeWalls(cfg, rng, variedWalls);
   const boxes: Box[] = [];
   const R = cfg.R;
   const addBox = (angle: number, z: number, ht: number, hu: number, hz: number) => {
@@ -146,7 +213,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       else addBox(angle, z, rngRange(rng, 3, 5), rngRange(rng, 0.4, 0.6), rngRange(rng, 3, 5)); // low platform
     }
   }
-  return { boxes, spawns };
+  return { boxes, spawns, ...walls };
 }
 
 export function spawnPosition(cfg: SimConfig, s: SpawnPoint, heightAboveFloor: number): Vec3 {

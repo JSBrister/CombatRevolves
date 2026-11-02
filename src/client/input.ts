@@ -2,7 +2,7 @@
 // exclusively through these commands, exactly like bots and (later) remote
 // clients.
 
-import { BTN_AIM, BTN_FIRE, BTN_GRENADE, BTN_JUMP, BTN_SPRINT, type InputCmd } from '../sim';
+import { BTN_AIM, BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, type InputCmd } from '../sim';
 
 export class InputSampler {
   keys = new Set<string>();
@@ -22,6 +22,7 @@ export class InputSampler {
       this.keys.add(e.code);
       if (e.code === 'Space') this.latched |= BTN_JUMP;
       if (e.code === 'KeyG') this.latched |= BTN_GRENADE;
+      if (e.code === 'KeyF') this.latched |= BTN_GRENADE2;
       if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5)) - 1;
         if (n >= 0 && n <= 2) this.weapon = n;
@@ -48,6 +49,7 @@ export class InputSampler {
 
   get aiming() { return (this.mouseButtons & 4) !== 0; }
   get grenadeHeld() { return this.keys.has('KeyG'); }
+  get bounceHeld() { return this.keys.has('KeyF'); }
 
   sample(playerId: number, tick: number): InputCmd {
     const k = this.keys;
@@ -59,6 +61,7 @@ export class InputSampler {
     if (k.has('Space')) buttons |= BTN_JUMP;
     if (k.has('ShiftLeft') || k.has('ShiftRight')) buttons |= BTN_SPRINT;
     if (k.has('KeyG')) buttons |= BTN_GRENADE;
+    if (k.has('KeyF')) buttons |= BTN_GRENADE2;
     const moveY = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
     const moveX = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
     return { playerId, tick, moveX, moveY, yaw: this.yaw, pitch: this.pitch, buttons, weapon: this.weapon };

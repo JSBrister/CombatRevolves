@@ -3,8 +3,8 @@
 
 import { sphereTrace } from './level';
 import { advanceFree } from './physics';
-import { BOLT_SPECS, GRENADE_RADIUS, launchVelocity, muzzlePoint } from './step';
-import { DT, omegaOf, type BoltKind, type SimState } from './types';
+import { BOLT_SPECS, GRENADE_RADIUS, launchVelocity, moveSphereBody, muzzlePoint, type SphereBody } from './step';
+import { DT, omegaOf, type BoltKind, type SimState, type ThrownKind } from './types';
 import { type Vec3, clone } from './vec';
 
 export interface Prediction {
@@ -13,17 +13,29 @@ export interface Prediction {
 }
 
 export function predictTrajectory(
-  state: SimState, playerId: number, kind: BoltKind | 'grenade', yaw: number, pitch: number,
+  state: SimState, playerId: number, kind: BoltKind | ThrownKind, yaw: number, pitch: number,
   maxSeconds = 22, sampleEvery = 2,
 ): Prediction {
   const p = state.players.find((q) => q.id === playerId);
   if (!p) return { points: [], hit: null };
-  const from = muzzlePoint(p, yaw, pitch, kind === 'grenade');
+  const thrown = kind === 'grenade' || kind === 'bounceGrenade';
+  const from = muzzlePoint(p, yaw, pitch, thrown);
   const r = clone(from);
   const v = launchVelocity(state.config, p, kind, from, yaw, pitch);
-  const radius = kind === 'grenade' ? GRENADE_RADIUS : BOLT_SPECS[kind].radius;
+  const radius = thrown ? GRENADE_RADIUS : BOLT_SPECS[kind as BoltKind].radius;
   const omega = omegaOf(state.config);
   const points: Vec3[] = [clone(r)];
+  if (kind === 'bounceGrenade') {
+    // Bounces until the fuse runs out; the "hit" marker is where it goes off.
+    const body: SphereBody = { pos: r, vel: v, radius, contactNormal: null };
+    const fuse = Math.round(state.config.bounceFuse / DT);
+    for (let i = 0; i < fuse; i++) {
+      moveSphereBody(state.level, state.config, omega, body, state.config.bounceRestitution);
+      if (i % sampleEvery === 0) points.push(clone(body.pos));
+    }
+    points.push(clone(body.pos));
+    return { points, hit: clone(body.pos) };
+  }
   const n = Math.round(maxSeconds / DT);
   for (let i = 0; i < n; i++) {
     const p0 = clone(r);

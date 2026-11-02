@@ -70,5 +70,6 @@ export class Sfx {
   shieldDown() { this.tone('sawtooth', 600, 150, 0.4, 0.2); }
   overheat() { this.noise(0.6, 0.25, 4000); this.tone('sine', 700, 200, 0.6, 0.15); }
   jump() { this.tone('sine', 220, 330, 0.08, 0.05); }
+  bounce(d: number, speed: number) { this.tone('triangle', 900, 500, 0.07, Math.min(0.25, 0.04 * speed) * Sfx.att(d)); }
   thud(d: number) { this.tone('sine', 120, 60, 0.12, 0.2 * Sfx.att(d)); }
 }

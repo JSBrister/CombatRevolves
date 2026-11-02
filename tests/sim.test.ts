@@ -3,10 +3,10 @@ import {
   BTN_FIRE, BTN_JUMP, BTN_SPRINT, DT, PLAYER_HALF_SEG, PLAYER_RADIUS, GRENADE_RADIUS,
   addPlayer, addProp, botInput, createState, decode, detonate, encode, falloff, hash01, integrate,
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
-  step, viewVectors, muzzlePoint, type InputCmd, type SimState, type Vec3,
+  step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
-const empty = (config = {}) => createState({ obstacles: false, props: false, dummies: false, config });
+const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
 const run = (s: SimState, n: number, inputs: (s: SimState) => InputCmd[] = () => []) => {
   for (let i = 0; i < n; i++) step(s, inputs(s), s.tick);
 };
@@ -366,5 +366,126 @@ describe('10. snapshot round-trip', () => {
     expect(back).toEqual(s);
     expect(Object.is(back.players[0].vel[2], -0)).toBe(true);
     expect(bytes.byteLength).toBeLessThan(JSON.stringify(s).length);
+  });
+});
+
+// ------------------------------------------------------------ playtest round 1 features
+
+describe('11. bouncing grenades', () => {
+  it('bounce instead of sticking and go off when the fuse (started at the throw) runs out', () => {
+    const s = empty();
+    const Re = s.config.R - GRENADE_RADIUS;
+    const g = spawnGrenade(s, -1, [Re - 3, 0, 0], [8, 6, 1], 'bounce');
+    const fuseTicks = Math.round(s.config.bounceFuse / DT);
+    let bounces = 0, explodedAt = -1;
+    while (explodedAt < 0 && s.tick < 2000) {
+      step(s, [], s.tick);
+      bounces += s.events.filter((e) => e.type === 'grenadeBounce').length;
+      if (s.events.some((e) => e.type === 'explode' && e.id === g.id)) explodedAt = s.tick - 1;
+      if (explodedAt < 0) expect(g.stuck).toBeNull();
+    }
+    expect(bounces).toBeGreaterThanOrEqual(2);
+    expect(explodedAt - g.spawnTick).toBe(fuseTicks);
+  });
+  it('are thrown with the relative-launch rule via their own button', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    const cmd = (b: number): InputCmd => ({ playerId: id, tick: s.tick, moveX: 0, moveY: 1, yaw: 0.4, pitch: 0.3, buttons: b, weapon: 0 });
+    run(s, 120, () => [cmd(BTN_GRENADE2)]);
+    step(s, [cmd(0)], s.tick);
+    expect(s.grenades.length).toBe(1);
+    const g = s.grenades[0];
+    expect(g.variant).toBe('bounce');
+    expect(p.bounceGrenades).toBe(3);
+    expect(p.grenades).toBe(4);
+    const aim = viewVectors(p.pos, p.yaw, p.pitch).aim;
+    for (let i = 0; i < 3; i++) expect(g.launchVel[i]).toBeCloseTo(p.vel[i] + s.config.muzzleGrenade * aim[i], 12);
+  });
+});
+
+describe('12. low walls and falling off the ring', () => {
+  it('rim walls vary in height; low sectors are open above the curb', () => {
+    const s = createState({ seed: 5 });
+    const { wallPos } = s.level;
+    const R = s.config.R, W = s.config.halfWidth, T = s.config.wallThickness;
+    const n = wallPos.length;
+    const low = wallPos.findIndex((h) => h <= 1);
+    const tall = wallPos.findIndex((h) => h >= s.config.wallHeight);
+    expect(low).toBeGreaterThanOrEqual(0);
+    expect(tall).toBeGreaterThanOrEqual(0);
+    const at = (i: number, height: number): Vec3 => {
+      const a = ((i + 0.5) / n) * 2 * Math.PI;
+      return [(R - height) * Math.cos(a), (R - height) * Math.sin(a), W + T / 2];
+    };
+    expect(sectorOf(((low + 0.5) / n) * 2 * Math.PI, n)).toBe(low);
+    expect(levelSdf(s.level, s.config, at(low, 3)).d).toBeGreaterThan(1.5); // 3 m up, above a 1 m curb
+    expect(levelSdf(s.level, s.config, at(tall, 3)).d).toBeLessThan(0); // inside a full wall
+  });
+  it('a player who walks off the edge falls away and dies past fallKillDistance', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    const W = s.config.halfWidth + s.config.wallThickness;
+    // just past the end of the hull, at rest relative to the (absent) floor
+    p.pos = [s.config.R - 1, 0, W + 0.5];
+    p.vel = [0, 0, 0.5];
+    p.grounded = false;
+    p.groundNormal = null;
+    let deathTick = -1;
+    for (let i = 0; i < 120 * 10 && deathTick < 0; i++) {
+      step(s, [], s.tick);
+      const k = s.events.find((e) => e.type === 'kill' && e.victim === id);
+      if (k) {
+        deathTick = s.tick;
+        expect(k.type === 'kill' && k.cause).toBe('spaced');
+      } else expect(distanceOffRing(s.config, p.pos)).toBeLessThanOrEqual(s.config.fallKillDistance + 0.5);
+    }
+    expect(deathTick).toBeGreaterThan(120); // a real fall, not an instant kill
+    expect(p.alive).toBe(false);
+  });
+  it('a grenade-jump over a low curb carries you off the ring', () => {
+    const s = createState({ seed: 5, obstacles: false, props: false, dummies: false });
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    const n = s.level.wallPos.length;
+    const low = s.level.wallPos.findIndex((h) => h <= 1);
+    const a = ((low + 0.5) / n) * 2 * Math.PI;
+    const R = s.config.R;
+    p.pos = [(R - 0.9) * Math.cos(a), (R - 0.9) * Math.sin(a), s.config.halfWidth - 3];
+    run(s, 10);
+    const b = localBasis(p.pos);
+    p.vel = [b.up[0] * 10, b.up[1] * 10, 10]; // like a blast from the inboard side
+    let spaced = false;
+    for (let i = 0; i < 120 * 12 && !spaced; i++) {
+      step(s, [], s.tick);
+      spaced = s.events.some((e) => e.type === 'kill' && e.victim === id && e.cause === 'spaced');
+    }
+    expect(spaced).toBe(true);
+  });
+});
+
+describe('13. tunable movement', () => {
+  it('walk speed and jump speed come from the config', () => {
+    const s = empty({ walkSpeed: 20, jumpSpeed: 12 });
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    const cmd = (b: number, y = 1): InputCmd => ({ playerId: id, tick: s.tick, moveX: 0, moveY: y, yaw: Math.PI / 2, pitch: 0, buttons: b, weapon: 0 });
+    run(s, 120, () => [cmd(0)]);
+    expect(Math.hypot(...p.vel)).toBeCloseTo(20, 1);
+    run(s, 120, () => [cmd(0, 0)]);
+    const r0 = Math.hypot(p.pos[0], p.pos[1]);
+    step(s, [cmd(BTN_JUMP, 0)], s.tick);
+    let apex = 0;
+    for (let i = 0; i < 600 && !(i > 10 && p.grounded); i++) {
+      step(s, [cmd(0, 0)], s.tick);
+      apex = Math.max(apex, r0 - Math.hypot(p.pos[0], p.pos[1]));
+    }
+    // Exact: a straight inertial line from radius r0 with radial speed u and tangential w*r0
+    // gets no closer to the axis than its impact parameter.
+    const w = omegaOf(s.config), u = 12;
+    const expected = r0 - (r0 * w * r0) / Math.hypot(u, w * r0);
+    expect(Math.abs(apex - expected)).toBeLessThan(0.1);
+    expect(apex).toBeLessThan((u * u) / (2 * s.config.g)); // lower than flat-ground u^2/2g
   });
 });

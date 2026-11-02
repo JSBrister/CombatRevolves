@@ -5,7 +5,7 @@
 
 import { localBasis } from './physics';
 import { hash01 } from './rng';
-import { BTN_FIRE, BTN_GRENADE, BTN_JUMP, BTN_SPRINT, WEAPON_PISTOL, WEAPON_RIFLE, type InputCmd, type SimState } from './types';
+import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, WEAPON_PISTOL, WEAPON_RIFLE, type InputCmd, type SimState } from './types';
 import { type Vec3, dot, len, sub } from './vec';
 import { EYE_OFFSET } from './world';
 
@@ -60,7 +60,7 @@ export function botInput(state: SimState, playerId: number): InputCmd {
     } else if ((tick >> 3) % 3 === 0) cmd.buttons |= BTN_FIRE; // tap tap
     // Grenade: hold for 0.25 s then release, every ~8 s, if close.
     const gPhase = (tick + playerId * 97) % 960;
-    if (best < 28 && gPhase < 30) cmd.buttons |= BTN_GRENADE;
+    if (best < 28 && gPhase < 30) cmd.buttons |= hash01(playerId, tick / 960 | 0, 9) < 0.5 ? BTN_GRENADE : BTN_GRENADE2;
   }
   if (hash01(playerId, tick >> 6, 8) < 0.06) cmd.buttons |= BTN_JUMP;
   return cmd;

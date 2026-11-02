@@ -7,7 +7,7 @@ import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } fro
 
 export type PosMap = Map<number, Vec3>;
 
-const BOLT_COLORS: Record<string, number> = { rifle: 0x55c8ff, pistol: 0x8dff5a, overcharge: 0x5dff7a, hover: 0xff5ee8, grenade: 0x7fb6ff };
+const BOLT_COLORS: Record<string, number> = { rifle: 0x55c8ff, pistol: 0x8dff5a, overcharge: 0x5dff7a, hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a };
 
 /** Fading polyline trail stored as a ring buffer. */
 class Trail {
@@ -129,7 +129,7 @@ export class EntityViews {
     const seen = new Set<number>();
     const projs: { id: number; pos: Vec3; kind: string; radius: number }[] = [
       ...state.bolts.map((b) => ({ id: b.id, pos: b.pos, kind: b.kind, radius: b.radius })),
-      ...state.grenades.map((g) => ({ id: g.id, pos: g.pos, kind: 'grenade', radius: g.radius })),
+      ...state.grenades.map((g) => ({ id: g.id, pos: g.pos, kind: g.variant === 'bounce' ? 'bounceGrenade' : 'grenade', radius: g.radius })),
     ];
     for (const p of projs) {
       seen.add(p.id);
@@ -152,8 +152,8 @@ export class EntityViews {
 
   private createProj(id: number, kind: string, radius: number): ProjView {
     const color = BOLT_COLORS[kind] ?? 0xffffff;
-    const sprite = this.makeGlow(color, radius * (kind === 'grenade' ? 7 : 6));
-    const core = new THREE.Mesh(new THREE.SphereGeometry(radius * (kind === 'grenade' ? 1 : 0.45), 12, 8), new THREE.MeshBasicMaterial({ color: kind === 'grenade' ? 0xcfe4ff : 0xffffff, fog: false }));
+    const sprite = this.makeGlow(color, radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 7 : 6));
+    const core = new THREE.Mesh(new THREE.SphereGeometry(radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 1 : 0.45), 12, 8), new THREE.MeshBasicMaterial({ color: kind === 'grenade' ? 0xcfe4ff : kind === 'bounceGrenade' ? 0xfff0a0 : 0xffffff, fog: false }));
     const marker = this.makeGlow(color, Math.max(1.5, this.rs.starRadius / 1500), LAYER_INERTIAL_ONLY);
     const max = Math.max(4, Math.round(this.trailTicks / 2));
     const trail = new Trail(max, new THREE.Color(color), LAYER_ROT_TRAILS, this.root);
