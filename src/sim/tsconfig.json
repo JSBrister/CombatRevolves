@@ -1,0 +1,15 @@
+{
+  "//": "The sim must run headless in Node: no DOM lib, no three.js. `npx tsc -p src/sim` enforces this.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true
+  },
+  "include": ["./**/*.ts"]
+}

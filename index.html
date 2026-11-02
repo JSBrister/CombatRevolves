@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Combat Revolves</title>
+  <link rel="stylesheet" href="/src/client/style.css" />
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="ringinfo"></div>
+    <div id="compass"><div id="spin-arrow">▲</div><div class="lbl">SPINWARD</div></div>
+    <div id="crosshair"><div class="ch"></div><div id="hitmark">✕</div></div>
+    <div id="charge"><div></div></div>
+    <div id="vitals">
+      <div class="bar shield"><div id="shield-fill"></div></div>
+      <div class="bar health"><div id="health-fill"></div></div>
+    </div>
+    <div id="motion">
+      <div><span id="weight">1.00</span><small> g apparent</small></div>
+      <div><span id="speed">0.0</span><small> m/s vs floor</small></div>
+    </div>
+    <div id="weapon">
+      <div id="weapon-name"></div>
+      <div class="bar heat"><div id="heat-fill"></div></div>
+      <div id="grenades"></div>
+    </div>
+    <div id="feed"></div>
+    <div id="dead" class="hidden"></div>
+    <div id="pip-label" class="hidden">INERTIAL VIEW · the ring spins, plasma flies straight</div>
+    <div id="help" class="hidden">
+      <b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> jump · <b>Mouse</b> look<br/>
+      <b>LMB</b> fire (pistol: hold to overcharge) · <b>RMB</b> trajectory preview<br/>
+      <b>G</b> hold to aim / release to throw sticky grenade<br/>
+      <b>1</b> rifle · <b>2</b> pistol · <b>3</b> hover gun (debug) · <b>Wheel</b> swap<br/>
+      <b>I</b> inertial view · <b>V</b> free-fly camera · <b>T</b> slow-mo · <b>P</b> pause · <b>B</b> add bot · <b>H</b> help
+    </div>
+  </div>
+
+  <div id="loading">
+    <h1>COMBAT <span>REVOLVES</span></h1>
+    <div class="sub">a rotating-reference-frame shooter</div>
+    <div id="tip"></div>
+    <div id="start">Loading…</div>
+  </div>
+
+  <script type="module" src="/src/client/main.ts"></script>
+</body>
+</html>

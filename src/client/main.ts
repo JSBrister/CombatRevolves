@@ -1,0 +1,305 @@
+import GUI from 'lil-gui';
+import * as sim from '../sim';
+import * as THREE from 'three';
+import {
+  DT, EYE_OFFSET, WEAPON_HOVER, WEAPON_PISTOL, addPlayer, botInput, createState, localBasis, omegaOf,
+  predictTrajectory, removePlayer, step, viewVectors,
+  type BoltKind, type InputCmd, type SimConfig, type SimEvent, type SimState, type Vec3,
+} from '../sim';
+import { Sfx } from './audio';
+import { BOLT_COLORS, EntityViews, type PosMap } from './entities';
+import { Hud } from './hud';
+import { InputSampler } from './input';
+import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, RingScene } from './scene';
+
+const TIPS = [
+  'There is no gravity here. The floor keeps getting in the way of your straight-line motion through space, and that feels like weight.',
+  'Run <b>spinward</b> and you get heavier. Run <b>antispinward</b> and you get lighter. At rim speed (~31 m/s on this ring) you would weigh nothing.',
+  'Drop something and it lands <b>antispinward</b> of the spot below it: it keeps the tangential speed it had higher up, which is slower than the floor\'s.',
+  'Throw a grenade straight up and it comes down <b>spinward</b> of you. At 20 m/s it lands about 23 m away.',
+  'Plasma is slow. A bolt fired antispinward at rim speed hangs still in space while the ring turns under it, so it comes round and hits you in the back one period later.',
+  'Grenade jumping works, but Coriolis bends the flight sideways. Hold <b>RMB</b> or <b>G</b> to preview the real trajectory.',
+  'Press <b>I</b> to watch from outside the ring. From there every bolt flies in a perfectly straight line.',
+];
+
+// ---------------------------------------------------------------- setup
+const canvas = document.getElementById('view') as HTMLCanvasElement;
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const rs = new RingScene();
+const views = new EntityViews(rs);
+const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 2e5);
+camera.layers.enable(LAYER_ROT_TRAILS);
+const pipCam = new THREE.PerspectiveCamera(38, 4 / 3, 1, 2e5);
+pipCam.layers.enable(LAYER_INERTIAL_ONLY);
+pipCam.layers.enable(LAYER_SELF);
+const input = new InputSampler(canvas);
+const hud = new Hud();
+const sfx = new Sfx();
+
+// Live config object: GUI binds to it, and every world uses it as its config.
+const cfg: SimConfig = createState({ obstacles: false, props: false, dummies: false }).config;
+let state!: SimState;
+let localId = -1;
+let botIds: number[] = [];
+let prev: PosMap = new Map();
+let prevFrameAngle = 0;
+
+const view = {
+  timeScale: 1,
+  paused: false,
+  trailSeconds: 1.5,
+  preview: true,
+  inertial: false,
+  freefly: false,
+  bots: 3,
+  seed: 1234,
+};
+
+function newWorld() {
+  state = createState({ seed: view.seed, config: cfg });
+  state.config = cfg;
+  localId = addPlayer(state, 'human', 'You');
+  botIds = [];
+  for (let i = 0; i < view.bots; i++) botIds.push(addPlayer(state, 'bot', `Bot ${String.fromCharCode(65 + i)}`));
+  rs.build(cfg, state.level);
+  views.reset();
+  views.localId = localId;
+  input.yaw = 0;
+  input.pitch = 0;
+  prev = capture(state);
+  prevFrameAngle = state.frameAngle;
+}
+
+function setBotCount(n: number) {
+  while (botIds.length < n) botIds.push(addPlayer(state, 'bot', `Bot ${String.fromCharCode(65 + botIds.length)}`));
+  while (botIds.length > n) removePlayer(state, botIds.pop()!);
+}
+
+function capture(s: SimState): PosMap {
+  const m: PosMap = new Map();
+  for (const p of s.players) m.set(p.id, [...p.pos] as Vec3);
+  for (const b of s.bolts) m.set(b.id, [...b.pos] as Vec3);
+  for (const g of s.grenades) m.set(g.id, [...g.pos] as Vec3);
+  for (const p of s.props) m.set(p.id, [...p.pos] as Vec3);
+  return m;
+}
+
+// ---------------------------------------------------------------- debug GUI
+const gui = new GUI({ title: 'Combat Revolves — debug' });
+const fRing = gui.addFolder('Ring');
+fRing.add(cfg, 'R', 50, 1000, 10).name('R (m) — rebuilds').onFinishChange(() => newWorld());
+fRing.add(cfg, 'g', 1, 30, 0.01).name('g at floor (m/s²)');
+fRing.add(cfg, 'centrifugal').name('centrifugal force');
+fRing.add(cfg, 'coriolis').name('Coriolis force');
+fRing.add(cfg, 'dragType', ['none', 'linear', 'quadratic']).name('air drag');
+fRing.add(cfg, 'dragCoeff', 0, 1, 0.001).name('drag coeff');
+const fW = gui.addFolder('Weapons');
+fW.add(cfg, 'muzzleRifle', 5, 150, 1).name('rifle muzzle (m/s)');
+fW.add(cfg, 'muzzlePistol', 5, 150, 1).name('pistol muzzle');
+fW.add(cfg, 'muzzleOvercharge', 5, 150, 1).name('overcharge muzzle');
+fW.add(cfg, 'muzzleGrenade', 2, 60, 0.5).name('grenade throw');
+fW.add(cfg, 'grenadeFuse', 0.2, 5, 0.1).name('grenade fuse (s)');
+const fK = gui.addFolder('Explosions');
+fK.add(cfg, 'knockbackScale', 0, 5, 0.05).name('knockback scale');
+fK.add(cfg, 'knockbackSpeed', 0, 60, 0.5).name('point-blank Δv (m/s)');
+fK.add(cfg, 'knockbackFalloff', ['none', 'linear', 'quadratic']).name('falloff');
+fK.add(cfg, 'liftBias', 0, 2, 0.05).name('toward-axis lift');
+fK.add(cfg, 'explosionRadius', 1, 20, 0.5).name('radius (m)');
+fK.add(cfg, 'selfDamageScale', 0, 1, 0.05).name('self damage');
+const fV = gui.addFolder('View / debug');
+fV.add(view, 'timeScale', 0.02, 2, 0.01).name('time scale (local)').listen();
+fV.add(view, 'trailSeconds', 0.1, 10, 0.1).name('trail length (s)').onChange((v: number) => (views.trailTicks = Math.round(v / DT)));
+fV.add(view, 'preview').name('trajectory preview');
+fV.add(view, 'inertial').name('inertial camera (I)').listen();
+fV.add(view, 'freefly').name('free-fly camera (V)').listen().onChange(() => setFreefly(view.freefly));
+fV.add(view, 'paused').name('pause (P)').listen();
+fV.add(view, 'bots', 0, 8, 1).name('bots').onFinishChange((n: number) => setBotCount(n));
+fV.add({ reset: () => newWorld() }, 'reset').name('reset world');
+gui.close();
+
+// ---------------------------------------------------------------- free-fly
+const ff = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
+function setFreefly(on: boolean) {
+  view.freefly = on;
+  input.enabled = !on;
+  if (on) {
+    ff.pos.copy(camera.position);
+    ff.quat.copy(camera.quaternion);
+    camera.layers.enable(LAYER_SELF);
+    input.freeLook = (dx, dy) => {
+      const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -dy * 0.002);
+      const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -dx * 0.002);
+      ff.quat.multiply(qy).multiply(qx);
+    };
+  } else {
+    camera.layers.disable(LAYER_SELF);
+    input.freeLook = null;
+  }
+}
+
+input.onKey = (code) => {
+  if (code === 'KeyI') view.inertial = !view.inertial;
+  if (code === 'KeyV') setFreefly(!view.freefly);
+  if (code === 'KeyT') view.timeScale = view.timeScale === 1 ? 0.2 : 1;
+  if (code === 'KeyP') view.paused = !view.paused;
+  if (code === 'KeyH') document.getElementById('help')!.classList.toggle('hidden');
+  if (code === 'KeyB') { view.bots = Math.min(8, view.bots + 1); setBotCount(view.bots); }
+};
+
+// ---------------------------------------------------------------- events -> audio/hud/fx
+function listenerPos(): Vec3 {
+  return [camera.position.x, camera.position.y, camera.position.z];
+}
+function handleEvent(e: SimEvent) {
+  const lp = listenerPos();
+  const d = (p: Vec3) => Math.hypot(p[0] - lp[0], p[1] - lp[1], p[2] - lp[2]);
+  switch (e.type) {
+    case 'fire': sfx.shot(e.kind, d(e.pos)); break;
+    case 'impact': sfx.impact(d(e.pos)); break;
+    case 'stick': sfx.stick(d(e.pos)); break;
+    case 'explode': sfx.explode(d(e.pos)); views.explosionFlash(e.pos); break;
+    case 'hit':
+      views.flashHit(e.target);
+      if (e.attacker === localId && e.target !== localId) sfx.hit();
+      if (e.target === localId) e.shieldBroken ? sfx.shieldDown() : sfx.hurt();
+      break;
+    case 'overheat': if (e.id === localId) sfx.overheat(); break;
+    case 'jump': if (e.id === localId) sfx.jump(); break;
+    case 'bodyImpact': sfx.thud(d(e.pos)); break;
+  }
+  hud.onEvent(state, e, localId);
+}
+
+// ---------------------------------------------------------------- main loop
+let acc = 0;
+let last = performance.now();
+const MAX_STEPS = 12;
+
+function simTick() {
+  prev = capture(state);
+  prevFrameAngle = state.frameAngle;
+  const inputs: InputCmd[] = [input.sample(localId, state.tick)];
+  for (const b of botIds) inputs.push(botInput(state, b));
+  step(state, inputs, state.tick);
+  for (const e of state.events) handleEvent(e);
+  views.onTick(state);
+}
+
+function previewKind(): BoltKind | 'grenade' | null {
+  const me = state.players.find((p) => p.id === localId);
+  if (!me || !me.alive || !view.preview) return null;
+  if (input.grenadeHeld && me.grenades > 0) return 'grenade';
+  if (!input.aiming) return null;
+  if (me.weapon === WEAPON_PISTOL) return me.pistolCharge >= 1 ? 'overcharge' : 'pistol';
+  if (me.weapon === WEAPON_HOVER) return 'hover';
+  return 'rifle';
+}
+
+function frame(now: number) {
+  const dtReal = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  if (!view.paused) acc += dtReal * view.timeScale;
+  let steps = 0;
+  while (acc >= DT && steps < MAX_STEPS) {
+    simTick();
+    acc -= DT;
+    steps++;
+  }
+  if (steps === MAX_STEPS) acc = 0; // can't keep up: drop time rather than spiral
+  const alpha = acc / DT;
+
+  const fa = prevFrameAngle + (state.frameAngle - prevFrameAngle) * alpha;
+  rs.setFrameAngle(fa);
+  const me = state.players.find((p) => p.id === localId);
+  // camera
+  if (view.freefly) {
+    const speed = (input.keys.has('ShiftLeft') ? 60 : 15) * dtReal;
+    const mv = new THREE.Vector3(
+      (input.keys.has('KeyD') ? 1 : 0) - (input.keys.has('KeyA') ? 1 : 0),
+      (input.keys.has('Space') ? 1 : 0) - (input.keys.has('KeyC') ? 1 : 0),
+      (input.keys.has('KeyS') ? 1 : 0) - (input.keys.has('KeyW') ? 1 : 0),
+    ).applyQuaternion(ff.quat).multiplyScalar(speed);
+    ff.pos.add(mv);
+    camera.position.copy(ff.pos);
+    camera.quaternion.copy(ff.quat);
+  } else if (me) {
+    const p0 = prev.get(me.id) ?? me.pos;
+    const pos: Vec3 = [p0[0] + (me.pos[0] - p0[0]) * alpha, p0[1] + (me.pos[1] - p0[1]) * alpha, p0[2] + (me.pos[2] - p0[2]) * alpha];
+    const v = viewVectors(pos, input.yaw, input.pitch);
+    const eye = new THREE.Vector3(pos[0] + v.up[0] * EYE_OFFSET, pos[1] + v.up[1] * EYE_OFFSET, pos[2] + v.up[2] * EYE_OFFSET);
+    camera.position.copy(eye);
+    camera.up.set(...v.up);
+    camera.lookAt(eye.x + v.aim[0], eye.y + v.aim[1], eye.z + v.aim[2]);
+  }
+
+  views.cameraPos.copy(camera.position);
+  views.render(state, prev, alpha, dtReal);
+  // trajectory preview (real physics, includes the shooter's own velocity)
+  const pk = previewKind();
+  views.setPreview(pk ? predictTrajectory(state, localId, pk, input.yaw, input.pitch) : null, BOLT_COLORS[pk ?? 'rifle']);
+
+  // main view
+  const W = window.innerWidth, H = window.innerHeight;
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+  renderer.render(rs.scene, camera);
+
+  // inertial picture-in-picture: a camera fixed in the NON-rotating frame
+  document.getElementById('pip-label')!.classList.toggle('hidden', !view.inertial);
+  if (view.inertial) {
+    const R = cfg.R;
+    const pw = Math.round(Math.min(W * 0.42, H * 0.5)), ph = Math.round(pw * 0.72);
+    const x = W - pw - 16, y = 96;
+    const P = new THREE.Vector3(0, -R * 2.1, R * 1.5).applyAxisAngle(new THREE.Vector3(0, 0, 1), -fa);
+    pipCam.position.copy(P);
+    pipCam.up.set(0, 0, 1);
+    pipCam.lookAt(0, 0, 0);
+    pipCam.aspect = pw / ph;
+    pipCam.updateProjectionMatrix();
+    renderer.setScissorTest(true);
+    renderer.setScissor(x, y, pw, ph);
+    renderer.setViewport(x, y, pw, ph);
+    const fog = rs.scene.fog;
+    rs.scene.fog = null;
+    renderer.render(rs.scene, pipCam);
+    rs.scene.fog = fog;
+    renderer.setScissorTest(false);
+    document.getElementById('pip-label')!.style.bottom = `${y + ph + 6}px`;
+  }
+
+  hud.update(state, me, { yaw: input.yaw, timeScale: view.timeScale, paused: view.paused, freefly: view.freefly });
+  requestAnimationFrame(frame);
+}
+
+function resize() {
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+
+// ---------------------------------------------------------------- boot
+newWorld();
+resize();
+const loading = document.getElementById('loading')!;
+document.getElementById('tip')!.innerHTML = TIPS[Math.floor(Math.random() * TIPS.length)];
+document.getElementById('start')!.textContent = 'Click to drop in';
+loading.addEventListener('click', () => {
+  loading.classList.add('hidden');
+  document.getElementById('hud')!.classList.remove('hidden');
+  sfx.unlock();
+  canvas.requestPointerLock?.();
+});
+canvas.addEventListener('click', () => {
+  if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
+});
+requestAnimationFrame((t) => {
+  last = t;
+  frame(t);
+});
+
+// Debug handle (console / automated checks).
+(window as unknown as { __game: unknown }).__game = {
+  get state() { return state; }, get localId() { return localId; }, sim, input, view, cfg, newWorld, setFreefly, localBasis, omegaOf,
+};

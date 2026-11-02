@@ -1,0 +1,49 @@
+:root {
+  --hud: #9fe6ff;
+  --hud-dim: rgba(159, 230, 255, 0.35);
+  --shield: #4cc3ff;
+  --health: #7fe07a;
+  --warn: #ff6a3d;
+  --bg: #02030a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', system-ui, sans-serif; color: var(--hud); }
+canvas#view { display: block; width: 100vw; height: 100vh; }
+.hidden { display: none !important; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; text-shadow: 0 0 6px rgba(0, 160, 255, 0.6); }
+#ringinfo { position: absolute; top: 12px; left: 16px; font-size: 13px; line-height: 1.5; font-family: ui-monospace, monospace; }
+#compass { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; }
+#spin-arrow { font-size: 30px; color: #f2c94c; transition: transform 0.05s linear; }
+#compass .lbl { font-size: 10px; letter-spacing: 2px; color: #f2c94c; }
+#crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+#crosshair .ch { width: 28px; height: 28px; border: 2px solid var(--hud); border-radius: 50%; opacity: 0.8; }
+#crosshair .ch::after { content: ''; position: absolute; left: 13px; top: 13px; width: 2px; height: 2px; background: var(--hud); }
+#hitmark { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -52%); font-size: 26px; color: #fff; opacity: 0; }
+#charge { position: absolute; top: calc(50% + 26px); left: 50%; transform: translateX(-50%); width: 60px; height: 4px; background: var(--hud-dim); opacity: 0; }
+#charge div { height: 100%; width: 0; background: #7dff6a; }
+#vitals { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); width: min(360px, 60vw); }
+.bar { height: 10px; border: 1px solid var(--hud-dim); margin-bottom: 4px; background: rgba(0, 0, 0, 0.35); }
+.bar > div { height: 100%; width: 100%; }
+.bar.shield > div { background: var(--shield); box-shadow: 0 0 8px var(--shield); }
+.bar.health { height: 6px; width: 60%; margin: 0 auto; }
+.bar.health > div { background: var(--health); }
+.bar.heat > div { background: linear-gradient(90deg, #6fd3ff, #ffb84d 70%, #ff4a2a); }
+#motion { position: absolute; left: 16px; bottom: 16px; font-size: 22px; font-family: ui-monospace, monospace; }
+#motion small { font-size: 12px; opacity: 0.7; }
+#weapon { position: absolute; right: 16px; bottom: 16px; width: 220px; text-align: right; }
+#weapon-name { font-size: 15px; letter-spacing: 1px; margin-bottom: 4px; }
+#grenades { font-size: 18px; color: #7fb6ff; letter-spacing: 3px; }
+#feed { position: absolute; right: 16px; top: 12px; font-size: 13px; text-align: right; line-height: 1.6; }
+#dead { position: absolute; top: 38%; width: 100%; text-align: center; font-size: 24px; color: var(--warn); }
+#pip-label { position: absolute; right: 16px; bottom: calc(38vh + 26px); font-size: 11px; letter-spacing: 1px; color: #ffd27a; }
+#help { position: absolute; left: 16px; top: 120px; font-size: 13px; line-height: 1.7; background: rgba(0, 10, 20, 0.6); padding: 10px 14px; border: 1px solid var(--hud-dim); }
+
+#loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, #0b1530 0%, #02030a 70%); cursor: pointer; padding: 16px; text-align: center; }
+#loading h1 { margin: 0; font-size: clamp(32px, 7vw, 72px); letter-spacing: 6px; font-weight: 300; color: #dff6ff; }
+#loading h1 span { color: #f2c94c; font-weight: 700; }
+#loading .sub { letter-spacing: 3px; font-size: 13px; opacity: 0.7; margin-bottom: 36px; }
+#tip { max-width: 620px; font-size: 16px; line-height: 1.6; color: #cfe9ff; border-left: 3px solid #f2c94c; padding: 6px 14px; text-align: left; }
+#start { margin-top: 36px; font-size: 18px; letter-spacing: 2px; animation: pulse 1.6s infinite; }
+@keyframes pulse { 50% { opacity: 0.4; } }
+.lil-gui.root { z-index: 5; }
