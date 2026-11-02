@@ -245,6 +245,7 @@ export interface Explosion {
 export interface Box {
   id: number;
   type: 'box';
+  kind: 'cover' | 'stair';
   angle: number; // ring angle of the box centre
   center: Vec3;
   half: Vec3; // half extents along (spinward, up, axial) at `angle`

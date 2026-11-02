@@ -489,3 +489,39 @@ describe('13. tunable movement', () => {
     expect(apex).toBeLessThan((u * u) / (2 * s.config.g)); // lower than flat-ground u^2/2g
   });
 });
+
+describe('14. staircases', () => {
+  const setup = () => {
+    const s = createState({ seed: 3, props: false });
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    // first staircase climbs spinward from its start; stand 2 m before the first step
+    const R = s.config.R;
+    const steps = s.level.boxes.filter((b) => b.kind === 'stair');
+    expect(steps.length).toBeGreaterThanOrEqual(12);
+    const first = steps[0];
+    const a = first.angle - (first.half[0] + 2) / R;
+    p.pos = [(R - 0.9) * Math.cos(a), (R - 0.9) * Math.sin(a), first.center[2]];
+    run(s, 10);
+    const height = () => R - Math.hypot(p.pos[0], p.pos[1]) - 0.9;
+    const cmd = (b: number): InputCmd => ({ playerId: id, tick: s.tick, moveX: 0, moveY: 1, yaw: 0, pitch: 0, buttons: b, weapon: 0 });
+    return { s, p, height, cmd };
+  };
+  it('cannot be walked up', () => {
+    const { s, height, cmd } = setup();
+    let maxH = 0;
+    for (let i = 0; i < 120 * 5; i++) { step(s, [cmd(0)], s.tick); maxH = Math.max(maxH, height()); }
+    expect(maxH).toBeLessThan(0.5);
+  });
+  it('can be climbed to the top platform with one jump per step', () => {
+    const { s, p, height, cmd } = setup();
+    let maxH = 0;
+    for (let i = 0; i < 120 * 12; i++) {
+      // walk forward; jump whenever on the ground (tap)
+      const jump = p.grounded && i % 2 === 0 ? BTN_JUMP : 0;
+      step(s, [cmd(jump)], s.tick);
+      maxH = Math.max(maxH, height());
+    }
+    expect(maxH).toBeGreaterThan(10.5);
+  });
+});

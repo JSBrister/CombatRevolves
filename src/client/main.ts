@@ -11,16 +11,7 @@ import { BOLT_COLORS, EntityViews, type PosMap } from './entities';
 import { Hud } from './hud';
 import { InputSampler } from './input';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, RingScene } from './scene';
-
-const TIPS = [
-  'There is no gravity here. The floor keeps getting in the way of your straight-line motion through space, and that feels like weight.',
-  'Run <b>spinward</b> and you get heavier. Run <b>antispinward</b> and you get lighter. At rim speed (~31 m/s on this ring) you would weigh nothing.',
-  'Drop something and it lands <b>antispinward</b> of the spot below it: it keeps the tangential speed it had higher up, which is slower than the floor\'s.',
-  'Throw a grenade straight up and it comes down <b>spinward</b> of you. At 20 m/s it lands about 23 m away.',
-  'Plasma is slow. A bolt fired antispinward at rim speed hangs still in space while the ring turns under it, so it comes round and hits you in the back one period later.',
-  'Grenade jumping works, but Coriolis bends the flight sideways. Hold <b>RMB</b> or <b>G</b> to preview the real trajectory.',
-  'Press <b>I</b> to watch from outside the ring. From there every bolt flies in a perfectly straight line.',
-];
+import './style.css';
 
 // ---------------------------------------------------------------- setup
 const canvas = document.getElementById('view') as HTMLCanvasElement;
@@ -47,7 +38,7 @@ let prevFrameAngle = 0;
 
 const view = {
   timeScale: 1,
-  paused: false,
+  paused: true, // until the player clicks "spawn"; Esc pauses again
   trailSeconds: 1.5,
   preview: true,
   inertial: false,
@@ -86,7 +77,9 @@ function capture(s: SimState): PosMap {
 }
 
 // ---------------------------------------------------------------- debug GUI
-const gui = new GUI({ title: 'Combat Revolves — debug' });
+// Only visible while paused: the prototype has no debug controls in normal play.
+const gui = new GUI({ title: 'Debug settings' });
+gui.hide();
 const fRing = gui.addFolder('Ring');
 fRing.add(cfg, 'R', 50, 1000, 10).name('R (m) — rebuilds').onFinishChange(() => newWorld());
 fRing.add(cfg, 'g', 1, 30, 0.01).name('g at floor (m/s²)');
@@ -119,12 +112,12 @@ const fV = gui.addFolder('View / debug');
 fV.add(view, 'timeScale', 0.02, 2, 0.01).name('time scale (local)').listen();
 fV.add(view, 'trailSeconds', 0.1, 10, 0.1).name('trail length (s)').onChange((v: number) => (views.trailTicks = Math.round(v / DT)));
 fV.add(view, 'preview').name('trajectory preview');
-fV.add(view, 'inertial').name('inertial camera (I)').listen();
-fV.add(view, 'freefly').name('free-fly camera (V)').listen().onChange(() => setFreefly(view.freefly));
-fV.add(view, 'paused').name('pause (P)').listen();
+fV.add(view, 'inertial').name('inertial-frame overlay').listen();
+fV.add(view, 'freefly').name('free-fly camera').listen().onChange(() => setFreefly(view.freefly));
 fV.add(view, 'bots', 0, 8, 1).name('bots').onFinishChange((n: number) => setBotCount(n));
+fV.add({ hover: () => (input.weapon = WEAPON_HOVER) }, 'hover').name('equip hover gun (debug weapon)');
 fV.add({ reset: () => newWorld() }, 'reset').name('reset world');
-gui.close();
+for (const f of [fRing, fW, fP, fK]) f.close();
 
 // ---------------------------------------------------------------- free-fly
 const ff = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
@@ -146,14 +139,6 @@ function setFreefly(on: boolean) {
   }
 }
 
-input.onKey = (code) => {
-  if (code === 'KeyI') view.inertial = !view.inertial;
-  if (code === 'KeyV') setFreefly(!view.freefly);
-  if (code === 'KeyT') view.timeScale = view.timeScale === 1 ? 0.2 : 1;
-  if (code === 'KeyP') view.paused = !view.paused;
-  if (code === 'KeyH') document.getElementById('help')!.classList.toggle('hidden');
-  if (code === 'KeyB') { view.bots = Math.min(8, view.bots + 1); setBotCount(view.bots); }
-};
 
 // ---------------------------------------------------------------- events -> audio/hud/fx
 function listenerPos(): Vec3 {
@@ -292,18 +277,40 @@ window.addEventListener('resize', resize);
 // ---------------------------------------------------------------- boot
 newWorld();
 resize();
+// ---------------------------------------------------------------- intro / pause
+// Playing == pointer locked. Losing the lock (Esc) pauses and reveals the
+// debug panel; clicking the pause screen re-locks and resumes.
 const loading = document.getElementById('loading')!;
-document.getElementById('tip')!.innerHTML = TIPS[Math.floor(Math.random() * TIPS.length)];
-document.getElementById('start')!.textContent = 'Click to drop in';
-loading.addEventListener('click', () => {
-  loading.classList.add('hidden');
-  document.getElementById('hud')!.classList.remove('hidden');
+const pauseEl = document.getElementById('pause')!;
+let started = false;
+
+function setPaused(p: boolean) {
+  view.paused = p;
+  pauseEl.classList.toggle('hidden', !p || !started);
+  if (p && started) gui.show();
+  else gui.hide();
+  input.keys.clear();
+  input.mouseButtons = 0;
+}
+
+function requestPlay() {
   sfx.unlock();
-  canvas.requestPointerLock?.();
+  const r = canvas.requestPointerLock?.() as unknown as Promise<void> | undefined;
+  // Some browsers refuse a re-lock right after Esc; stay paused and let them click again.
+  if (r && typeof r.catch === 'function') r.catch(() => {});
+}
+
+document.addEventListener('pointerlockchange', () => {
+  const locked = document.pointerLockElement === canvas;
+  if (locked && !started) {
+    started = true;
+    loading.classList.add('hidden');
+    document.getElementById('hud')!.classList.remove('hidden');
+  }
+  setPaused(!locked);
 });
-canvas.addEventListener('click', () => {
-  if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
-});
+loading.addEventListener('click', requestPlay);
+pauseEl.addEventListener('click', requestPlay);
 requestAnimationFrame((t) => {
   last = t;
   frame(t);
@@ -311,5 +318,5 @@ requestAnimationFrame((t) => {
 
 // Debug handle (console / automated checks).
 (window as unknown as { __game: unknown }).__game = {
-  get state() { return state; }, get localId() { return localId; }, sim, input, view, cfg, newWorld, setFreefly, localBasis, omegaOf,
+  get state() { return state; }, get localId() { return localId; }, sim, input, view, cfg, gui, newWorld, setFreefly, setPaused, localBasis, omegaOf,
 };

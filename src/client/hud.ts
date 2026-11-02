@@ -15,9 +15,7 @@ export class Hud {
       `rim speed ${(w * cfg.R).toFixed(1)} m/s<br/>` +
       (!cfg.coriolis || !cfg.centrifugal ? `<span style="color:#ff6a3d">${!cfg.centrifugal ? 'CENTRIFUGAL OFF ' : ''}${!cfg.coriolis ? 'CORIOLIS OFF' : ''}</span><br/>` : '') +
       (opts.timeScale !== 1 ? `<span style="color:#ffd27a">time ×${opts.timeScale.toFixed(2)}</span><br/>` : '') +
-      (opts.paused ? '<span style="color:#ffd27a">PAUSED</span><br/>' : '') +
-      (opts.freefly ? '<span style="color:#ffd27a">FREE-FLY CAMERA (V)</span><br/>' : '') +
-      `t ${(state.tick * DT).toFixed(1)} s`;
+      (opts.freefly ? '<span style="color:#ffd27a">FREE-FLY CAMERA</span><br/>' : '');
     // Spinward is yaw = 0 in the local frame; show it relative to where we face.
     $('spin-arrow').style.transform = `rotate(${-opts.yaw}rad)`;
     if (!me) return;

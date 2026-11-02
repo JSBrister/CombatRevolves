@@ -192,20 +192,41 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const walls = makeWalls(cfg, rng, variedWalls);
   const boxes: Box[] = [];
   const R = cfg.R;
-  const addBox = (angle: number, z: number, ht: number, hu: number, hz: number) => {
+  const addBox = (angle: number, z: number, ht: number, hu: number, hz: number, kind: Box['kind'] = 'cover') => {
     const sag = (ht * ht) / (2 * R) + 0.05; // bury the bottom so the curved floor never shows a gap
     const huTot = hu + sag / 2;
     const rc = R - 2 * hu + huTot; // top stays at height 2*hu
-    boxes.push({ id: nextId(), type: 'box', angle, center: [rc * Math.cos(angle), rc * Math.sin(angle), z], half: [ht, huTot, hz] });
+    boxes.push({ id: nextId(), type: 'box', kind, angle, center: [rc * Math.cos(angle), rc * Math.sin(angle), z], half: [ht, huTot, hz] });
   };
+  const stairs: { angle: number; halfArc: number }[] = [];
   if (withObstacles) {
     const circ = 2 * Math.PI * R;
+    // Staircases: solid steps each STAIR_RISE high (one jump per step) up to a
+    // lookout platform. Placed midway between spawn points, alternating which
+    // way they climb (climbing spinward vs antispinward feels different!).
+    const nStairs = Math.max(2, Math.min(12, Math.round(circ / 150)));
+    for (let k = 0; k < nStairs; k++) {
+      const mid = ((k + 0.5) / nStairs) * Math.PI * 2 + Math.PI / spawns.length / 2;
+      const dir = k % 2 === 0 ? 1 : -1;
+      const z = k % 2 === 0 ? -7 : 7;
+      const total = STAIR_STEPS * STAIR_TREAD + STAIR_TOP;
+      const start = mid - (dir * total) / 2 / R;
+      for (let i = 0; i < STAIR_STEPS; i++) {
+        const along = (i + 0.5) * STAIR_TREAD;
+        addBox(start + (dir * along) / R, z, STAIR_TREAD / 2, ((i + 1) * STAIR_RISE) / 2, STAIR_WIDTH / 2, 'stair');
+      }
+      const along = STAIR_STEPS * STAIR_TREAD + STAIR_TOP / 2;
+      addBox(start + (dir * along) / R, z, STAIR_TOP / 2, (STAIR_STEPS * STAIR_RISE) / 2, STAIR_WIDTH / 2, 'stair');
+      stairs.push({ angle: mid, halfArc: total / 2 });
+    }
     const count = Math.max(10, Math.min(60, Math.round(circ / 22)));
     for (let i = 0; i < count; i++) {
       const angle = ((i + rngRange(rng, 0.2, 0.8)) / count) * Math.PI * 2;
       // keep spawns clear
       const near = spawns.some((s) => Math.abs(Math.atan2(Math.sin(angle - s.angle), Math.cos(angle - s.angle))) * R < 5);
       if (near) continue;
+      const onStairs = stairs.some((s) => Math.abs(Math.atan2(Math.sin(angle - s.angle), Math.cos(angle - s.angle))) * R < s.halfArc + 4);
+      if (onStairs) continue;
       const kind = rngNext(rng);
       const z = rngRange(rng, -cfg.halfWidth + 4, cfg.halfWidth - 4);
       if (kind < 0.5) addBox(angle, z, rngRange(rng, 0.8, 2.2), rngRange(rng, 0.5, 0.9), rngRange(rng, 1.5, 3.5)); // low cover
@@ -215,6 +236,12 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   }
   return { boxes, spawns, ...walls };
 }
+
+export const STAIR_STEPS = 5;
+export const STAIR_RISE = 2.2; // m per step: needs a jump each
+export const STAIR_TREAD = 2.6; // m along the ring
+export const STAIR_WIDTH = 5; // m across the ring
+export const STAIR_TOP = 6; // lookout platform length
 
 export function spawnPosition(cfg: SimConfig, s: SpawnPoint, heightAboveFloor: number): Vec3 {
   const r = cfg.R - heightAboveFloor;

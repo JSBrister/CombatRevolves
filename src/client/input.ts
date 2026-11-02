@@ -25,7 +25,7 @@ export class InputSampler {
       if (e.code === 'KeyF') this.latched |= BTN_GRENADE2;
       if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5)) - 1;
-        if (n >= 0 && n <= 2) this.weapon = n;
+        if (n >= 0 && n <= 1) this.weapon = n; // the hover gun is debug-panel only
       }
       this.onKey(e.code);
       if (['Space', 'Tab'].includes(e.code)) e.preventDefault();

@@ -11,7 +11,11 @@ npm run headless   # runs the sim with 4 bots in Node, no DOM/three.js
 npx tsc -p src/sim # proves the sim compiles without DOM types
 ```
 
-**Controls:** WASD, Shift sprint, Space jump, mouse look · LMB fire (pistol: hold to overcharge) · RMB trajectory preview ·
+**Play online:** https://jsbrister.github.io/CombatRevolves/ (built and deployed by GitHub Actions on every push to `main`).
+
+**Controls:** WASD move · Shift sprint · Space jump · mouse look · left click fire · right click show trajectory ·
+1 plasma rifle · 2 plasma pistol (hold to overcharge) · wheel swap · G sticky grenade · F bouncing grenade (hold to aim, release to throw) · Esc pause.
+The debug panel (ring size, forces, speeds, time scale, inertial-frame overlay, free-fly camera, hover gun, bots) only appears while paused.
 G sticky grenade / F bouncing grenade (hold to aim, release to throw) · 1/2/3 rifle/pistol/hover gun · I inertial overlay · V free-fly camera · T slow-mo · P pause · B add bot · H help.
 
 ## Layout
@@ -38,6 +42,7 @@ G sticky grenade / F bouncing grenade (hold to aim, release to throw) · 1/2/3 r
 - **Inputs:** players without a command for a tick repeat their last one, as a server would. Edge-triggered actions (jump, pistol tap, grenade release) use `prevButtons` stored in state, so they replay exactly.
 - **Snapshots** use the binary encoder, not JSON, because JSON turns −0 into 0. That can flip an `atan2` branch and break bit-exact replay.
 - **Rim walls** vary in height per angular sector (full 15 m, 4 m, or a 1 m curb with orange tops). The SDF evaluates the point's own sector plus any taller neighbours, using the exact distance to the neighbour's edge. Past a curb there is only space: anything more than `fallKillDistance` (default 25 m) off the ring band is dead.
+- **Staircases:** each step is a solid local-frame box 2.2 m higher than the last (one jump per step), up to an 11 m lookout where you weigh about 0.88 g. Alternate staircases climb spinward and antispinward.
 - **Bouncing grenades** (yellow) share one sub-stepped sphere mover with the props and with their own trajectory preview. Their fuse starts at the throw. They bounce off players and props relative to the target's velocity.
 - **Owner self-hits:** a projectile is `armed` against its owner once it has left the owner's capsule. The test fires a bolt antispinward at the local rim speed, and it hits the shooter in the back ≈ 2π/ω later.
 

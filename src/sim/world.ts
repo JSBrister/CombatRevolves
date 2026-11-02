@@ -16,6 +16,7 @@ export interface WorldOptions {
   config?: Partial<SimConfig>;
   obstacles?: boolean;
   props?: boolean;
+  /** Static target dummies (default false). */
   dummies?: boolean;
   /** Rim walls with low and medium stretches (default true). False = full height all round. */
   variedWalls?: boolean;
@@ -45,7 +46,7 @@ export function createState(opts: WorldOptions = {}): SimState {
       addProp(state, [(config.R - radius) * Math.cos(a), (config.R - radius) * Math.sin(a), rngRange(state, -14, 14)], radius);
     }
   }
-  if (opts.dummies ?? true) {
+  if (opts.dummies ?? false) {
     // A line of target dummies a little spinward of spawn 0, across the ring.
     for (let i = 0; i < 4; i++) {
       const id = addPlayer(state, 'dummy', `Dummy ${i + 1}`);

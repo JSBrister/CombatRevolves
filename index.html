@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Combat Revolves</title>
-  <link rel="stylesheet" href="/src/client/style.css" />
 </head>
 <body>
   <canvas id="view"></canvas>
@@ -30,22 +29,35 @@
     <div id="feed"></div>
     <div id="dead" class="hidden"></div>
     <div id="pip-label" class="hidden">INERTIAL VIEW · the ring spins, plasma flies straight</div>
-    <div id="help" class="hidden">
-      <b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> jump · <b>Mouse</b> look<br/>
-      <b>LMB</b> fire (pistol: hold to overcharge) · <b>RMB</b> trajectory preview<br/>
-      <b>G</b> sticky grenade · <b>F</b> bouncing grenade (hold to aim, release to throw)<br/>
-      <b>1</b> rifle · <b>2</b> pistol · <b>3</b> hover gun (debug) · <b>Wheel</b> swap<br/>
-      <b>I</b> inertial view · <b>V</b> free-fly camera · <b>T</b> slow-mo · <b>P</b> pause · <b>B</b> add bot · <b>H</b> help
-    </div>
   </div>
 
-  <div id="loading">
+  <div id="loading" class="overlay">
     <h1>COMBAT <span>REVOLVES</span></h1>
-    <div class="sub">a rotating-reference-frame shooter</div>
-    <div id="tip"></div>
-    <div id="start">Loading…</div>
+    <div class="controls">
+      <div><b>WASD</b> move</div><div><b>Shift</b> sprint · <b>Space</b> jump</div>
+      <div><b>Mouse</b> look</div><div><b>Left click</b> fire</div>
+      <div><b>Right click</b> show trajectory</div><div><b>1</b> plasma rifle · <b>2</b> plasma pistol</div>
+      <div><b>Wheel</b> swap weapon</div><div>Pistol: <b>hold</b> to overcharge</div>
+      <div><b>G</b> sticky grenade</div><div><b>F</b> bouncing grenade</div>
+      <div class="wide">Grenades: hold to aim, release to throw · <b>Esc</b> pause</div>
+    </div>
+    <div class="start">Click to spawn</div>
   </div>
 
-  <script type="module" src="/src/client/main.ts"></script>
+  <div id="pause" class="overlay hidden">
+    <h2>PAUSED</h2>
+    <div class="controls">
+      <div><b>WASD</b> move</div><div><b>Shift</b> sprint · <b>Space</b> jump</div>
+      <div><b>Mouse</b> look</div><div><b>Left click</b> fire</div>
+      <div><b>Right click</b> show trajectory</div><div><b>1</b> plasma rifle · <b>2</b> plasma pistol</div>
+      <div><b>Wheel</b> swap weapon</div><div>Pistol: <b>hold</b> to overcharge</div>
+      <div><b>G</b> sticky grenade</div><div><b>F</b> bouncing grenade</div>
+      <div class="wide">Grenades: hold to aim, release to throw · <b>Esc</b> pause</div>
+    </div>
+    <div class="start">Click to resume</div>
+    <div class="note">Debug settings: panel at top right</div>
+  </div>
+
+  <script type="module" src="./src/client/main.ts"></script>
 </body>
 </html>
