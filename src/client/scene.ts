@@ -347,6 +347,51 @@ export class RingScene {
     }
     planet.rotation.set(0.4, 0.2, 0.3);
     this.inertial.add(planet);
+    if (cfg.planetPull > 0) this.buildSkyhook(cfg, planet.position, Rs * 0.18 * 2.4);
+  }
+
+  /**
+   * What holds the ring up over the planet: a tower from the planet's surface
+   * to a bearing on the ring's axle, off to one side of the ring. The tower is
+   * fixed to the stars (it turns in the ring's view); the axle and the spokes
+   * out to the rim turn with the ring.
+   */
+  private buildSkyhook(cfg: SimConfig, planetPos: THREE.Vector3, planetRadius: number) {
+    const R = cfg.R, W = cfg.halfWidth;
+    const metal = new THREE.MeshStandardMaterial({ color: 0x8a8f9c, metalness: 0.7, roughness: 0.45, fog: false });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, metalness: 0.6, roughness: 0.5, fog: false });
+    const glow = new THREE.MeshBasicMaterial({ color: 0x6ad8ff, fog: false });
+    const strut = (a: THREE.Vector3, b: THREE.Vector3, r0: number, r1: number, m: THREE.Material) => {
+      const len = a.distanceTo(b);
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, len, 12, 1), m);
+      c.position.copy(a).add(b).multiplyScalar(0.5);
+      c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+      c.castShadow = true;
+      return c;
+    };
+    const hubZ = -(W + R * 0.45);
+    const hub = new THREE.Vector3(0, 0, hubZ);
+    // tower: from the planet's surface (nearest point to the hub) up to the bearing
+    const toHub = hub.clone().sub(planetPos).normalize();
+    const base = planetPos.clone().addScaledVector(toHub, planetRadius * 0.98);
+    const top = hub.clone().addScaledVector(toHub, -R * 0.06);
+    this.inertial.add(strut(base, top, R * 0.12, R * 0.035, metal));
+    // a few braces near the base so it reads as a structure, not a stick
+    const side = new THREE.Vector3(0, 0, 1).cross(toHub).normalize();
+    for (const sgn of [-1, 1]) {
+      const foot = base.clone().addScaledVector(side, sgn * R * 0.6);
+      this.inertial.add(strut(foot, base.clone().lerp(top, 0.25), R * 0.03, R * 0.02, dark));
+    }
+    const bearing = new THREE.Mesh(new THREE.TorusGeometry(R * 0.06, R * 0.015, 12, 32), glow);
+    bearing.position.copy(hub);
+    this.inertial.add(bearing);
+    // turning with the ring: the axle stub and spokes out to the rim
+    this.level.add(strut(hub.clone().setZ(hubZ - R * 0.05), new THREE.Vector3(0, 0, -W - 2), R * 0.03, R * 0.03, dark));
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const rim = new THREE.Vector3(Math.cos(a) * (R + cfg.hullThickness), Math.sin(a) * (R + cfg.hullThickness), -W - cfg.wallThickness);
+      this.level.add(strut(new THREE.Vector3(0, 0, hubZ * 0.85), rim, R * 0.012, R * 0.012, metal));
+    }
   }
 
   setFrameAngle(a: number) {
