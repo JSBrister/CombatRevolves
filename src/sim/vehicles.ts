@@ -109,19 +109,19 @@ export function updateVehicles(state: SimState, omega: number) {
       const k = Math.max(0, 1 - cfg.bikeDamping * DT);
       v.vel = scale(v.vel, k);
     }
-    const before = clone(v.vel);
-    // frictionless while ridden; a normal sliding object when parked
-    const impact = moveSphereBody(state.level, cfg, omega, v, 0.25, DT, undefined, rider ? 0 : cfg.friction);
-    if (impact > cfg.bikeCrashSpeed) {
-      damageVehicle(state, v, v.lastAttacker >= 0 && tick - v.lastDamageTick < secs(10) ? v.lastAttacker : rider?.id ?? -1,
-        (impact - cfg.bikeCrashSpeed) * cfg.bikeCrashDamage);
-      if (rider && impact > cfg.riderCrashSpeed) {
-        const d = (impact - cfg.riderCrashSpeed) * cfg.riderCrashDamage;
-        damagePlayer(state, rider, rider.lastAttacker >= 0 && tick - rider.lastDamageTick < secs(10) ? rider.lastAttacker : rider.id, d, d, 'crash');
-      }
+    // frictionless while ridden; a normal sliding object when parked. Walls and
+    // boxes hurt it above bikeCrashSpeed; landings (anything floor-like) only
+    // well above that, so jumps are encouraged. The rider is never hurt by either.
+    const up = localBasis(v.pos).up;
+    let damage = 0;
+    moveSphereBody(state.level, cfg, omega, v, cfg.bikeBounce, DT, undefined, rider ? 0 : cfg.friction, (speed, n) => {
+      const limit = dot(n, up) > 0.6 ? cfg.bikeLandingSpeed : cfg.bikeCrashSpeed;
+      if (speed > limit) damage = Math.max(damage, (speed - limit) * cfg.bikeCrashDamage);
+    });
+    if (damage > 0) {
+      damageVehicle(state, v, v.lastAttacker >= 0 && tick - v.lastDamageTick < secs(10) ? v.lastAttacker : rider?.id ?? -1, damage);
       if (!v.alive) continue;
     }
-    void before;
     ramPlayers(state, v, rider);
   }
   // riders sit on their bikes

@@ -51,7 +51,7 @@ export class Hud {
     const wi = me.weapon;
     const st = cfg.weapons[WEAPON_IDS[wi]];
     const overheated = state.tick < me.overheatUntil[wi];
-    const reloading = me.reloadUntil > state.tick;
+    const reloading = me.reloadUntil > state.tick && me.reloadWeapon === me.weapon;
     $('weapon-name').textContent = WEAPON_NAMES[wi] + (overheated ? ' — OVERHEATED' : reloading ? ' — RELOADING' : '');
     // ammo weapons show rounds; heat weapons show the heat bar
     const heatBar = $('heat-fill').parentElement as HTMLElement;

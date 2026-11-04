@@ -1183,16 +1183,32 @@ describe('26. hover-bikes', () => {
     expect(p.vehicle).toBe(-1);
     expect(v.driver).toBe(-1);
   });
-  it('slamming into a wall hurts the bike and the rider', () => {
+  it('slamming into a wall hurts the bike (not the rider), and it bounces', () => {
     const { s, id, p, v } = bikeWorld();
     step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
     // hurl it across the ring at the rim wall at 35 m/s
     v.vel = [0, 0, 35 * Math.sign(-v.pos[2] || 1) * -1];
     v.vel = [0, 0, v.pos[2] > 0 ? 35 : -35];
     const hp0 = v.health, me0 = p.health + p.shield;
-    run(s, 120 * 2, () => [cmdFor(s, id)]);
+    let bounced = false;
+    for (let i = 0; i < 240; i++) {
+      step(s, [cmdFor(s, id)], s.tick);
+      if (v.vel[2] * (v.pos[2] > 0 ? 1 : -1) < -10) bounced = true;
+    }
     expect(v.health).toBeLessThan(hp0);
-    expect(p.health + p.shield).toBeLessThan(me0);
+    expect(v.alive).toBe(true); // tough enough to survive one big crash
+    expect(p.health + p.shield).toBe(me0);
+    expect(bounced).toBe(true);
+  });
+  it('landing a big jump does not hurt the bike or the rider', () => {
+    const { s, id, p, v } = bikeWorld();
+    step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
+    v.pos = addScaled(v.pos, localBasis(v.pos).up, 15);
+    v.vel = scale(localBasis(v.pos).up, -12); // ~20 m/s coming down
+    const hp0 = v.health, me0 = p.health + p.shield;
+    run(s, 120 * 3, () => [cmdFor(s, id)]);
+    expect(v.health).toBe(hp0);
+    expect(p.health + p.shield).toBe(me0);
   });
   it('running someone over hurts them and sends them flying', () => {
     const { s, id, v } = bikeWorld();
@@ -1300,5 +1316,26 @@ describe('27. enemy AI: cover and ramps', () => {
     }
     expect(best).toBeGreaterThan(h - 1.5);
     expect(e.alive).toBe(true);
+  });
+});
+
+describe('28. reloads carry on when you switch weapons', () => {
+  it('an emptied fuel rod launcher is loaded again when you come back to it', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    applyItem(s.config, p, 'launcher', -1);
+    run(s, 60, () => [cmdFor(s, id, { weapon: WEAPON_LAUNCHER })]);
+    // empty the magazine (auto-reload starts), then switch away straight away
+    for (let i = 0; i < 400 && p.mag[WEAPON_LAUNCHER] > 0; i++) step(s, [cmdFor(s, id, { weapon: WEAPON_LAUNCHER, buttons: i % 2 ? BTN_FIRE : 0 })], s.tick);
+    run(s, 2, () => [cmdFor(s, id, { weapon: WEAPON_LAUNCHER })]);
+    expect(p.reloadUntil).toBeGreaterThan(s.tick);
+    run(s, Math.round(s.config.weapons.launcher.reloadTime / DT) + 10, () => [cmdFor(s, id, { weapon: 0 })]);
+    expect(p.mag[WEAPON_LAUNCHER]).toBe(s.config.weapons.launcher.magSize);
+    run(s, 40, () => [cmdFor(s, id, { weapon: WEAPON_LAUNCHER })]);
+    expect(p.reloadUntil).toBe(0);
+    const before = p.mag[WEAPON_LAUNCHER];
+    run(s, 2, () => [cmdFor(s, id, { weapon: WEAPON_LAUNCHER, buttons: BTN_FIRE })]);
+    expect(p.mag[WEAPON_LAUNCHER]).toBe(before - 1);
   });
 });

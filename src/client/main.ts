@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import {
   DT, LEVELS, WEAPON_HOVER, WEAPON_IDS, WEAPON_NAMES, isLaconicBusy, addPlayer, applyItem, botInput, createState, damagePlayer,
   eyeOffset, levelById, localBasis, omegaOf, startLevel,
-  predictTrajectory, removePlayer, step, viewVectors,
+  predictTrajectory, removePlayer, step, viewVectors, addVehicle, addScaled,
   type BoltKind, type GameMode, type InputCmd, type ItemKind, type LevelDef, type ThrownKind, type SimConfig, type SimEvent, type SimState, type Vec3,
 } from '../sim';
 import { Sfx } from './audio';
@@ -110,6 +110,8 @@ fRing.add(cfg, 'coriolis').name('Coriolis force');
 fRing.add(cfg, 'dragType', ['none', 'linear', 'quadratic']).name('air drag');
 fRing.add(cfg, 'dragCoeff', 0, 1, 0.001).name('drag coeff');
 fRing.add(cfg, 'fallKillDistance', 2, 500, 1).name('fall-off kill distance (m)');
+fRing.add(cfg, 'planetPull', 0, 30, 0.05).name('planet pull (m/s²)').listen();
+fRing.add(cfg, 'gravity', 0, 30, 0.05).name('real gravity to the floor (m/s²)').listen();
 
 const fP = gui.addFolder('Player');
 fP.add(cfg, 'walkSpeed', 1, 60, 0.5).name('run speed (m/s)');
@@ -171,6 +173,21 @@ fG.add(cfg, 'bounceRestitution', 0, 1, 0.05).name('bouncer bounciness');
 fG.add(cfg, 'pickupRespawn', 1, 120, 1).name('pickup respawn (s)');
 fG.add(cfg, 'dropLifetime', 1, 120, 1).name('dropped item lifetime (s)');
 
+const fB = gui.addFolder('Hover-bikes');
+fB.add(cfg, 'bikeThrust', 0, 80, 0.5).name('thrust (m/s²)');
+fB.add(cfg, 'bikeStrafe', 0, 40, 0.5).name('strafe (m/s²)');
+fB.add(cfg, 'bikeMaxSpeed', 5, 150, 1).name('throttle top speed (m/s)');
+fB.add(cfg, 'bikeDamping', 0, 1, 0.01).name('damping (/s)');
+fB.add(cfg, 'bikeHop', 0, 30, 0.5).name('hop (m/s)');
+fB.add(cfg, 'bikeBounce', 0, 1, 0.05).name('bounciness');
+fB.add(cfg, 'bikeHealth', 10, 3000, 10).name('health (new bikes)');
+fB.add(cfg, 'bikeCrashSpeed', 0, 100, 1).name('wall crash damage above (m/s)');
+fB.add(cfg, 'bikeLandingSpeed', 0, 150, 1).name('landing damage above (m/s)');
+fB.add(cfg, 'bikeCrashDamage', 0, 50, 0.5).name('crash damage per m/s');
+fB.add(cfg, 'bikeRamSpeed', 0, 40, 0.5).name('run-over damage above (m/s)');
+fB.add(cfg, 'bikeRamDamage', 0, 50, 0.5).name('run-over damage per m/s');
+fB.close();
+
 const fK = gui.addFolder('Explosions (grenades)');
 fK.add(cfg, 'knockbackScale', 0, 5, 0.05).name('knockback scale (all blasts)');
 fK.add(cfg, 'knockbackSpeed', 0, 60, 0.5).name('point-blank Δv (m/s)');
@@ -195,6 +212,12 @@ const give = (item: ItemKind) => () => { const p = me_(); if (p && p.alive) appl
 for (const item of ['redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'rifle', 'pistol'] as ItemKind[]) fGive.add({ f: give(item) }, 'f').name(WEAPON_NAMES[WEAPON_IDS.indexOf(item as never)]);
 fGive.add({ f: () => { cfg.allowHoverGun = true; input.weapon = WEAPON_HOVER; } }, 'f').name('Hover Gun (debug)');
 fGive.add({ f: give('jetpack') }, 'f').name('Jetpack (full)');
+fGive.add({ f: () => {
+  const p = me_();
+  if (!p || !p.alive) return;
+  const v = viewVectors(p.pos, input.yaw, 0);
+  addVehicle(state, addScaled(addScaled(p.pos, v.forward, 3.5), v.up, -0.2), input.yaw);
+} }, 'f').name('Hover-bike (in front of you)');
 fGive.add({ f: () => { give('sticky')(); give('bounce')(); } }, 'f').name('Grenades (refill)');
 fGive.add({ f: () => { const p = me_(); if (p) { p.health = p.maxHealth; p.shield = p.maxShield; } } }, 'f').name('Health + shields');
 fGive.add({ f: () => { for (const p of state.players) if (p.id !== localId && p.alive) damagePlayer(state, p, localId, 1e6, 1e6, 'debug'); } }, 'f').name('Kill everyone else');
@@ -359,7 +382,7 @@ function frame(now: number) {
   // first-person gun, mouse slowdown while charging the laser, owned list for the wheel
   views.setViewWeapon(me?.weapon ?? 0, !!me && me.alive && !view.freefly && me.vehicle < 0);
   input.lookScale = me && isLaconicBusy(me, state.tick) ? cfg.weapons.laconic.chargeLookScale : 1;
-  views.reloadDip = me && me.reloadUntil > state.tick ? Math.min(1, views.reloadDip + dtReal * 6) : Math.max(0, views.reloadDip - dtReal * 6);
+  views.reloadDip = me && me.reloadUntil > state.tick && me.reloadWeapon === me.weapon ? Math.min(1, views.reloadDip + dtReal * 6) : Math.max(0, views.reloadDip - dtReal * 6);
   if (me) input.owned = me.owned;
 
   // main view

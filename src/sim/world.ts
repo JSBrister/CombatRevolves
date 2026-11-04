@@ -110,7 +110,7 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
     lastDamageTick: -1e9, lastAttacker: -1,
     weapon: 0, owned: [...STARTING_WEAPONS],
     heat: WEAPON_IDS.map(() => 0), overheatUntil: WEAPON_IDS.map(() => 0), ammo: WEAPON_IDS.map(() => 0),
-    mag: WEAPON_IDS.map(() => 0), reloadUntil: 0, infiniteAmmo: false,
+    mag: WEAPON_IDS.map(() => 0), reloadUntil: 0, reloadWeapon: -1, infiniteAmmo: false,
     charge: 0, holdTicks: 0, needRelease: false, burstUntil: 0, meleeReadyTick: 0, vehicle: -1,
     fireReadyTick: 0, hasJetpack: false, jetFuel: 0, jetting: false, lastGroundTick: -1e9, lastJumpTick: -1e9,
     grenades: MAX_GRENADES, bounceGrenades: MAX_GRENADES, grenadeReadyTick: 0,

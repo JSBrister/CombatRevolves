@@ -86,16 +86,17 @@ export const defaultConfig = (): SimConfig => ({
   // --- hover-bikes (E to ride) -----------------------------------------------------
   vehicleMinRadius: 150, // only rings at least this big get bikes
   vehicleSpacing: 400, // one bike per this many metres of ring (max 10)
-  bikeHealth: 300,
+  bikeHealth: 450,
   bikeThrust: 18, // m/s^2 (W/S)
   bikeStrafe: 8, // m/s^2 (A/D)
   bikeMaxSpeed: 40, // m/s: throttle stops adding speed beyond this (the spin can add more!)
   bikeDamping: 0.08, // fraction of speed lost per second while ridden (it's frictionless otherwise)
   bikeHop: 6, // Space while riding (m/s)
-  bikeCrashSpeed: 10, // hitting something faster than this damages the bike...
-  bikeCrashDamage: 9, // ...this much per m/s above it
-  riderCrashSpeed: 16, // ...and above this also hurts the rider
-  riderCrashDamage: 5,
+  bikeBounce: 0.55, // restitution: how much of an impact it bounces back (0 = dead stop, 1 = perfect bounce)
+  bikeCrashSpeed: 14, // hitting a wall or box faster than this damages the bike...
+  bikeCrashDamage: 6, // ...this much per m/s above it
+  bikeLandingSpeed: 30, // landings (floor, ramps, hills) only hurt it above this: jump away
+  // The rider never takes crash or landing damage: only the explosion if the bike is destroyed.
   bikeRamSpeed: 6, // running someone over faster than this hurts them
   bikeRamDamage: 6, // per m/s of closing speed above it
   bikeRespawn: 20, // s before a destroyed bike reappears at its spot

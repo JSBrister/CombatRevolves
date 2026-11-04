@@ -84,10 +84,10 @@ export interface SimConfig {
   bikeMaxSpeed: number; // m/s (thrust stops adding speed beyond this)
   bikeDamping: number; // fraction of speed lost per second while ridden
   bikeHop: number; // m/s
-  bikeCrashSpeed: number; // impacts faster than this damage the bike
+  bikeBounce: number; // restitution of the bike's collisions
+  bikeCrashSpeed: number; // wall/box impacts faster than this damage the bike
   bikeCrashDamage: number; // per m/s above that
-  riderCrashSpeed: number; // impacts faster than this also hurt the rider
-  riderCrashDamage: number; // per m/s above that
+  bikeLandingSpeed: number; // floor-like impacts only damage it above this
   bikeRamSpeed: number; // closing speed above which a bike hurts whoever it hits
   bikeRamDamage: number; // per m/s above that
   bikeRespawn: number; // s
@@ -220,6 +220,7 @@ export interface Player {
   ammo: number[]; // spare rounds per weapon index (only for ammo weapons)
   mag: number[]; // rounds in the magazine per weapon index
   reloadUntil: number; // tick the current reload finishes (0 = not reloading)
+  reloadWeapon: number; // which weapon is reloading (it carries on if you switch away)
   infiniteAmmo: boolean; // campaign enemies: spare rounds never run out (they still reload)
   charge: number; // 0..1: pistol overcharge or Laconic Laser charge
   holdTicks: number;

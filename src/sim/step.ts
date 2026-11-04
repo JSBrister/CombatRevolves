@@ -339,7 +339,10 @@ export interface SphereBody {
  * restitution + Coulomb friction. Shared by props, bouncing grenades and the
  * bouncing-grenade trajectory preview. Returns the largest impact speed.
  */
-export function moveSphereBody(level: Level, cfg: SimConfig, omega: number, b: SphereBody, restitution: number, dt = DT, extra: Vec3 | null = pull, mu = cfg.friction): number {
+export function moveSphereBody(
+  level: Level, cfg: SimConfig, omega: number, b: SphereBody, restitution: number, dt = DT, extra: Vec3 | null = pull, mu = cfg.friction,
+  onImpact?: (speed: number, n: Vec3) => void,
+): number {
   const support = b.contactNormal;
   const n = clamp(Math.ceil((len(b.vel) * dt) / (0.4 * b.radius)), 1, 32);
   const h = dt / n;
@@ -359,6 +362,7 @@ export function moveSphereBody(level: Level, cfg: SimConfig, omega: number, b: S
       const vn = dot(b.vel, hit.n);
       if (vn < 0) {
         maxImpact = Math.max(maxImpact, -vn);
+        onImpact?.(-vn, hit.n);
         reflect(b.vel, hit.n, vn, -vn > 1.5 ? restitution : 0, mu);
       }
       // Only a resting/sliding contact supports the body next tick; one it is
@@ -485,7 +489,6 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
     p.charge = 0;
     p.holdTicks = 0;
     p.needRelease = false;
-    p.reloadUntil = 0; // switching cancels a reload
     p.fireReadyTick = Math.max(p.fireReadyTick, tick + secs(0.25));
   }
   if (!isOwned(cfg, p, p.weapon)) p.weapon = p.owned[0] ?? 0;
@@ -497,22 +500,26 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
   const locked = tick < p.overheatUntil[wi];
   const usesAmmo = st.magSize > 0;
 
-  // Reloading: finish, or start one (R, or automatically on an empty magazine).
+  // Reloading: finish (a reload carries on if you switch away), or start one
+  // (R, or automatically on an empty magazine).
+  if (p.reloadUntil && tick >= p.reloadUntil) {
+    const rw = p.reloadWeapon >= 0 ? p.reloadWeapon : wi;
+    const want = cfg.weapons[WEAPON_IDS[rw]].magSize - p.mag[rw];
+    const got = Math.max(0, p.infiniteAmmo ? want : Math.min(want, p.ammo[rw]));
+    p.mag[rw] += got;
+    if (!p.infiniteAmmo) p.ammo[rw] -= got;
+    p.reloadUntil = 0;
+    p.reloadWeapon = -1;
+  }
   if (usesAmmo) {
-    if (p.reloadUntil && tick >= p.reloadUntil) {
-      const want = st.magSize - p.mag[wi];
-      const got = p.infiniteAmmo ? want : Math.min(want, p.ammo[wi]);
-      p.mag[wi] += got;
-      if (!p.infiniteAmmo) p.ammo[wi] -= got;
-      p.reloadUntil = 0;
-    }
     const canReload = p.mag[wi] < st.magSize && (p.infiniteAmmo || p.ammo[wi] > 0);
     if (!p.reloadUntil && canReload && (p.mag[wi] === 0 || pressed & BTN_RELOAD)) {
       p.reloadUntil = tick + Math.max(1, secs(st.reloadTime));
+      p.reloadWeapon = wi;
       state.events.push({ type: 'reload', id: p.id });
     }
   }
-  const reloading = p.reloadUntil > 0;
+  const reloading = p.reloadUntil > 0 && p.reloadWeapon === wi;
   const hasAmmo = !usesAmmo || p.mag[wi] > 0;
   const ready = tick >= p.fireReadyTick && !locked && !reloading && hasAmmo && p.heat[wi] < 1;
 
@@ -1082,6 +1089,7 @@ function updateVitals(state: SimState, p: Player) {
   p.ammo = WEAPON_IDS.map(() => 0);
   p.mag = WEAPON_IDS.map(() => 0);
   p.reloadUntil = 0;
+  p.reloadWeapon = -1;
   p.burstUntil = 0;
   p.charge = 0;
   p.holdTicks = 0;
