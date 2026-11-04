@@ -472,11 +472,30 @@ function showLevels(mode: GameMode) {
   $('levels-title').textContent = mode === 'campaign' ? 'CAMPAIGN' : 'DEBUG SANDBOX';
   const list = $('level-list');
   list.innerHTML = '';
-  for (const def of LEVELS.filter((l) => l.mode === mode)) {
+  delete list.dataset.last;
+  // sandbox levels are grouped by what's special about them
+  const groupOf = (d: LevelDef) => {
+    const c = d.config;
+    if (d.mode === 'campaign') return '';
+    if (c.floorHoles || c.deckHeight || c.planetPull || (c.dragType && c.dragType !== 'none')) return 'GIMMICKS';
+    if (c.tube || c.terrainSphere || c.hills || c.ridgeHeight) return 'SHAPES AND TERRAIN';
+    return 'RINGS';
+  };
+  const defs = LEVELS.filter((l) => l.mode === mode);
+  const groups = [...new Set(defs.map(groupOf))];
+  for (const def of groups.flatMap((g) => defs.filter((d) => groupOf(d) === g))) {
+    const g = groupOf(def);
+    if (g && list.dataset.last !== g) {
+      const h = document.createElement('div');
+      h.className = 'level-group';
+      h.textContent = g;
+      list.appendChild(h);
+      list.dataset.last = g;
+    }
     const card = document.createElement('div');
     card.className = 'level-card';
     const who = mode === 'campaign' ? `${def.enemies?.length ?? 0} enemies` : `${def.bots ?? 0} bots`;
-    card.innerHTML = `<h3>${def.name}</h3><div class="stats">R ${def.config.R} m · ${fmtSpin(def.config.R ?? 100)} · ${who}</div><p>${def.blurb}</p>`;
+    card.innerHTML = `<h3>${def.name}</h3><div class="stats">${def.config.spin === false ? "flat ground · no spin" : `R ${def.config.R} m · ${fmtSpin(def.config.R ?? 100)}`} · ${who}</div><p>${def.blurb}</p>`;
     card.addEventListener('click', () => {
       rOverride = null;
       startGame(def);
