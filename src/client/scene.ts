@@ -273,6 +273,15 @@ export class RingScene {
     tex.repeat.set((2 * Math.PI * R) / 5, (2 * Math.PI * a) / 5);
     const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, side: kind === 'inside' ? THREE.BackSide : THREE.FrontSide, roughness: 0.85, metalness: 0.2 }));
     mesh.receiveShadow = true;
+    if (kind === 'inside') {
+      // a window strip along the ceiling (the side nearest the axis): the tube's sky
+      const strip = new THREE.Mesh(new THREE.CylinderGeometry(rc - a + 0.05, rc - a + 0.05, a * 0.35, tubular, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xfff1c8, side: THREE.DoubleSide, fog: false }));
+      strip.rotation.x = Math.PI / 2;
+      mesh.add(strip);
+      const glow = new THREE.PointLight(0xfff2dd, 0.6, 0, 0);
+      mesh.add(glow);
+    }
     if (kind === 'outside') {
       // a painted line along the top (the side facing the axis) and the slip-off lines
       for (const [lat, color] of [[0, 0xc9a43a], [Math.acos(0.6), 0xff5a2a], [-Math.acos(0.6), 0xff5a2a]] as const) {

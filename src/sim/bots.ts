@@ -5,7 +5,7 @@
 
 import { advanceFree, localBasis, planetPullAt, viewVectors } from './physics';
 import { levelSdf } from './level';
-import { floorRadius } from './terrain';
+import { floorRadius, terrainAt } from './terrain';
 import { boltStats, launchVelocity, muzzlePoint } from './step';
 import { hash01 } from './rng';
 import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_SPRINT, DT, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_IDS, omegaOf, type BoltKind, type InputCmd, type Player, type SimState } from './types';
@@ -88,8 +88,15 @@ function keepFooting(state: SimState, me: Player, cmd: InputCmd): InputCmd {
   if (cmd.moveX === 0 && cmd.moveY === 0) return cmd;
   const vv = viewVectors(me.pos, cmd.yaw, 0);
   const d = norm(addScaled(scale(vv.forward, cmd.moveY), vv.right, cmd.moveX));
-  const probe = addScaled(addScaled(me.pos, d, 1.2), vv.up, -(standHeight(me.size) + 2));
-  if (levelSdf(state.level, state.config, probe).d > 0.25) { cmd.moveX = 0; cmd.moveY = 0; } // nothing to stand on there
+  const ahead = addScaled(me.pos, d, 1.2);
+  const probe = addScaled(ahead, vv.up, -(standHeight(me.size) + 2));
+  // a drop of more than 2 m (ledge, hole, the edge of the world)...
+  if (levelSdf(state.level, state.config, probe).d > 0.25) { cmd.moveX = 0; cmd.moveY = 0; return cmd; }
+  // ...or floor ahead too steep to stand on (you'd slide off)
+  if (state.level.terrain && heightAboveFloor(state, me) < 0.5) {
+    const t = terrainAt(state.level, state.config, Math.atan2(ahead[1], ahead[0]), ahead[2]);
+    if (Math.hypot(t.dhds, t.dhdz) > 0.9) { cmd.moveX = 0; cmd.moveY = 0; }
+  }
   return cmd;
 }
 

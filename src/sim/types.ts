@@ -27,6 +27,11 @@ export interface SimConfig {
   tube: 'none' | 'inside' | 'half' | 'outside';
   tubeRadius: number;
   floorHoles: number; // holes in the floor you can fall through into space
+  comboHits: number; // this many seeker hits on one target, each within comboWindow s of the last...
+  comboWindow: number;
+  comboDamage: number; // ...set off a supercombine: a blast this strong
+  comboRadius: number;
+  comboKnockback: number;
   deckHeight: number; // >0: a second deck this far above the floor, with ramps up through slots in it
   planetPull: number; // m/s^2: a uniform pull fixed relative to the stars (a planet below); it sweeps round as the ring turns
   planetAngle: number; // direction of that pull in the non-rotating frame (radians about the axis)
@@ -261,6 +266,8 @@ export interface Player {
   prevButtons: number;
   lastInput: InputCmd;
   kills: number;
+  needles: number; // seeker hits taken recently (enough of them in a row supercombine)
+  needleTick: number; // tick of the last one
   deaths: number;
 }
 
@@ -446,6 +453,7 @@ export type SimEvent =
   | { type: 'mount'; id: number; vehicle: number; on: boolean }
   | { type: 'vehicleHit'; id: number; damage: number; pos: Vec3 }
   | { type: 'vehicleDestroyed'; id: number; pos: Vec3 }
+  | { type: 'supercombine'; id: number; pos: Vec3 }
   | { type: 'melee'; id: number; target: number; pos: Vec3; mallet: boolean; from: Vec3; aim: Vec3; up: Vec3; reach: number; cone: number }
   | { type: 'pickup'; id: number; item: ItemKind; player: number; pos: Vec3 }
   | { type: 'overheat'; id: number }

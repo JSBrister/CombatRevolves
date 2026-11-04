@@ -29,6 +29,11 @@ export const defaultConfig = (): SimConfig => ({
   tube: 'none', // 'inside' / 'half' / 'outside' a torus whose tube has radius tubeRadius
   tubeRadius: 20,
   floorHoles: 0, // holes in the floor you can fall out of
+  comboHits: 6, // Seeker Swarm: this many hits on one target, each within comboWindow s of the last,
+  comboWindow: 0.6, // ...set off a "supercombine" blast on them
+  comboDamage: 90,
+  comboRadius: 3,
+  comboKnockback: 14,
   deckHeight: 0, // >0: an upper deck this high above the floor
   planetPull: 0, // m/s^2: pull toward a planet below, fixed to the stars (sweeps round once per spin)
   planetAngle: 0, // which way the planet is (radians about the axis, non-rotating frame)
@@ -212,6 +217,10 @@ export const ENEMY_TYPES: Record<string, EnemyType> = {
   soldier: {
     name: 'Soldier', color: 0x8a3ad0, size: 1, health: 100, shield: 70, speedScale: 0.8, weapon: 'rifle',
     grenades: 1, bounceGrenades: 1, behaviour: 'strafe', range: 40, aimError: 0.06, aimSkill: 0.6,
+  },
+  swarmer: {
+    name: 'Swarmer', color: 0xff6ad8, size: 0.9, health: 80, shield: 50, speedScale: 0.9, weapon: 'seeker',
+    grenades: 0, bounceGrenades: 1, behaviour: 'strafe', range: 45, aimError: 0.08, aimSkill: 0,
   },
   skirmisher: {
     name: 'Skirmisher', color: 0xd03a3a, size: 0.9, health: 70, shield: 40, speedScale: 1.2, weapon: 'redRifle',

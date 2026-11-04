@@ -175,6 +175,9 @@ fG.add(cfg, 'grenadeFuse', 0.2, 5, 0.1).name('sticky fuse (s)');
 fG.add(cfg, 'bounceFuse', 0.2, 8, 0.1).name('bouncer fuse (s)');
 fG.add(cfg, 'bounceRestitution', 0, 1, 0.05).name('bouncer bounciness');
 fG.add(cfg, 'pickupRespawn', 1, 120, 1).name('pickup respawn (s)');
+fG.add(cfg, 'comboHits', 1, 30, 1).name('seeker supercombine: hits');
+fG.add(cfg, 'comboWindow', 0.05, 5, 0.05).name('...each within (s)');
+fG.add(cfg, 'comboDamage', 0, 500, 1).name('...blast damage');
 fG.add(cfg, 'dropLifetime', 1, 120, 1).name('dropped item lifetime (s)');
 
 const fB = gui.addFolder('Hover-bikes');
@@ -282,6 +285,7 @@ function handleEvent(e: SimEvent) {
       break;
     case 'stick': sfx.stick(d(e.pos)); break;
     case 'explode': sfx.explode(d(e.pos)); views.explosionFlash(e.pos); break;
+    case 'supercombine': views.burst(e.pos, 0xff6ad8, 4); sfx.explode(d(e.pos)); break;
     case 'hit':
       views.flashHit(e.target);
       if (e.attacker === localId && e.target !== localId) sfx.hit();

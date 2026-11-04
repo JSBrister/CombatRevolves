@@ -24,6 +24,7 @@ export interface EnemySpawn {
   along?: number; // or metres along the floor from the start (handy on Earth, where a degree is 1.7 km)
   z?: number; // metres across the ring
   stair?: number; // or: stand on this staircase's lookout
+  deck?: boolean; // stand on the upper deck (at angle/along, z) instead of the floor
 }
 
 export interface LevelDef {
@@ -114,6 +115,25 @@ export const LEVELS: LevelDef[] = [
       { type: 'soldier', along: 40, z: -15 }, { type: 'soldier', along: 55, z: 20 }, { type: 'grunt', along: 35, z: 5 },
       { type: 'grunt', along: 38, z: -5 }, { type: 'heavy', along: 90, z: 0 }, { type: 'skirmisher', along: -45, z: 10 },
       { type: 'sniper', stair: 1 },
+    ],
+  },
+  {
+    id: 'c7', mode: 'campaign', name: 'Double Trouble', seed: 707,
+    blurb: 'A ring with an upper deck. Swarmers up top fire homing seekers; get under the deck, or up the ramps and in close.',
+    config: { R: 150, halfWidth: 25, deckHeight: 10 }, vehicles: 0,
+    enemies: [
+      { type: 'grunt', along: 30, z: -6 }, { type: 'grunt', along: 34, z: 6 }, { type: 'soldier', along: 60, z: 0 },
+      { type: 'swarmer', along: 45, z: 5, deck: true }, { type: 'swarmer', along: -50, z: -5, deck: true },
+      { type: 'heavy', along: 110, z: 0 }, { type: 'skirmisher', along: -35, z: 8 },
+    ],
+  },
+  {
+    id: 'c8', mode: 'campaign', name: 'Log Jam', seed: 808,
+    blurb: 'Fighting on the outside of a spinning tube, 28 m across. Every hit knocks someone toward the edge, including you.',
+    config: { R: 100, halfWidth: 14, tube: 'outside', tubeRadius: 14 },
+    enemies: [
+      { type: 'grunt', along: 25, z: 0 }, { type: 'grunt', along: 28, z: 2 }, { type: 'skirmisher', along: -30, z: -2 },
+      { type: 'soldier', along: 55, z: 0 }, { type: 'swarmer', along: -60, z: 0 }, { type: 'heavy', along: 100, z: 0 },
     ],
   },
   // ------------------------------------------------------------ sandbox
@@ -236,6 +256,15 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
       p.infiniteAmmo = true; // never runs dry, but still has to reload
       p.grenades = t.grenades;
       p.bounceGrenades = t.bounceGrenades;
+      const dk = e.deck ? state.level.decks?.[0] : undefined;
+      if (dk) {
+        const a = startAngle + (e.along !== undefined ? e.along / cfg.R : ((e.angle ?? 0) * Math.PI) / 180);
+        const r = dk.r - standHeight(t.size);
+        p.pos = freeSpotNear(state, [r * Math.cos(a), r * Math.sin(a), e.z ?? 0], t.size);
+        p.yaw = (e.along ?? e.angle ?? 0) > 0 ? Math.PI : 0;
+        botIds.push(id);
+        continue;
+      }
       const top = e.stair !== undefined ? state.level.stairTops[e.stair % Math.max(1, state.level.stairTops.length)] : undefined;
       p.pos = freeSpotNear(state, top
         ? addScaled(top, localBasis(top).up, standHeight(t.size))

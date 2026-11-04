@@ -772,6 +772,7 @@ function updateBolts(state: SimState, omega: number) {
         const kb = cfg.weapons[BOLT_WEAPON[b.kind]].knockback * (b.kind === 'overcharge' ? 4 : 1);
         if (kb > 0) hit.player.vel = addScaled(hit.player.vel, norm(sub(b.vel, hit.player.vel)), kb);
         damagePlayer(state, hit.player, b.owner, b.damage, b.shieldDamage, b.kind);
+        if (b.kind === 'seeker') supercombine(state, hit.player, b.owner);
       } else if (hit.vehicle) {
         const kb = cfg.weapons[BOLT_WEAPON[b.kind]].knockback * (PLAYER_MASS / BIKE_MASS);
         hit.vehicle.vel = addScaled(hit.vehicle.vel, norm(sub(b.vel, hit.vehicle.vel)), kb);
@@ -793,6 +794,17 @@ function updateBolts(state: SimState, omega: number) {
     if (!dead) keep.push(b);
   }
   state.bolts = keep;
+}
+
+/** Seeker hits in quick succession on one target add up to a big blast on them. */
+function supercombine(state: SimState, q: Player, owner: number) {
+  const cfg = state.config;
+  q.needles = state.tick - q.needleTick <= secs(cfg.comboWindow) ? q.needles + 1 : 1;
+  q.needleTick = state.tick;
+  if (q.needles < cfg.comboHits || !q.alive) return;
+  q.needles = 0;
+  state.events.push({ type: 'supercombine', id: q.id, pos: clone(q.pos) });
+  detonate(state, q.pos, owner, -1, { radius: cfg.comboRadius, damage: cfg.comboDamage, knockback: cfg.comboKnockback }, 'supercombine');
 }
 
 /**

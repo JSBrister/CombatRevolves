@@ -34,7 +34,7 @@ hover gun, bots) only appears while paused.
 | 6 | Laconic Laser | Superweapon: hold to charge (1.2 s), then it streams very fast red bolts for 0.5 s. You move and aim slowly the whole time. Most of a stream kills. |
 | 7 | Grav Mallet | Melee weapon: a wide swing (3.2 m reach) that hits everything in the arc in front of you (shown briefly): 90 damage and a 28 m/s shove to people, a knock to bikes, and loose grenades get batted away (they're yours now). |
 | 8 | Torch Rocket | A real rocket: leaves at 20 m/s, then its motor pushes it along its nose at 70 m/s² for 1.5 s. The nose starts where you aimed and keeps its direction relative to the stars, so in the ring's frame it slowly turns against the spin. Big blast. 2-round magazine. |
-| 9 | Seeker Swarm | Hold for a stream of little homing rockets. Each steers its nose toward the nearest enemy within 50° of it, cancelling its own drift and the spin's pull, so it can actually hit. Small blasts. |
+| 9 | Seeker Swarm | Hold for a stream of little homing rockets. Each steers its nose toward the nearest enemy within 50° of it, cancelling its own drift and the spin's pull, so it can actually hit. Small blasts; 6 hits on one target in quick succession *supercombine* into a big one. |
 | — | Hover gun | Debug only: fires a bolt at rest in the inertial frame. |
 
 Every hit gives a small kick along the bolt's path (tunable per weapon). A reload carries on if you switch weapons. **Q** is a melee shove with any weapon: short
@@ -84,6 +84,7 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 - **Shadows:** one shadow-casting sun that follows the camera. On rings the sun is fixed relative to the stars, 40° off the axis, so in the ring's frame it circles once per spin: each spot gets a day, with long shadows sweeping round, and a night.
 - **Atmosphere** is off everywhere except the *Hazy ring* sandbox level (quadratic drag relative to the air, which moves with the floor).
 - **Levels** are data (`levels.ts`): a ring size and seed fix the layout; enemies are placed by angle and z, or on a ramp's lookout platform; a placement that lands inside cover is nudged clear. `level.shape` is the seam for other kinds of world (only `'ring'` exists): the collision shape, force field and renderer switch on it.
+- **Campaign levels 7 and 8:** *Double Trouble* (Swarmers with seekers on an upper deck) and *Log Jam* (a fight on the outside of a tube, where enemies sometimes blow themselves off).
 - **Campaign rules:** teams (you vs enemies) with friendly fire off, no respawns, won when every enemy is dead, lost when you die. Enemy types differ in size (their hitbox scales too), colour, health, speed, weapon, range, accuracy and behaviour (chase, strafe, hold).
 - **Ring size** scales the map: rim walls are capped at 40% of the radius, ramps and cover shrink on small rings.
 - **Obstacle boxes** are axis-aligned in the *local frame* of their ring angle, not in world XYZ. World-aligned boxes would sit crooked on a curved floor.

@@ -1427,6 +1427,28 @@ describe('29. rockets', () => {
     expect(shoot('seeker')).toBe(true);
     expect(shoot('rocket')).toBe(false);
   });
+  it('enough seeker hits in quick succession supercombine; spread out, they do not', () => {
+    const pelt = (gapTicks: number) => {
+      const s = empty();
+      const a = addPlayer(s, 'human', 'A'), t = addPlayer(s, 'human', 'T');
+      run(s, 20);
+      const T = s.players.find((q) => q.id === t)!;
+      T.maxHealth = T.health = 1e6;
+      let combos = 0;
+      for (let i = 0; i < s.config.comboHits; i++) {
+        const b = localBasis(T.pos);
+        spawnBolt(s, a, 'seeker', addScaled(T.pos, b.spin, -2), scale(b.spin, 30), b.spin);
+        for (let k = 0; k < gapTicks; k++) {
+          step(s, [], s.tick);
+          combos += s.events.filter((e) => e.type === 'supercombine').length;
+          T.vel = [0, 0, 0];
+        }
+      }
+      return combos;
+    };
+    expect(pelt(12)).toBe(1);
+    expect(pelt(120)).toBe(0);
+  });
 });
 
 describe('30. inside a sphere, and the ridge', () => {
