@@ -73,6 +73,7 @@ export class RingScene {
     floorGeo.rotateX(Math.PI / 2);
     if (level.terrain) {
       this.level.add(this.terrainMesh(cfg, level));
+      if (level.terrain.sphere && W > 0.9 * R) this.sphereMarkings(cfg);
     } else {
       const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ map: deck, side: THREE.BackSide, roughness: 0.85, metalness: 0.2 }));
       floor.receiveShadow = true;
@@ -228,12 +229,40 @@ export class RingScene {
     this.level.add(sun);
   }
 
+  /**
+   * Inside a whole sphere there's no sky to read the shape from: a glowing
+   * line along the axis (it lights the place, like a sun stretched pole to
+   * pole) and painted latitude rings every 15 degrees. The orange ring at
+   * ~53 degrees is where the floor gets too steep to stand on.
+   */
+  private sphereMarkings(cfg: SimConfig) {
+    const R = cfg.R;
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 2 * R, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff1c0, fog: false }));
+    rod.rotation.x = Math.PI / 2;
+    const halo = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 2 * R, 16, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xffd890, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    halo.rotation.x = Math.PI / 2;
+    this.level.add(rod, halo);
+    const ring = (lat: number, color: number) => {
+      const pts: THREE.Vector3[] = [];
+      const r = (R - 0.05) * Math.cos(lat), z = (R - 0.05) * Math.sin(lat);
+      for (let i = 0; i <= 256; i++) { const a = (i / 256) * Math.PI * 2; pts.push(new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), z)); }
+      this.level.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, fog: true })));
+    };
+    for (let deg = -75; deg <= 75; deg += 15) ring((deg * Math.PI) / 180, deg === 0 ? 0xc9a43a : 0x8a96a8);
+    const steep = Math.acos(0.6); // the walkable limit (ground normal within ~53 degrees of "up")
+    for (const sg of [-1, 1]) ring(sg * steep, 0xff5a2a);
+  }
+
   /** The floor as a mesh following the terrain (hills / sphere band). */
   private terrainMesh(cfg: SimConfig, level: Level): THREE.Mesh {
     const R = cfg.R, W = cfg.halfWidth + cfg.wallThickness;
     const span = 2 * Math.PI * R;
     const nu = Math.min(1400, Math.max(96, Math.round(span / 1.5)));
-    const nv = Math.min(120, Math.max(8, Math.round((2 * W) / 1.5)));
+    const sphere = level.terrain!.sphere;
+    // on a sphere, rows are evenly spaced in latitude (z = R sin(lat)), so the poles stay smooth
+    const latMax = sphere ? Math.asin(Math.min(1, cfg.halfWidth / R)) : 0;
+    const nv = sphere ? Math.min(160, Math.max(16, Math.round((2 * latMax * R) / 2))) : Math.min(120, Math.max(8, Math.round((2 * W) / 1.5)));
     const pos = new Float32Array((nu + 1) * (nv + 1) * 3);
     const uv = new Float32Array((nu + 1) * (nv + 1) * 2);
     const tile = level.terrain!.hills.length ? 4 : 5;
@@ -241,7 +270,7 @@ export class RingScene {
     for (let i = 0; i <= nu; i++) {
       const a = (i / nu) * Math.PI * 2;
       for (let j = 0; j <= nv; j++) {
-        const z = -W + (2 * W * j) / nv;
+        const z = sphere ? R * Math.sin(-latMax + (2 * latMax * j) / nv) : -W + (2 * W * j) / nv;
         const r = floorRadius(level, cfg, a, z);
         pos[k * 3] = r * Math.cos(a); pos[k * 3 + 1] = r * Math.sin(a); pos[k * 3 + 2] = z;
         uv[k * 2] = (a * R) / tile; uv[k * 2 + 1] = z / tile;
@@ -284,12 +313,13 @@ export class RingScene {
       const h = heights[i];
       const a0 = i * step;
       const isLow = h < cfg.wallHeight * 0.5;
-      const inner = new THREE.Mesh(new THREE.RingGeometry(R - h, R, segsPer, 1, a0, step), isLow ? low : tall);
+      const rIn = Math.max(0, R - h); // (a wall taller than the floor radius closes a sphere's pole)
+      const inner = new THREE.Mesh(new THREE.RingGeometry(rIn, R, segsPer, 1, a0, step), isLow ? low : tall);
       inner.position.z = sgn * W;
-      const outer = new THREE.Mesh(new THREE.RingGeometry(R - h, cfg.R + hull, segsPer, 1, a0, step), outerMat);
+      const outer = new THREE.Mesh(new THREE.RingGeometry(rIn, cfg.R + hull, segsPer, 1, a0, step), outerMat);
       outer.position.z = sgn * (W + T);
       // Cylinder theta 0 maps to ring angle -pi/2 after rotateX(pi/2).
-      const topGeo = new THREE.CylinderGeometry(R - h, R - h, T, segsPer, 1, true, a0 + Math.PI / 2, step);
+      const topGeo = new THREE.CylinderGeometry(Math.max(0.01, rIn), Math.max(0.01, rIn), T, segsPer, 1, true, a0 + Math.PI / 2, step);
       topGeo.rotateX(Math.PI / 2);
       topGeo.translate(0, 0, sgn * (W + T / 2));
       this.level.add(inner, outer, new THREE.Mesh(topGeo, isLow ? topLow : topTall));

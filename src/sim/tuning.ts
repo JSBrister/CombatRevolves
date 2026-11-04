@@ -24,6 +24,8 @@ export const defaultConfig = (): SimConfig => ({
   terrainSphere: false, // true = the floor is a band round the inside of a sphere (bowl-shaped across)
   hills: 0, // number of rolling hills on the floor
   hillHeight: 8, // tallest hill (m)
+  ridgeHeight: 0, // a ridge along the middle, this high (m): the floor's cross-section becomes a Lambda
+  ridgePlateau: 12, // how rounded its top is (m)
   planetPull: 0, // m/s^2: pull toward a planet below, fixed to the stars (sweeps round once per spin)
   planetAngle: 0, // which way the planet is (radians about the axis, non-rotating frame)
   gravity: 0, // real gravity pulling toward the floor (m/s^2): 0 on rings, 9.81 on Earth

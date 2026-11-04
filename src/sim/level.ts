@@ -89,6 +89,18 @@ function rimWall(p: Vec3, rho: number, theta: number, heights: number[], R: numb
  */
 function terrainFloor(level: Level, cfg: SimConfig, p: Vec3, rho: number, theta: number, out: SdfHit) {
   const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness;
+  const tr = level.terrain!;
+  if (tr.sphere && !tr.hills.length && !tr.ridge) {
+    // a plain sphere: the exact distance (the height-field estimate breaks down near the poles)
+    const r = Math.hypot(p[0], p[1], p[2]);
+    const d = Math.max(R - r, Math.abs(p[2]) - (W + T), rho - (R + cfg.hullThickness));
+    if (d >= out.d) return;
+    out.d = d;
+    if (d === R - r) out.n = r > 1e-9 ? [-p[0] / r, -p[1] / r, -p[2] / r] : [0, 0, 1];
+    else if (d === rho - (R + cfg.hullThickness)) out.n = [p[0] / Math.max(rho, 1e-9), p[1] / Math.max(rho, 1e-9), 0];
+    else out.n = [0, 0, Math.sign(p[2]) || 1];
+    return;
+  }
   const t = terrainAt(level, cfg, theta, p[2]);
   const F = rho - (R - t.h);
   // grad F = r_hat + dh/ds * spin_hat + dh/dz * z_hat
@@ -262,9 +274,13 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     angle: arcAngle(cfg, (s + 0.5) / nRamps0 + (cfg.arena > 0 ? 0 : 1 / 16)),
     halfArc: (H0 / RAMP_SLOPE + STAIR_TOP) / 2 + 2,
   }));
-  const terrain = cfg.terrainSphere || cfg.hills > 0
-    ? { sphere: cfg.terrainSphere, hills: makeHills(cfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), rampClear) }
+  const ridge = cfg.ridgeHeight > 0 ? { height: cfg.ridgeHeight, plateau: cfg.ridgePlateau } : undefined;
+  const terrain = cfg.terrainSphere || cfg.hills > 0 || ridge
+    ? { sphere: cfg.terrainSphere, hills: makeHills(cfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), rampClear), ...(ridge ? { ridge } : {}) }
     : null;
+  // Ramps and mesas need flat ground; on a sphere keep clutter to the lower latitudes.
+  const steep = !!ridge;
+  const Wp = cfg.terrainSphere ? Math.min(cfg.halfWidth, 0.45 * R) : cfg.halfWidth;
   const probe: Level = { shape: 'ring', terrain, boxes, stairTops: [], spawns, pickupSpots: [], vehicleSpots: [], wallPos: [], wallNeg: [] };
   /** Floor radius here (R on a flat floor). */
   const Rf = (angle: number, z: number) => floorRadius(probe, cfg, angle, z);
@@ -325,10 +341,9 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   }
   if (withObstacles) {
     const circ = playSpan(cfg);
-    const widthScale = Math.max(1, cfg.halfWidth / 20); // wider floors get more stuff
     // Ramps up to lookout platforms, midway between spawn points, alternating
     // which way they climb (climbing spinward vs antispinward feels different!).
-    const nStairs = Math.max(2, Math.min(12, Math.round(circ / 150)));
+    const nStairs = steep ? 0 : Math.max(2, Math.min(12, Math.round(circ / 150)));
     const H = Math.max(2, Math.min(LOOKOUT_HEIGHT, 0.3 * R)); // lookout height
     const rampLen = H / RAMP_SLOPE;
     const topItems: ItemKind[] = ['cannon', 'jetpack', 'hammer'];
@@ -365,13 +380,13 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     }
     // Mesas: low raised platforms with a ramp, for some verticality on bigger rings.
     const angDist = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) * R;
-    const nMesas = Math.min(40, Math.floor((circ / 80) * widthScale));
+    const nMesas = steep ? 0 : Math.min(40, Math.floor((circ / 80) * Math.max(1, Wp / 20)));
     const mh = Math.min(MESA_HEIGHT, 0.15 * R);
     for (let i = 0; i < nMesas; i++) {
       const plat = rngRange(rng, 6, 9);
       const width = rngRange(rng, 5, 8);
       const dir = rngNext(rng) < 0.5 ? 1 : -1;
-      const z = rngRange(rng, -cfg.halfWidth + width / 2 + 2, cfg.halfWidth - width / 2 - 2);
+      const z = rngRange(rng, -Wp + width / 2 + 2, Wp - width / 2 - 2);
       const rampLen = mh / RAMP_SLOPE;
       const total = rampLen + plat;
       const mid = arcAngle(cfg, (i + rngRange(rng, 0.25, 0.75)) / nMesas);
@@ -387,7 +402,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       addBox(topAngle, z, plat / 2, mh / 2, width / 2, 'ramp');
       stairs.push({ angle: mid, halfArc: total / 2 });
     }
-    const count = Math.max(4, Math.min(300, Math.round((circ / 16) * widthScale)));
+    const count = Math.max(4, Math.min(300, Math.round((circ / 16) * Math.max(1, Wp / 20))));
     for (let i = 0; i < count; i++) {
       const angle = arcAngle(cfg, (i + rngRange(rng, 0.2, 0.8)) / count);
       // keep spawns clear
@@ -399,7 +414,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       if (nearPickup) continue;
       if (vehicleSpots.some((sp) => Math.abs(Math.atan2(Math.sin(angle - Math.atan2(sp.pos[1], sp.pos[0])), Math.cos(angle - Math.atan2(sp.pos[1], sp.pos[0])))) * R < 5)) continue;
       const kind = rngNext(rng);
-      const z = rngRange(rng, -cfg.halfWidth + 4, cfg.halfWidth - 4);
+      const z = rngRange(rng, -Wp + 4, Wp - 4);
       if (kind < 0.5) addBox(angle, z, rngRange(rng, 0.8, 2.2), rngRange(rng, 0.5, 0.9) * k, rngRange(rng, 1.5, 3.5)); // low cover
       else if (kind < 0.8) addBox(angle, z, rngRange(rng, 1, 1.6), rngRange(rng, 1.8, 3) * k, rngRange(rng, 1, 1.6)); // pillar
       else addBox(angle, z, rngRange(rng, 3, 5) * Math.max(k, 0.5), rngRange(rng, 0.4, 0.6) * k, rngRange(rng, 3, 5)); // low platform

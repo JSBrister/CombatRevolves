@@ -16,6 +16,8 @@ export interface SimConfig {
   terrainSphere: boolean; // floor is a band round the inside of a sphere of radius R (curves up at the edges)
   hills: number; // how many Gaussian hills on the floor (0 = flat)
   hillHeight: number; // tallest hill (m)
+  ridgeHeight: number; // a ridge along the middle of the ring, this high (m): a Lambda-shaped cross-section
+  ridgePlateau: number; // how rounded the ridge's top is (m)
   planetPull: number; // m/s^2: a uniform pull fixed relative to the stars (a planet below); it sweeps round as the ring turns
   planetAngle: number; // direction of that pull in the non-rotating frame (radians about the axis)
   gravity: number; // real gravity toward the floor (m/s^2), on top of any spin. 0 on a normal ring.
@@ -388,7 +390,7 @@ export interface Hill {
 
 export interface Level {
   shape: LevelShape;
-  terrain: { sphere: boolean; hills: Hill[] } | null; // null = flat cylinder floor
+  terrain: { sphere: boolean; hills: Hill[]; ridge?: { height: number; plateau: number } } | null; // null = flat cylinder floor
   boxes: Box[];
   stairTops: Vec3[]; // a floor point on each staircase's lookout (add stand height to place a player)
   spawns: SpawnPoint[];

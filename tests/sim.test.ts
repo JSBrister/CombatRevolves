@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, scale, addVehicle, WEAPON_ROCKET, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, scale, addVehicle, WEAPON_ROCKET, terrainAt, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1125,7 +1125,7 @@ describe('24. terrain: hills and the sphere band', () => {
     expect(Math.abs(p.apparentG - Math.cos(lat) ** 2)).toBeLessThan(0.08);
   });
   it('every terrain level builds and its players settle on the ground', () => {
-    for (const id of ['s-hills', 's-bowl', 's-wide', 'c6']) {
+    for (const id of ['s-hills', 's-bowl', 's-wide', 'c6', 's-sphere', 's-ridge']) {
       const { state, localId } = startLevel(levelById(id)!);
       run(state, 120, (st) => [cmdFor(st, localId)]);
       for (const p of state.players) {
@@ -1426,5 +1426,67 @@ describe('29. rockets', () => {
     };
     expect(shoot('seeker')).toBe(true);
     expect(shoot('rocket')).toBe(false);
+  });
+});
+
+describe('30. inside a sphere, and the ridge', () => {
+  const solo = (id: string) => {
+    const { state, localId } = startLevel(levelById(id)!);
+    state.players = state.players.filter((p) => p.id === localId);
+    state.level.boxes = [];
+    return { s: state, id: localId, p: state.players[0] };
+  };
+  /** Put the player on the sphere's floor at this latitude. */
+  const onSphere = (s: SimState, p: { pos: Vec3; vel: Vec3 }, lat: number) => {
+    const R = s.config.R;
+    const r = R - 0.95; // along the sphere's radius (the floor normal there)
+    p.pos = [r * Math.cos(lat), 0, r * Math.sin(lat)];
+    p.vel = [0, 0, 0];
+  };
+  it('sphere: at 30 degrees you stand in g cos^2(lat); at 65 degrees you slide down toward the equator', () => {
+    const { s, id, p } = solo('s-sphere');
+    onSphere(s, p, Math.PI / 6);
+    run(s, 240, () => [cmdFor(s, id)]);
+    expect(p.grounded).toBe(true);
+    expect(Math.abs(p.apparentG - 0.75)).toBeLessThan(0.08);
+    onSphere(s, p, (65 * Math.PI) / 180);
+    const z0 = p.pos[2];
+    run(s, 480, () => [cmdFor(s, id)]);
+    expect(p.pos[2]).toBeLessThan(z0 - 5);
+    expect(p.alive).toBe(true);
+  });
+  it('sphere: the poles are closed, and near them you are almost weightless', () => {
+    const { s, id, p } = solo('s-sphere');
+    const R = s.config.R;
+    // a ball dropped near the pole drifts, very slowly, and never leaves the sphere
+    p.pos = [6, 0, R - 8];
+    p.vel = [0, 0, 6]; // straight at the pole
+    let maxR = 0;
+    for (let i = 0; i < 120 * 20; i++) {
+      step(s, [cmdFor(s, id)], s.tick);
+      maxR = Math.max(maxR, Math.hypot(...p.pos));
+    }
+    expect(p.alive).toBe(true);
+    expect(maxR).toBeLessThan(R + 0.5);
+  });
+  it('ridge: half the weight on the crest; on the 40-degree flank the floor carries g cos(slope)', () => {
+    const { s, id, p } = solo('s-ridge');
+    const R = s.config.R;
+    const stand = (z: number) => {
+      const h = s.config.ridgeHeight; // crest height at z = 0; near the walls the floor is at R
+      const r = z === 0 ? R - h - 0.9 : R - 0.9 - 3;
+      p.pos = [r, 0, z];
+      p.vel = [0, 0, 0];
+      run(s, 360, () => [cmdFor(s, id)]);
+      return p.apparentG;
+    };
+    expect(Math.abs(stand(0) - 0.5)).toBeLessThan(0.05);
+    expect(p.grounded).toBe(true);
+    const z = s.config.halfWidth - 3;
+    const g = stand(z);
+    expect(p.grounded).toBe(true);
+    const t = terrainAt(s.level, s.config, 0, z);
+    const expected = ((R - t.h) / R) * Math.cos(Math.atan(Math.abs(t.dhdz)));
+    expect(Math.abs(g - expected)).toBeLessThan(0.03);
   });
 });

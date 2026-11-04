@@ -134,6 +134,11 @@ export const LEVELS: LevelDef[] = [
   { id: 's-bowl', mode: 'sandbox', name: 'Bowl World (sphere band)', seed: 32, config: { R: 80, halfWidth: 55, terrainSphere: true, wallHeight: 3 },
     variedWalls: false, bots: 2,
     blurb: 'A band round the inside of a spinning sphere, out to 43 degrees latitude. The edges are hills you climb in weaker gravity (g cos^2 of your latitude).' },
+  { id: 's-sphere', mode: 'sandbox', name: 'Inside a Sphere (160 m)', seed: 35, config: { R: 160, halfWidth: 159, terrainSphere: true, wallHeight: 64 },
+    variedWalls: false, bots: 3,
+    blurb: 'The whole inside of a spinning sphere. Gravity is g cos^2 of your latitude; past ~53 degrees the floor is too steep to stand on, and at the poles you float. Jetpacks and bikes recommended.' },
+  { id: 's-ridge', mode: 'sandbox', name: 'The Ridge (Lambda)', seed: 36, config: { R: 240, halfWidth: 150, ridgeHeight: 120, ridgePlateau: 12 }, bots: 4,
+    blurb: 'A 120 m ridge runs round the middle of a 240 m ring: the floor is a Lambda in cross-section. Gravity on the crest is half what it is at the foot, and the slopes are 40 degrees.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
     blurb: '140 m across: room to flank, and to watch your shots curve sideways.' },
   { id: 's-planet', mode: 'sandbox', name: 'Skyhook (planet below)', seed: 34, config: { R: 100, planetPull: 8.8, planetAngle: Math.PI }, bots: 2,
@@ -145,7 +150,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'ridgeHeight', 'ridgePlateau', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 

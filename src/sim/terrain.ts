@@ -23,6 +23,17 @@ export function terrainAt(level: Level, cfg: SimConfig, angle: number, z: number
     h += R - root;
     dhdz += (Math.sign(z) * zz) / root;
   }
+  if (t.ridge && t.ridge.height > 0) {
+    // Lambda: straight flanks from the rim walls up to a rounded crest along z = 0
+    const c = t.ridge.plateau, W = cfg.halfWidth;
+    const span = Math.sqrt(W * W + c * c) - c; // so the flanks reach the floor exactly at the walls
+    const q = Math.sqrt(z * z + c * c);
+    const u = (q - c) / span;
+    if (u < 1) {
+      h += t.ridge.height * (1 - u);
+      dhdz -= (t.ridge.height / span) * (z / q);
+    }
+  }
   for (const hl of t.hills) {
     const ds = wrap(angle - hl.angle) * cfg.R;
     const dz = z - hl.z;
