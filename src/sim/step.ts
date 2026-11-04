@@ -10,7 +10,7 @@ import {
   BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
   omegaOf,
   type Bolt, type BoltKind, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
-  type Outcome, type Player, type Prop, type SimConfig, type SimState, type Vehicle, type WeaponId,
+  type Outcome, type Player, type Prop, type SimConfig, type SimState, type Vehicle, type WeaponId, type WeaponStats,
 } from './types';
 import { type Vec3, add, addScaled, clone, dist, dot, len, norm, rhoOf, scale, sub } from './vec';
 import {
@@ -33,11 +33,13 @@ const PISTOL_CHARGE_DELAY = 30; // ticks of holding before the overcharge starts
 /** Which weapon's stats a bolt kind uses. */
 export const BOLT_WEAPON: Record<BoltKind, WeaponId> = {
   rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', overcharge: 'pistol', fuelRod: 'launcher', cannon: 'cannon', laconic: 'laconic',
-  hover: 'hover',
+  rocket: 'rocket', seeker: 'seeker', hover: 'hover',
 };
 const WEAPON_BOLT: Record<Exclude<WeaponId, 'hammer'>, BoltKind> = {
-  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', cannon: 'cannon', laconic: 'laconic', hover: 'hover',
+  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', cannon: 'cannon', laconic: 'laconic', rocket: 'rocket', seeker: 'seeker', hover: 'hover',
 };
+/** Bolts that carry their own motor. */
+export const isRocket = (kind: BoltKind) => kind === 'rocket' || kind === 'seeker';
 
 /** Muzzle speed, damage, radius and lifetime of a bolt kind, from the live config. */
 export function boltStats(cfg: SimConfig, kind: BoltKind) {
@@ -73,13 +75,17 @@ export function launchVelocity(cfg: SimConfig, p: Player, kind: BoltKind | Throw
   return addScaled(p.vel, aim, muzzleSpeed(cfg, kind));
 }
 
-/** Spawn helpers (also used by tests). */
-export function spawnBolt(state: SimState, owner: number, kind: BoltKind, pos: Vec3, vel: Vec3): Bolt {
+/** Spawn helpers (also used by tests). A rocket's nose starts along `dir` (default: its velocity). */
+export function spawnBolt(state: SimState, owner: number, kind: BoltKind, pos: Vec3, vel: Vec3, dir?: Vec3): Bolt {
   const spec = boltStats(state.config, kind);
+  const rocket = isRocket(kind);
   const b: Bolt = {
     id: allocId(state), type: 'bolt', kind, owner, pos: clone(pos), vel: clone(vel), launchVel: clone(vel),
     radius: spec.radius, damage: spec.damage, shieldDamage: spec.shieldDamage,
     armed: owner < 0, spawnTick: state.tick, expireTick: state.tick + secs(Math.min(spec.lifetime, state.config.projectileLifetime)),
+    dir: rocket ? norm(dir ?? vel) : null,
+    burnUntil: rocket ? state.tick + 1 + secs(state.config.weapons[BOLT_WEAPON[kind]].burnTime) : 0, // (it first moves next tick)
+    target: -1,
   };
   state.bolts.push(b);
   return b;
@@ -548,10 +554,12 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
   switch (id) {
     case 'rifle':
     case 'redRifle':
+    case 'seeker': // hold for a stream of homing rockets
       if (held && ready) shoot(WEAPON_BOLT[id], st.heatPerShot, st.interval);
       break;
     case 'launcher':
     case 'cannon':
+    case 'rocket':
     case 'hover':
       if (pressed & BTN_FIRE && ready) shoot(WEAPON_BOLT[id], st.heatPerShot, st.interval);
       break;
@@ -685,7 +693,8 @@ function swing(state: SimState, p: Player, damage: number, knockback: number, re
 
 function fireBolt(state: SimState, p: Player, kind: BoltKind) {
   const from = muzzlePoint(p);
-  spawnBolt(state, p.id, kind, from, launchVelocity(state.config, p, kind, from));
+  // a rocket's nose points where you aim, whatever your own motion adds to its launch velocity
+  spawnBolt(state, p.id, kind, from, launchVelocity(state.config, p, kind, from), viewVectors(p.pos, p.yaw, p.pitch).aim);
   state.events.push({ type: 'fire', owner: p.id, kind, pos: from });
 }
 
@@ -742,9 +751,15 @@ function updateBolts(state: SimState, omega: number) {
   const keep: Bolt[] = [];
   for (const b of state.bolts) {
     if (b.spawnTick === state.tick) { keep.push(b); continue; }
-    if (state.tick >= b.expireTick) continue;
+    const ws = cfg.weapons[BOLT_WEAPON[b.kind]];
+    if (state.tick >= b.expireTick) {
+      // rockets blow up when they time out; plasma just fizzles
+      if (b.dir && ws.blastRadius > 0) detonate(state, b.pos, b.owner, b.id, { radius: ws.blastRadius, damage: ws.blastDamage, knockback: ws.blastKnockback }, b.kind);
+      continue;
+    }
     const p0 = clone(b.pos);
-    advanceFree(b.pos, b.vel, DT, omega, cfg, pull);
+    if (b.dir) moveRocket(state, b, ws, omega);
+    else advanceFree(b.pos, b.vel, DT, omega, cfg, pull);
     const hit = sweep(state, p0, b.pos, b.radius, b.owner, b.armed);
     if (hit) {
       if (hit.player) {
@@ -762,9 +777,8 @@ function updateBolts(state: SimState, omega: number) {
         hit.prop.contactNormal = null;
       }
       state.events.push({ type: 'impact', pos: hit.pos, kind: b.kind, target: hit.player?.id ?? hit.prop?.id ?? hit.vehicle?.id ?? -1, owner: b.owner });
-      if (b.kind === 'fuelRod') {
-        const w = cfg.weapons.launcher;
-        detonate(state, hit.pos, b.owner, b.id, { radius: w.blastRadius, damage: w.blastDamage, knockback: w.blastKnockback }, 'fuel rod');
+      if (ws.blastRadius > 0 && (b.kind === 'fuelRod' || b.dir)) {
+        detonate(state, hit.pos, b.owner, b.id, { radius: ws.blastRadius, damage: ws.blastDamage, knockback: ws.blastKnockback }, b.kind === 'fuelRod' ? 'fuel rod' : b.kind);
       }
       continue;
     }
@@ -774,6 +788,78 @@ function updateBolts(state: SimState, omega: number) {
     if (!dead) keep.push(b);
   }
   state.bolts = keep;
+}
+
+/**
+ * A rocket: real physics plus its motor. Nothing turns it, so its nose keeps
+ * its direction relative to the stars: in the ring's frame that direction
+ * turns at -omega about the axis. While the motor burns it pushes along the
+ * nose. A homing rocket also steers its nose (at up to turnRate) so that its
+ * velocity relative to the target lines up with the line of sight: it cancels
+ * sideways drift rather than just pointing at you, which is how it can hit.
+ */
+function moveRocket(state: SimState, b: Bolt, ws: WeaponStats, omega: number) {
+  const dir = b.dir!;
+  // inertial orientation: rotate by -omega*DT about +Z
+  const c = Math.cos(-omega * DT), sn = Math.sin(-omega * DT);
+  let d: Vec3 = [c * dir[0] - sn * dir[1], sn * dir[0] + c * dir[1], dir[2]];
+  if (ws.turnRate > 0) {
+    // keep a lock while the target is still ahead of the rocket's motion; otherwise look for one
+    let tgt: Player | null = null;
+    if (b.target >= 0) {
+      const q = state.players.find((x) => x.id === b.target);
+      if (q && q.alive) {
+        const to = sub(q.pos, b.pos);
+        if (len(to) < ws.seekRange * 1.5 && dot(to, sub(b.vel, q.vel)) > 0) tgt = q;
+      }
+    }
+    tgt ??= seekTarget(state, b, d, ws);
+    b.target = tgt?.id ?? -1;
+    if (tgt) {
+      const los = norm(sub(tgt.pos, b.pos));
+      const rel = sub(b.vel, tgt.vel);
+      const drift = sub(rel, scale(los, dot(rel, los))); // velocity across the line of sight
+      // the acceleration we'd like (kill the drift, keep closing), minus what the
+      // spin (and any planet) is already doing to us: thrust makes up the difference
+      const aWant = sub(scale(los, 0.4 * ws.thrust), scale(drift, 3));
+      const want = norm(sub(aWant, fictitiousAccel(b.pos, b.vel, omega, state.config, pull)));
+      d = turnToward(d, want, ws.turnRate * DT);
+    }
+  }
+  b.dir = d;
+  const burning = state.tick < b.burnUntil;
+  const push: Vec3 | null = burning ? scale(d, ws.thrust) : null;
+  const extra = push ? (pull ? add(push, pull) : push) : pull;
+  integrate(b.pos, b.vel, DT, omega, state.config, null, extra);
+}
+
+/** Nearest enemy of the rocket's owner within its seeker cone. */
+function seekTarget(state: SimState, b: Bolt, nose: Vec3, ws: WeaponStats): Player | null {
+  const owner = state.players.find((q) => q.id === b.owner);
+  const cosMax = Math.cos((ws.seekAngle * Math.PI) / 180);
+  let best: Player | null = null;
+  let bestD = ws.seekRange;
+  for (const q of state.players) {
+    if (!q.alive || q.id === b.owner || q.kind === 'dummy') continue;
+    if (owner && q.team === owner.team && !state.config.friendlyFire) continue;
+    const to = sub(q.pos, b.pos);
+    const d = len(to);
+    if (d > bestD || d < 1e-6 || dot(to, nose) / d < cosMax) continue;
+    bestD = d;
+    best = q;
+  }
+  return best;
+}
+
+/** Rotate unit vector `a` toward unit vector `b` by at most `maxAngle`. */
+function turnToward(a: Vec3, b: Vec3, maxAngle: number): Vec3 {
+  const cosT = Math.max(-1, Math.min(1, dot(a, b)));
+  const t = Math.acos(cosT);
+  if (t <= maxAngle || t < 1e-9) return b;
+  // slerp by maxAngle / t
+  const f = maxAngle / t, st = Math.sin(t);
+  const ka = Math.sin((1 - f) * t) / st, kb = Math.sin(f * t) / st;
+  return norm(add(scale(a, ka), scale(b, kb)));
 }
 
 function updateGrenades(state: SimState, omega: number) {

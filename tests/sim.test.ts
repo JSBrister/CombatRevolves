@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, scale, addVehicle, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, scale, addVehicle, WEAPON_ROCKET, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1356,5 +1356,75 @@ describe('28. reloads carry on when you switch weapons', () => {
     const before = p.mag[WEAPON_LAUNCHER];
     run(s, 2, () => [cmdFor(s, id, { weapon: WEAPON_LAUNCHER, buttons: BTN_FIRE })]);
     expect(p.mag[WEAPON_LAUNCHER]).toBe(before - 1);
+  });
+});
+
+describe('29. rockets', () => {
+  /** Rotating-frame vector -> inertial, at this frame angle. */
+  const toInertial = (v: Vec3, fa: number): Vec3 => [Math.cos(fa) * v[0] - Math.sin(fa) * v[1], Math.sin(fa) * v[0] + Math.cos(fa) * v[1], v[2]];
+  it('the nose keeps its direction relative to the stars; the motor adds thrust x burn time, inertially', () => {
+    const s = empty({ R: 1000 });
+    const w = omegaOf(s.config);
+    run(s, 37); // start at an odd frame angle
+    const r: Vec3 = [500, 0, 0];
+    const atRest: Vec3 = [w * r[1], -w * r[0], 0]; // at rest in the inertial frame
+    const nose: Vec3 = [0.6, 0.8, 0];
+    const b = spawnBolt(s, -1, 'rocket', r, atRest, nose);
+    run(s, 1); // a bolt first moves on the tick after it's fired
+    const nose0 = toInertial(nose, s.frameAngle);
+    const ws = s.config.weapons.rocket;
+    run(s, Math.round(ws.burnTime / DT) + 20);
+    expect(s.bolts).toContain(b);
+    expect(s.tick).toBeGreaterThan(b.burnUntil);
+    const n1 = toInertial(b.dir!, s.frameAngle);
+    for (let i = 0; i < 3; i++) expect(n1[i]).toBeCloseTo(nose0[i], 9);
+    // inertial velocity: v_rot + omega x r, rotated into the star frame
+    const vIn = toInertial([b.vel[0] - w * b.pos[1], b.vel[1] + w * b.pos[0], b.vel[2]], s.frameAngle);
+    const dv = ws.thrust * Math.round(ws.burnTime / DT) * DT;
+    for (let i = 0; i < 3; i++) expect(vIn[i]).toBeCloseTo(nose0[i] * dv, 1);
+  });
+  it('fired from the hip it leaves slowly along your aim, then accelerates; it explodes on impact', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    applyItem(s.config, p, 'rocket', -1);
+    run(s, 40, () => [cmdFor(s, id, { weapon: WEAPON_ROCKET, pitch: 0.3 })]);
+    step(s, [cmdFor(s, id, { weapon: WEAPON_ROCKET, pitch: 0.3, buttons: BTN_FIRE })], s.tick);
+    const b = s.bolts.find((q) => q.kind === 'rocket')!;
+    expect(b).toBeTruthy();
+    const v0 = Math.hypot(...b.vel);
+    run(s, 60, () => [cmdFor(s, id, { weapon: WEAPON_ROCKET, pitch: 0.3 })]);
+    expect(s.bolts).toContain(b);
+    expect(Math.hypot(...b.vel)).toBeGreaterThan(v0 + 25);
+    let boom = false;
+    for (let i = 0; i < 600 && !boom; i++) {
+      step(s, [cmdFor(s, id, { weapon: WEAPON_ROCKET })], s.tick);
+      boom = s.events.some((e) => e.type === 'explode');
+    }
+    expect(boom).toBe(true);
+  });
+  it('a seeker steers onto someone off to the side; a plain rocket on the same line misses', () => {
+    const shoot = (kind: 'seeker' | 'rocket') => {
+      const s = empty({ R: 1000, halfWidth: 40 });
+      const a = addPlayer(s, 'human', 'A'), t = addPlayer(s, 'human', 'T');
+      run(s, 10);
+      const A = s.players.find((q) => q.id === a)!, T = s.players.find((q) => q.id === t)!;
+      const R = s.config.R;
+      const at = (ang: number, z: number): Vec3 => [(R - 0.9) * Math.cos(ang), (R - 0.9) * Math.sin(ang), z];
+      A.pos = at(0, 0); T.pos = at(35 / R, 9);
+      A.vel = [0, 0, 0]; T.vel = [0, 0, 0];
+      T.maxHealth = T.health = 1e6;
+      const b = localBasis(A.pos);
+      const from = addScaled(A.pos, b.up, 0.6);
+      spawnBolt(s, a, kind, from, scale(b.spin, 15), b.spin);
+      let hit = false;
+      for (let i = 0; i < 400 && !hit; i++) {
+        step(s, [], s.tick);
+        hit = s.events.some((e) => e.type === 'hit' && e.target === t);
+      }
+      return hit;
+    };
+    expect(shoot('seeker')).toBe(true);
+    expect(shoot('rocket')).toBe(false);
   });
 });

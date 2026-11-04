@@ -8,6 +8,7 @@ import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } fro
 
 const PICKUP_GLOW: Record<string, number> = {
   health: 0xff6060, sticky: 0x7fb6ff, bounce: 0xffd23a, redRifle: 0xff4a3a, launcher: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a, hammer: 0x9ad0ff, jetpack: 0xffa040,
+  rocket: 0xffa03a, seeker: 0xff6ad8,
   rifle: 0x55c8ff, pistol: 0x8dff5a,
 };
 
@@ -15,7 +16,7 @@ export type PosMap = Map<number, Vec3>;
 
 const BOLT_COLORS: Record<string, number> = {
   rifle: 0x55c8ff, redRifle: 0xff4a3a, pistol: 0x8dff5a, overcharge: 0x5dff7a, fuelRod: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a,
-  hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a,
+  hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a, rocket: 0xffa03a, seeker: 0xff6ad8,
 };
 
 /** Fading polyline trail stored as a ring buffer. */
@@ -255,7 +256,11 @@ export class EntityViews {
   private createProj(id: number, kind: string, radius: number): ProjView {
     const color = BOLT_COLORS[kind] ?? 0xffffff;
     const sprite = this.makeGlow(color, radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 7 : kind === 'cannon' || kind === 'laconic' ? 9 : 6));
-    const core = new THREE.Mesh(new THREE.SphereGeometry(radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 1 : 0.45), 12, 8), new THREE.MeshBasicMaterial({ color: kind === 'grenade' ? 0xcfe4ff : kind === 'bounceGrenade' ? 0xfff0a0 : 0xffffff, fog: false }));
+    const rocket = kind === 'rocket' || kind === 'seeker';
+    const core = rocket
+      // a rocket body along local +Y (turned to the nose every frame); its glow is the exhaust
+      ? new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.35, radius * 0.6, radius * (kind === 'rocket' ? 6 : 4), 10), new THREE.MeshStandardMaterial({ color: kind === 'rocket' ? 0xd8d0c0 : 0xff9ae8, emissive: kind === 'rocket' ? 0x222018 : 0x601848, metalness: 0.6, roughness: 0.4 }))
+      : new THREE.Mesh(new THREE.SphereGeometry(radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 1 : 0.45), 12, 8), new THREE.MeshBasicMaterial({ color: kind === 'grenade' ? 0xcfe4ff : kind === 'bounceGrenade' ? 0xfff0a0 : 0xffffff, fog: false }));
     const marker = this.makeGlow(color, Math.max(1.5, this.rs.starRadius / 1500), LAYER_INERTIAL_ONLY);
     const max = Math.max(4, Math.round(this.trailTicks / 2));
     const trail = new Trail(max, new THREE.Color(color), LAYER_ROT_TRAILS, this.root);
@@ -378,8 +383,8 @@ export class EntityViews {
 
     // projectiles
     const pulse = 0.85 + 0.15 * Math.sin(performance.now() * 0.03);
-    const live = new Map<number, { pos: Vec3; stuck: boolean }>();
-    for (const b of state.bolts) live.set(b.id, { pos: b.pos, stuck: false });
+    const live = new Map<number, { pos: Vec3; stuck: boolean; dir?: Vec3 | null; burning?: boolean }>();
+    for (const b of state.bolts) live.set(b.id, { pos: b.pos, stuck: false, dir: b.dir, burning: state.tick < b.burnUntil });
     for (const g of state.grenades) live.set(g.id, { pos: g.pos, stuck: g.stuck !== null });
     for (const [id, v] of this.projs) {
       const l = live.get(id);
@@ -394,6 +399,14 @@ export class EntityViews {
         v.marker.position.copy(v.sprite.position);
         if (l.stuck) v.sprite.material.opacity = 0.5 + 0.5 * Math.sin(performance.now() * 0.04);
         else v.sprite.material.opacity = pulse;
+        if (l.dir) {
+          // rocket: body along its nose, exhaust glow behind it while the motor burns
+          const nose = new THREE.Vector3(...l.dir);
+          v.core.quaternion.setFromUnitVectors(Y, nose);
+          v.core.scale.setScalar(1);
+          v.sprite.position.addScaledVector(nose, -0.5);
+          v.sprite.material.opacity = l.burning ? 0.7 + 0.3 * Math.random() : 0.15;
+        }
         v.trail.update(pos);
         v.inTrail.update();
       } else {

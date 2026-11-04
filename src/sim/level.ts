@@ -348,7 +348,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       pickupSpots.push({ pos: at(topAngle, H + 1, z), item: topItems[s % topItems.length] });
     }
     // Floor pickups at the midpoints between spawns that have no staircase.
-    const floorItems: ItemKind[] = ['launcher', 'health', 'redRifle', 'sticky', 'laconic', 'bounce', 'health', 'sticky'];
+    const floorItems: ItemKind[] = ['launcher', 'health', 'redRifle', 'sticky', 'rocket', 'laconic', 'bounce', 'seeker', 'health', 'sticky'];
     let fi = 0;
     for (let i = 0; i < spawns.length - (arena ? 1 : 0); i++) {
       const a = arcAngle(cfg, (i + (arena ? 1 : 0.5)) / spawns.length);

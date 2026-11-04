@@ -214,7 +214,7 @@ export function botInput(state: SimState, playerId: number): InputCmd {
     const straight = aimAt(eye, target.pos);
     const skill = type?.aimSkill ?? 0.3;
     let aim = straight;
-    if (skill > 0 && id !== 'hammer') {
+    if (skill > 0 && id !== 'hammer' && id !== 'rocket' && id !== 'seeker') { // rockets: no solver (they steer and burn)
       const kind: BoltKind = id === 'launcher' ? 'fuelRod' : id === 'pistol' ? 'pistol' : (id as BoltKind);
       const solved = solveAim(state, me, target, kind);
       const dyaw = Math.atan2(Math.sin(solved.yaw - straight.yaw), Math.cos(solved.yaw - straight.yaw));
@@ -247,7 +247,11 @@ export function botInput(state: SimState, playerId: number): InputCmd {
       if (nav.hiding) return keepFooting(state, me, cmd); // no shooting from (or on the way to) cover
     }
     const burst = (tick >> 5) % 4 !== 0;
-    if (id === 'rifle' || id === 'redRifle') {
+    if (id === 'seeker') {
+      if (burst) cmd.buttons |= BTN_FIRE;
+    } else if (id === 'rocket') {
+      if ((tick >> 4) % 6 === 0) cmd.buttons |= BTN_FIRE;
+    } else if (id === 'rifle' || id === 'redRifle') {
       if (burst && me.heat[cmd.weapon] < 0.85) cmd.buttons |= BTN_FIRE;
     } else if (id === 'laconic') {
       if ((tick >> 8) % 2 === 0) cmd.buttons |= BTN_FIRE; // hold to charge; it streams by itself

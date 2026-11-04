@@ -116,8 +116,8 @@ export const BTN_RELOAD = 64;
 export const BTN_MELEE = 128;
 export const BTN_USE = 256; // get on / off a vehicle
 
-// Weapons are addressed by a fixed slot index (also the 1-5 number keys).
-export const WEAPON_IDS = ['rifle', 'pistol', 'redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'hover'] as const;
+// Weapons are addressed by a fixed slot index (also the number keys).
+export const WEAPON_IDS = ['rifle', 'pistol', 'redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'rocket', 'seeker', 'hover'] as const;
 export type WeaponId = (typeof WEAPON_IDS)[number];
 export const WEAPON_RIFLE = 0;
 export const WEAPON_PISTOL = 1;
@@ -126,13 +126,15 @@ export const WEAPON_LAUNCHER = 3;
 export const WEAPON_CANNON = 4;
 export const WEAPON_LACONIC = 5;
 export const WEAPON_HAMMER = 6;
-export const WEAPON_HOVER = 7;
+export const WEAPON_ROCKET = 7;
+export const WEAPON_SEEKER = 8;
+export const WEAPON_HOVER = 9;
 export const WEAPON_NAMES = [
   'Plasma Rifle', 'Plasma Pistol', 'Red Plasma Rifle', 'Fuel Rod Launcher', 'Plasma Bolt Cannon', 'Laconic Laser', 'Grav Mallet',
-  'Hover Gun (debug)',
+  'Torch Rocket', 'Seeker Swarm', 'Hover Gun (debug)',
 ];
 /** Number keys 1..N select the first N weapons; the hover gun is debug-panel only. */
-export const PLAYER_WEAPON_SLOTS = 7;
+export const PLAYER_WEAPON_SLOTS = 9;
 export const STARTING_WEAPONS = [WEAPON_RIFLE, WEAPON_PISTOL];
 
 /** Tunable stats for one weapon. Fields a weapon doesn't use stay 0. */
@@ -164,6 +166,13 @@ export interface WeaponStats {
   // Laconic Laser: movement and aim penalties while charging and firing
   chargeMoveScale: number;
   chargeLookScale: number;
+  // rockets: a constant push along the rocket's own axis (which keeps its
+  // direction relative to the stars unless it steers), for burnTime seconds
+  thrust: number; // m/s^2
+  burnTime: number; // s
+  turnRate: number; // rad/s the rocket can steer toward a target (0 = no homing)
+  seekRange: number; // m: how far it looks for a target
+  seekAngle: number; // degrees either side of its nose it can see
 }
 
 /** One tick of player intent. The ONLY way gameplay is driven. */
@@ -243,9 +252,9 @@ export interface Player {
   deaths: number;
 }
 
-export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'hover';
+export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'rocket' | 'seeker' | 'hover';
 
-export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rifle' | 'pistol' | 'jetpack';
+export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rocket' | 'seeker' | 'rifle' | 'pistol' | 'jetpack';
 
 /** Floating item pickup (not a physics object). */
 export interface Pickup {
@@ -273,6 +282,10 @@ export interface Bolt {
   armed: boolean; // false until it has cleared its owner's capsule
   spawnTick: number;
   expireTick: number;
+  /** Rockets only: the nose direction (rotating-frame unit vector), when the motor stops, and who it's chasing. */
+  dir: Vec3 | null;
+  burnUntil: number;
+  target: number;
 }
 
 export type GrenadeKind = 'sticky' | 'bounce';

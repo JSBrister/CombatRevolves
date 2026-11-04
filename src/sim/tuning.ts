@@ -115,7 +115,8 @@ const w = (o: Partial<WeaponStats>): WeaponStats => ({
   muzzle: 25, damage: 7, shieldDamage: 7, interval: 0.1, heatPerShot: 0, coolRate: 0.4, overheatLock: 2.5,
   radius: 0.12, lifetime: 60, ammoMax: 0, magSize: 0, reloadTime: 0, knockback: 0.5, chargeTime: 0, burstTime: 0,
   ocMuzzle: 0, ocDamage: 0, ocShieldDamage: 0, ocHeat: 0,
-  blastRadius: 0, blastDamage: 0, blastKnockback: 0, chargeMoveScale: 1, chargeLookScale: 1, ...o,
+  blastRadius: 0, blastDamage: 0, blastKnockback: 0, chargeMoveScale: 1, chargeLookScale: 1,
+  thrust: 0, burnTime: 0, turnRate: 0, seekRange: 0, seekAngle: 0, ...o,
 });
 
 /**
@@ -140,6 +141,11 @@ const w = (o: Partial<WeaponStats>): WeaponStats => ({
  *   oc*           the pistol's overcharged shot
  *   blast*        explosion on impact (fuel rod)
  *   chargeMoveScale / chargeLookScale  Laconic Laser: movement and aim speed while charging and firing
+ *   thrust, burnTime  rockets: constant push (m/s^2) along the rocket's nose for burnTime s. The nose
+ *                 starts where you aim (not along the launch velocity) and keeps its direction
+ *                 relative to the stars, so in the ring's frame it slowly turns against the spin.
+ *   turnRate, seekRange, seekAngle  homing: how fast the nose can turn (rad/s) toward the nearest
+ *                 enemy within seekRange and seekAngle degrees of the nose
  */
 export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
   rifle: w({ muzzle: 80, damage: 7, shieldDamage: 7, interval: 0.075, heatPerShot: 0.045, coolRate: 0.45, overheatLock: 2.5,
@@ -159,6 +165,13 @@ export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
     chargeMoveScale: 0.25, chargeLookScale: 0.25 }),
   // melee weapon: a big swing that hits everyone in front of you (reach = blastRadius)
   hammer: w({ muzzle: 0, damage: 90, shieldDamage: 90, interval: 0.9, knockback: 28, blastRadius: 3.2, radius: 0 }),
+  // a real rocket: leaves fairly slowly, then pushes itself along its nose for 1.5 s
+  rocket: w({ muzzle: 20, damage: 40, shieldDamage: 40, interval: 0.7, radius: 0.22, knockback: 4, lifetime: 8,
+    magSize: 2, ammoMax: 8, reloadTime: 2.5, thrust: 70, burnTime: 1.5, blastRadius: 5, blastDamage: 110, blastKnockback: 20 }),
+  // a stream of little homing rockets: each steers its nose at the nearest enemy in front of it
+  seeker: w({ muzzle: 18, damage: 9, shieldDamage: 12, interval: 0.11, radius: 0.12, knockback: 0.8, lifetime: 5,
+    magSize: 20, ammoMax: 60, reloadTime: 2.2, thrust: 45, burnTime: 2.5, turnRate: 4, seekRange: 60, seekAngle: 50,
+    blastRadius: 1.2, blastDamage: 6, blastKnockback: 1.5 }),
   hover: w({ muzzle: 0, damage: 10, shieldDamage: 10, interval: 0.125, radius: 0.25, knockback: 1 }),
 });
 

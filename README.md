@@ -17,7 +17,7 @@ npx tsc -p src/sim # proves the sim compiles without DOM types
 *Debug sandbox* (free-for-all with bots and respawns). Levels are rings of different sizes and widths (some with rolling hills, a bowl-shaped *sphere band*, or a planet's pull), plus *Earth* (flat ground, normal gravity, no spin: the reference for what everything should do) and *Boot Camp*, the first campaign level, also on Earth.
 
 **Controls:** WASD move · Shift toggle sprint (on by default) · Space jump (hold in the air with a jetpack) · mouse look ·
-left click fire · right click show trajectory · 1–7 weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
+left click fire · right click show trajectory · 1–9 weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
 (hold to aim, release to throw) · R reload · Q melee · E get on/off a hover-bike · walk over items to pick them up · Tab scores · Esc pause.
 The debug panel (ring size 10–5000 m, forces, movement, every weapon's stats, time scale, inertial-frame overlay, free-fly camera,
 hover gun, bots) only appears while paused.

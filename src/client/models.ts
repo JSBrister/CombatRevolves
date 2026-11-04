@@ -70,6 +70,25 @@ export function makeGun(weapon: number): THREE.Group {
       g.add(h, ring);
       break;
     }
+    case 7: { // Torch Rocket: a fat tube with a rocket's nose poking out
+      const body = mat(0x6a6a5a, 0x101008, 0.5);
+      g.add(tube(0.1, 0.85, body, 0.05), tube(0.115, 0.06, mat(0xffa03a, 0x803a00), 0.45),
+        tube(0.06, 0.1, mat(0xd8d0c0), 0.52), box(0.16, 0.18, 0.07, dark, -0.05, -0.16), box(0.12, 0.08, 0.05, dark, 0.15, 0.13));
+      break;
+    }
+    case 8: { // Seeker Swarm: a spiky pink pod of little rockets
+      const body = mat(0x7a2a6a, 0x200818, 0.5);
+      const tip = mat(0xff9ae8, 0xff3ad8, 0.3);
+      g.add(box(0.42, 0.16, 0.14, body, 0.05), box(0.12, 0.16, 0.06, dark, -0.08, -0.13));
+      for (let i = 0; i < 5; i++) {
+        const sp = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.16, 6), tip);
+        const a = (i / 5) * Math.PI;
+        sp.position.set(0.0 + i * 0.07, 0.1 + 0.02 * Math.sin(a * 2), (i % 2 ? 1 : -1) * 0.03);
+        sp.rotation.z = -0.5;
+        g.add(sp);
+      }
+      break;
+    }
     default: { // hover gun (debug)
       g.add(box(0.3, 0.12, 0.1, mat(0xb03aa0, 0x400a3a)), tube(0.05, 0.1, mat(0xffa8f0, 0xff5ee8), 0.2));
     }
@@ -105,7 +124,7 @@ export function makeBike(): THREE.Group {
   return g;
 }
 
-const ITEM_WEAPON: Partial<Record<ItemKind, number>> = { rifle: 0, pistol: 1, redRifle: 2, launcher: 3, cannon: 4, laconic: 5, hammer: 6 };
+const ITEM_WEAPON: Partial<Record<ItemKind, number>> = { rifle: 0, pistol: 1, redRifle: 2, launcher: 3, cannon: 4, laconic: 5, hammer: 6, rocket: 7, seeker: 8 };
 
 /** Floating pickup model (about 0.6 m across). */
 export function makePickup(item: ItemKind): THREE.Group {
@@ -156,5 +175,5 @@ export function makePickup(item: ItemKind): THREE.Group {
 
 export const ITEM_NAMES: Record<ItemKind, string> = {
   health: 'Health', sticky: 'Sticky grenades', bounce: 'Bouncing grenades', redRifle: 'Red Plasma Rifle',
-  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', hammer: 'Grav Mallet', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack',
+  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', hammer: 'Grav Mallet', rocket: 'Torch Rocket', seeker: 'Seeker Swarm', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack',
 };
