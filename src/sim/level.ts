@@ -354,8 +354,12 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     halfArc: (H0 / RAMP_SLOPE + STAIR_TOP) / 2 + 2,
   }));
   const ridge = cfg.ridgeHeight > 0 ? { height: cfg.ridgeHeight, plateau: cfg.ridgePlateau } : undefined;
+  // O'Neill windows: n glass strips, each as wide as the land between them, kept clear of hills
+  const windows = cfg.windows > 0
+    ? Array.from({ length: cfg.windows }, (_, i) => ({ angle: ((i + 0.5) / cfg.windows) * 2 * Math.PI, halfArc: (Math.PI * R) / (2 * cfg.windows) }))
+    : [];
   const terrain: Level['terrain'] = cfg.terrainSphere || cfg.hills > 0 || ridge || cfg.tube !== 'none'
-    ? { sphere: cfg.terrainSphere, hills: makeHills(cfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), rampClear), ...(ridge ? { ridge } : {}) }
+    ? { sphere: cfg.terrainSphere, hills: makeHills(cfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), [...rampClear, ...windows]), ...(ridge ? { ridge } : {}) }
     : null;
   if (cfg.tube !== 'none' && terrain) terrain.tube = { kind: cfg.tube, radius: cfg.tubeRadius };
   // Ramps and mesas need flat ground; on a sphere keep clutter to the lower latitudes.
@@ -562,7 +566,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   return {
     shape: 'ring', terrain, boxes: filtered, stairTops, spawns, pickupSpots, vehicleSpots,
     ...(noWalls ? { wallPos: [], wallNeg: [] } : walls),
-    ...(holes.length ? { holes } : {}), ...(decks.length ? { decks } : {}),
+    ...(holes.length ? { holes } : {}), ...(decks.length ? { decks } : {}), ...(windows.length ? { windows } : {}),
   };
 }
 

@@ -396,9 +396,14 @@ export class RingScene {
       }
     }
     const idx: number[] = [];
-    for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
-      const a = i * (nv + 1) + j, b = (i + 1) * (nv + 1) + j;
-      idx.push(a, a + 1, b, b, a + 1, b + 1);
+    const wins = level.windows ?? [];
+    const inWindow = (a: number) => wins.some((w) => Math.abs(Math.atan2(Math.sin(a - w.angle), Math.cos(a - w.angle))) * R < w.halfArc);
+    for (let i = 0; i < nu; i++) {
+      if (wins.length && inWindow(((i + 0.5) / nu) * Math.PI * 2)) continue; // glass there (drawn separately)
+      for (let j = 0; j < nv; j++) {
+        const a = i * (nv + 1) + j, b = (i + 1) * (nv + 1) + j;
+        idx.push(a, a + 1, b, b, a + 1, b + 1);
+      }
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -409,6 +414,27 @@ export class RingScene {
     tex.needsUpdate = true;
     const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.9, metalness: 0.05 }));
     mesh.receiveShadow = true;
+    // O'Neill windows: faintly tinted glass with mullions, flush with the floor
+    const glass = new THREE.MeshPhysicalMaterial({ color: 0x9fc8ff, transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0, side: THREE.DoubleSide, depthWrite: false });
+    const frame = new THREE.LineBasicMaterial({ color: 0x5a6a80, transparent: true, opacity: 0.6 });
+    for (const w of level.windows ?? []) {
+      // the grid snaps to whole cells, so span exactly the cells left out above
+      const i0 = Math.ceil(((w.angle - w.halfArc / R) / (2 * Math.PI)) * nu - 0.5), i1 = Math.floor(((w.angle + w.halfArc / R) / (2 * Math.PI)) * nu - 0.5);
+      const a0 = (i0 / nu) * 2 * Math.PI, a1 = ((i1 + 1) / nu) * 2 * Math.PI;
+      const gg = new THREE.CylinderGeometry(R, R, 2 * W, Math.max(8, i1 - i0 + 1), 1, true, a0 + Math.PI / 2, a1 - a0);
+      gg.rotateX(Math.PI / 2);
+      const pane = new THREE.Mesh(gg, glass);
+      mesh.add(pane);
+      const pts: number[] = [];
+      for (let z = -W; z <= W; z += 50) for (let k = 0; k < 64; k++) {
+        const t0 = a0 + ((a1 - a0) * k) / 64, t1 = a0 + ((a1 - a0) * (k + 1)) / 64;
+        pts.push(R * Math.cos(t0), R * Math.sin(t0), z, R * Math.cos(t1), R * Math.sin(t1), z);
+      }
+      for (let k = 0; k <= 12; k++) { const t = a0 + ((a1 - a0) * k) / 12; pts.push(R * Math.cos(t), R * Math.sin(t), -W, R * Math.cos(t), R * Math.sin(t), W); }
+      const lg = new THREE.BufferGeometry();
+      lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      mesh.add(new THREE.LineSegments(lg, frame));
+    }
     return mesh;
   }
 

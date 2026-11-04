@@ -27,6 +27,7 @@ export interface SimConfig {
   tube: 'none' | 'inside' | 'half' | 'outside';
   tubeRadius: number;
   floorHoles: number; // holes in the floor you can fall through into space
+  windows: number; // O'Neill-style: this many glass strips the length of the ring, alternating with land
   spinChange: number; // 0 = steady spin; >0: the spin periodically drops by this fraction (1 = stops dead) and comes back
   spinPeriod: number; // s per spin-change cycle
   comboHits: number; // this many seeker hits on one target, each within comboWindow s of the last...
@@ -457,6 +458,8 @@ export interface Level {
   } | null; // null = flat cylinder floor
   /** Openings in the main floor (and hull): fall through into space. */
   holes?: Hole[];
+  /** Glass strips in the floor (walkable; the renderer shows space through them): centre angle and half-width in metres. */
+  windows?: { angle: number; halfArc: number }[];
   /** Upper decks: a thin floor at radius r (its walking surface), with openings. */
   decks?: Deck[];
   boxes: Box[];

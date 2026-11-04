@@ -169,9 +169,9 @@ export const LEVELS: LevelDef[] = [
     blurb: 'The whole inside of a spinning sphere. Gravity is g cos^2 of your latitude; past ~53 degrees the floor is too steep to stand on, and at the poles you float. Jetpacks and bikes recommended.' },
   { id: 's-ridge', mode: 'sandbox', name: 'The Ridge (Lambda)', seed: 36, config: { R: 240, halfWidth: 150, ridgeHeight: 120, ridgePlateau: 12 }, bots: 4,
     blurb: 'A 120 m ridge runs round the middle of a 240 m ring: the floor is a Lambda in cross-section. Gravity on the crest is half what it is at the foot, and the slopes are 40 degrees.' },
-  { id: 's-oneill', mode: 'sandbox', name: "O'Neill Cylinder (1 km x 3 km)", seed: 37, config: { R: 1000, halfWidth: 1500, hills: 60, hillHeight: 35, wallHeight: 1000 },
+  { id: 's-oneill', mode: 'sandbox', name: "O'Neill Cylinder (1 km x 3 km)", seed: 37, config: { R: 1000, halfWidth: 1500, hills: 60, hillHeight: 35, wallHeight: 1000, windows: 3 },
     variedWalls: false, bots: 6,
-    blurb: 'A proper space colony: 2 km across, 3 km long, a minute per turn. The land curves up overhead into the far side. Take a bike.' },
+    blurb: 'A proper space colony: 2 km across, 3 km long, a minute per turn. Three strips of land alternate with three glass windows you can walk on, with space under your feet. Take a bike.' },
   { id: 's-swiss', mode: 'sandbox', name: 'Swiss Cheese (holes in the floor)', seed: 38, config: { R: 120, floorHoles: 18 }, bots: 3,
     blurb: 'Somebody forgot the floor plates. Fall through a hole and the spin flings you out into space; so does a good blast.' },
   { id: 's-decks', mode: 'sandbox', name: 'Double Decker (two levels)', seed: 39, config: { R: 150, halfWidth: 25, deckHeight: 10 }, bots: 4,
@@ -195,7 +195,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
