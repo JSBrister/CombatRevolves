@@ -4,7 +4,7 @@ import {
   addPlayer, addProp, botInput, createState, decode, detonate, encode, falloff, hash01, integrate,
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
-  isLaconicBusy, solveAim, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
+  isLaconicBusy, predictTrajectory, solveAim, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
   LEVELS, levelById, startLevel, add, scale, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
@@ -1114,5 +1114,37 @@ describe('24. terrain: hills and the sphere band', () => {
         expect(p.grounded).toBe(true);
       }
     }
+  });
+});
+
+describe('25. planet below: a pull fixed to the stars', () => {
+  it('standing still, your weight swings between g - pull and g + pull once per spin', () => {
+    const { state, localId } = startLevel(levelById('s-planet')!);
+    const s = state;
+    s.players = s.players.filter((p) => p.id === localId);
+    const p = s.players[0];
+    const ratio = s.config.planetPull / s.config.g;
+    const T = (2 * Math.PI) / omegaOf(s.config);
+    run(s, 120, () => [cmdFor(s, localId)]);
+    let lo = Infinity, hi = 0;
+    for (let i = 0; i < Math.round(T / DT); i++) {
+      step(s, [cmdFor(s, localId)], s.tick);
+      lo = Math.min(lo, p.apparentG);
+      hi = Math.max(hi, p.apparentG);
+    }
+    expect(p.grounded).toBe(true);
+    expect(Math.abs(hi - (1 + ratio))).toBeLessThan(0.08);
+    expect(Math.abs(lo - (1 - ratio))).toBeLessThan(0.08);
+  });
+  it('the trajectory preview follows the turning pull', () => {
+    const { state, localId } = startLevel(levelById('s-planet')!);
+    run(state, 30, (st) => [cmdFor(st, localId)]);
+    const pred = predictTrajectory(state, localId, 'grenade', 0, 0.4);
+    const g = spawnGrenade(state, localId, muzzlePoint(state.players.find((p) => p.id === localId)!, 0, 0.4, true),
+      launchVelocity(state.config, state.players.find((p) => p.id === localId)!, 'grenade', muzzlePoint(state.players.find((p) => p.id === localId)!, 0, 0.4, true), 0, 0.4));
+    state.players = state.players.filter((p) => p.id === localId);
+    for (let i = 0; i < 2000 && !g.stuck; i++) step(state, [cmdFor(state, localId, { yaw: 0, pitch: 0.4 })], state.tick);
+    expect(pred.hit).not.toBeNull();
+    expect(Math.hypot(g.pos[0] - pred.hit![0], g.pos[1] - pred.hit![1], g.pos[2] - pred.hit![2])).toBeLessThan(0.6);
   });
 });

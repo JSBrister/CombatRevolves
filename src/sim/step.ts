@@ -4,7 +4,7 @@
 
 import { clamp, closestOnSeg, segSegClosest, segSphere } from './geom';
 import { levelSdf, sphereTrace, spawnPosition } from './level';
-import { advanceFree, fictitiousAccel, integrate, localBasis, viewVectors } from './physics';
+import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, viewVectors } from './physics';
 import { rngInt } from './rng';
 import {
   BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
@@ -18,6 +18,13 @@ import {
 } from './world';
 
 const secs = (s: number) => Math.round(s / DT);
+
+/**
+ * The planet's pull for the tick being stepped (null on most levels). Set at
+ * the top of step() from the state, so everything moved this tick feels the
+ * same field; it is not carried between ticks.
+ */
+let pull: Vec3 | null = null;
 
 export const GRENADE_RADIUS = 0.15;
 const PISTOL_CHARGE_DELAY = 30; // ticks of holding before the overcharge starts building
@@ -106,6 +113,7 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   if (tick !== state.tick) throw new Error(`step: expected tick ${state.tick}, got ${tick}`);
   const cfg = state.config;
   const omega = omegaOf(cfg);
+  pull = planetPullAt(cfg, state.frameAngle);
   state.events = [];
 
   const byPlayer = new Map<number, InputCmd>();
@@ -218,7 +226,7 @@ function movePlayer(state: SimState, p: Player, omega: number) {
   let ground: Vec3 | null = null;
   let impact = 0;
   for (let i = 0; i < n; i++) {
-    integrate(p.pos, p.vel, h, omega, cfg, support);
+    integrate(p.pos, p.vel, h, omega, cfg, support, pull);
     const res = resolvePlayerLevel(state, p);
     if (res.ground) ground = res.ground;
     impact = Math.max(impact, res.impact);
@@ -232,7 +240,7 @@ function movePlayer(state: SimState, p: Player, omega: number) {
   // N = dv.n/dt - a_fictitious.n. Airborne = weightless.
   let target = 0;
   if (ground && !jumped) {
-    const a = fictitiousAccel(r0, v0, omega, cfg);
+    const a = fictitiousAccel(r0, v0, omega, cfg, pull);
     target = Math.max(0, dot(sub(p.vel, v0), ground) / DT - dot(a, ground)) / cfg.g;
   }
   p.apparentG += (target - p.apparentG) * 0.12;
@@ -328,14 +336,14 @@ export interface SphereBody {
  * restitution + Coulomb friction. Shared by props, bouncing grenades and the
  * bouncing-grenade trajectory preview. Returns the largest impact speed.
  */
-export function moveSphereBody(level: Level, cfg: SimConfig, omega: number, b: SphereBody, restitution: number, dt = DT): number {
+export function moveSphereBody(level: Level, cfg: SimConfig, omega: number, b: SphereBody, restitution: number, dt = DT, extra: Vec3 | null = pull): number {
   const support = b.contactNormal;
   const n = clamp(Math.ceil((len(b.vel) * dt) / (0.4 * b.radius)), 1, 32);
   const h = dt / n;
   let contact: Vec3 | null = null;
   let maxImpact = 0;
   for (let i = 0; i < n; i++) {
-    integrate(b.pos, b.vel, h, omega, cfg, support);
+    integrate(b.pos, b.vel, h, omega, cfg, support, extra);
     for (let iter = 0; iter < 2; iter++) {
       const hit = levelSdf(level, cfg, b.pos);
       const gap = hit.d - b.radius;
@@ -693,7 +701,7 @@ function updateBolts(state: SimState, omega: number) {
     if (b.spawnTick === state.tick) { keep.push(b); continue; }
     if (state.tick >= b.expireTick) continue;
     const p0 = clone(b.pos);
-    advanceFree(b.pos, b.vel, DT, omega, cfg);
+    advanceFree(b.pos, b.vel, DT, omega, cfg, pull);
     const hit = sweep(state, p0, b.pos, b.radius, b.owner, b.armed);
     if (hit) {
       if (hit.player) {
@@ -768,7 +776,7 @@ function updateGrenades(state: SimState, omega: number) {
       }
     } else if (g.spawnTick !== tick) {
       const p0 = clone(g.pos);
-      advanceFree(g.pos, g.vel, DT, omega, cfg);
+      advanceFree(g.pos, g.vel, DT, omega, cfg, pull);
       const hit = sweep(state, p0, g.pos, g.radius, g.owner, g.armed);
       if (hit) {
         g.pos = hit.pos;

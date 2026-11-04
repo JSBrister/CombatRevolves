@@ -16,6 +16,8 @@ export interface SimConfig {
   terrainSphere: boolean; // floor is a band round the inside of a sphere of radius R (curves up at the edges)
   hills: number; // how many Gaussian hills on the floor (0 = flat)
   hillHeight: number; // tallest hill (m)
+  planetPull: number; // m/s^2: a uniform pull fixed relative to the stars (a planet below); it sweeps round as the ring turns
+  planetAngle: number; // direction of that pull in the non-rotating frame (radians about the axis)
   gravity: number; // real gravity toward the floor (m/s^2), on top of any spin. 0 on a normal ring.
   wallHeight: number;
   wallThickness: number;

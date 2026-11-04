@@ -53,9 +53,20 @@ export function centrifugalAccel(r: Vec3, omega: number, cfg: SimConfig): Vec3 {
   return [w2 * r[0] + gx, w2 * r[1] + gy, 0];
 }
 
-/** Full fictitious acceleration (used for diagnostics and apparent weight). */
-export function fictitiousAccel(r: Vec3, v: Vec3, omega: number, cfg: SimConfig): Vec3 {
+/**
+ * The planet's pull in the rotating frame at a given spin angle: a uniform
+ * field fixed relative to the stars, so here it turns at -omega. null if none.
+ */
+export function planetPullAt(cfg: SimConfig, frameAngle: number): Vec3 | null {
+  if (!cfg.planetPull) return null;
+  const a = cfg.planetAngle - frameAngle;
+  return [cfg.planetPull * Math.cos(a), cfg.planetPull * Math.sin(a), 0];
+}
+
+/** Full acceleration on a free body (used for diagnostics and apparent weight). */
+export function fictitiousAccel(r: Vec3, v: Vec3, omega: number, cfg: SimConfig, extra: Vec3 | null = null): Vec3 {
   const a = centrifugalAccel(r, omega, cfg);
+  if (extra) { a[0] += extra[0]; a[1] += extra[1]; a[2] += extra[2]; }
   if (cfg.coriolis) {
     // -2 omega z_hat x v = (2 omega vy, -2 omega vx, 0)
     a[0] += 2 * omega * v[1];
@@ -71,7 +82,7 @@ export function jacobi(r: Vec3, v: Vec3, omega: number): number {
 
 /** True when free flight is exactly a straight inertial line (analytic path is valid). */
 export function analyticValid(cfg: SimConfig): boolean {
-  return cfg.centrifugal && cfg.coriolis && !cfg.gravity && (cfg.dragType === 'none' || cfg.dragCoeff === 0);
+  return cfg.centrifugal && cfg.coriolis && !cfg.gravity && !cfg.planetPull && (cfg.dragType === 'none' || cfg.dragCoeff === 0);
 }
 
 /**
@@ -103,9 +114,10 @@ function applyDrag(v: Vec3, h: number, cfg: SimConfig) {
   v[0] *= f; v[1] *= f; v[2] *= f;
 }
 
-function kick(r: Vec3, v: Vec3, h: number, omega: number, cfg: SimConfig, support: Vec3 | null) {
+function kick(r: Vec3, v: Vec3, h: number, omega: number, cfg: SimConfig, support: Vec3 | null, extra: Vec3 | null) {
   const a0 = centrifugalAccel(r, omega, cfg);
   let ax = a0[0], ay = a0[1], az = 0;
+  if (extra) { ax += extra[0]; ay += extra[1]; az += extra[2]; }
   if (support) {
     // Contact constraint: a surface we rest on supplies a normal force that
     // cancels the part of the TOTAL fictitious acceleration (centrifugal +
@@ -114,7 +126,7 @@ function kick(r: Vec3, v: Vec3, h: number, omega: number, cfg: SimConfig, suppor
     // antispinward off the floor every few ticks, which broke jumping.)
     let tx = ax, ty = ay;
     if (cfg.coriolis) { tx += 2 * omega * v[1]; ty -= 2 * omega * v[0]; }
-    const an = tx * support[0] + ty * support[1];
+    const an = tx * support[0] + ty * support[1] + az * support[2];
     if (an < 0) { ax -= an * support[0]; ay -= an * support[1]; az -= an * support[2]; }
   }
   if (ax === 0 && ay === 0 && az === 0) return;
@@ -147,19 +159,19 @@ function coriolisRotate(v: Vec3, h: number, omega: number, cfg: SimConfig) {
  *  - it is trivially deterministic and cheap enough for hundreds of bodies.
  * When drag = 0 projectiles bypass this and use propagateAnalytic instead.
  */
-export function integrate(r: Vec3, v: Vec3, dt: number, omega: number, cfg: SimConfig, support: Vec3 | null = null) {
+export function integrate(r: Vec3, v: Vec3, dt: number, omega: number, cfg: SimConfig, support: Vec3 | null = null, extra: Vec3 | null = null) {
   const h = dt / 2;
   applyDrag(v, h, cfg);
-  kick(r, v, h, omega, cfg, support);
+  kick(r, v, h, omega, cfg, support, extra);
   coriolisRotate(v, h, omega, cfg);
   r[0] += v[0] * dt; r[1] += v[1] * dt; r[2] += v[2] * dt;
   coriolisRotate(v, h, omega, cfg);
-  kick(r, v, h, omega, cfg, support);
+  kick(r, v, h, omega, cfg, support, extra);
   applyDrag(v, h, cfg);
 }
 
 /** Advance a free projectile by dt using the exact path when valid, otherwise the integrator. */
-export function advanceFree(r: Vec3, v: Vec3, dt: number, omega: number, cfg: SimConfig) {
+export function advanceFree(r: Vec3, v: Vec3, dt: number, omega: number, cfg: SimConfig, extra: Vec3 | null = null) {
   if (analyticValid(cfg)) propagateAnalytic(r, v, omega, dt);
-  else integrate(r, v, dt, omega, cfg);
+  else integrate(r, v, dt, omega, cfg, null, extra);
 }

@@ -126,7 +126,7 @@ export class RingScene {
     this.level.add(ribs);
 
     this.buildBoxes(cfg, level);
-    this.buildSky();
+    this.buildSky(cfg);
   }
 
   private buildBoxes(cfg: SimConfig, level: Level) {
@@ -306,7 +306,7 @@ export class RingScene {
     }
   }
 
-  private buildSky() {
+  private buildSky(cfg: SimConfig) {
     const Rs = this.starRadius;
     // Stars: fixed in the inertial frame.
     const n = 5000;
@@ -340,6 +340,11 @@ export class RingScene {
       new THREE.MeshStandardMaterial({ map: this.textures.planet, fog: false, roughness: 1 }),
     );
     planet.position.set(-Rs * 0.55, Rs * 0.3, -Rs * 0.35);
+    if (cfg.planetPull > 0) {
+      // the planet doing the pulling: huge, in the direction of the pull
+      planet.scale.setScalar(2.4);
+      planet.position.set(Math.cos(cfg.planetAngle) * Rs * 0.6, Math.sin(cfg.planetAngle) * Rs * 0.6, -Rs * 0.05);
+    }
     planet.rotation.set(0.4, 0.2, 0.3);
     this.inertial.add(planet);
   }

@@ -3,7 +3,7 @@
 // deterministic (uses a stateless hash, never the sim RNG or Math.random), so
 // a server can run bots without disturbing replays.
 
-import { advanceFree, localBasis } from './physics';
+import { advanceFree, localBasis, planetPullAt } from './physics';
 import { boltStats, launchVelocity, muzzlePoint } from './step';
 import { hash01 } from './rng';
 import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_SPRINT, DT, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_IDS, omegaOf, type BoltKind, type InputCmd, type Player, type SimState } from './types';
@@ -44,7 +44,7 @@ export function solveAim(state: SimState, me: Player, target: Player, kind: Bolt
     let best = Infinity;
     let miss: Vec3 = [0, 0, 0];
     for (let i = 1; i <= steps; i++) {
-      advanceFree(r, v, DT, omega, cfg);
+      advanceFree(r, v, DT, omega, cfg, planetPullAt(cfg, state.frameAngle + omega * i * DT));
       const d = sub(addScaled(target.pos, target.vel, i * DT), r); // assume they keep going
       const dl = len(d);
       if (dl < best) { best = dl; miss = d; } else if (dl > best + 2) break;

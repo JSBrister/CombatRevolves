@@ -2,7 +2,7 @@
 // same propagation, same level sweep). Pure: does not touch the state.
 
 import { sphereTrace } from './level';
-import { advanceFree } from './physics';
+import { advanceFree, planetPullAt } from './physics';
 import { GRENADE_RADIUS, boltStats, launchVelocity, moveSphereBody, muzzlePoint, type SphereBody } from './step';
 import { DT, omegaOf, type BoltKind, type SimState, type ThrownKind } from './types';
 import { type Vec3, clone } from './vec';
@@ -30,7 +30,7 @@ export function predictTrajectory(
     const body: SphereBody = { pos: r, vel: v, radius, contactNormal: null };
     const fuse = Math.round(state.config.bounceFuse / DT);
     for (let i = 0; i < fuse; i++) {
-      moveSphereBody(state.level, state.config, omega, body, state.config.bounceRestitution);
+      moveSphereBody(state.level, state.config, omega, body, state.config.bounceRestitution, DT, planetPullAt(state.config, state.frameAngle + omega * i * DT));
       if (i % sampleEvery === 0) points.push(clone(body.pos));
     }
     points.push(clone(body.pos));
@@ -39,7 +39,7 @@ export function predictTrajectory(
   const n = Math.round(maxSeconds / DT);
   for (let i = 0; i < n; i++) {
     const p0 = clone(r);
-    advanceFree(r, v, DT, omega, state.config);
+    advanceFree(r, v, DT, omega, state.config, planetPullAt(state.config, state.frameAngle + omega * i * DT));
     const hit = sphereTrace(state.level, state.config, p0, r, radius);
     if (hit) {
       points.push(hit.pos);

@@ -18,6 +18,7 @@ export class Hud {
         : `Earth · g ${cfg.gravity.toFixed(2)} · no spin<br/>`) +
       (cfg.dragType !== 'none' && cfg.dragCoeff > 0 ? `atmosphere: ${cfg.dragType} drag ${cfg.dragCoeff}<br/>` : '') +
       (cfg.spin && cfg.gravity ? `+ real gravity ${cfg.gravity.toFixed(2)} m/s²<br/>` : '') +
+      (cfg.planetPull ? `planet pull ${cfg.planetPull.toFixed(1)} m/s² (sweeps round each spin)<br/>` : '') +
       (!cfg.coriolis || !cfg.centrifugal ? `<span style="color:#ff6a3d">${!cfg.centrifugal ? 'CENTRIFUGAL OFF ' : ''}${!cfg.coriolis ? 'CORIOLIS OFF' : ''}</span><br/>` : '') +
       (opts.timeScale !== 1 ? `<span style="color:#ffd27a">time ×${opts.timeScale.toFixed(2)}</span><br/>` : '') +
       (opts.freefly ? '<span style="color:#ffd27a">FREE-FLY CAMERA</span><br/>' : '');
