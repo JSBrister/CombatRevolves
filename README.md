@@ -101,9 +101,9 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 - **Terrain:** the floor can carry a height profile: Gaussian hills, and/or a *sphere band*, where the floor is the inside of a sphere of radius R round the equator, so it curves up toward the axis at the edges. The spin still pulls straight away from the axis, so walking toward an edge is like climbing a slope equal to your latitude in weaker g. Collision uses the height function's own gradient (exact for planes, close for smooth hills). Hills keep clear of ramps and lookouts.
 - **A whole sphere** (*Inside a Sphere*): a band that goes all the way to the poles, which the rim walls close off. You weigh g cos²(latitude); past about 53° the floor is too steep to stand on (an orange ring marks it) and you slide back toward the equator; near the poles you're almost weightless. The height-field distance estimate breaks down near the poles, so a plain sphere uses its exact distance. A glowing line along the axis and latitude rings make the shape readable, since there's no sky.
 - **Silly worlds:**
-  - *O'Neill Cylinder*: 2 km across, 3 km long and hilly, with a minute per turn.
+  - *O'Neill Cylinder*: 2 km across, 3 km long and hilly, with a minute per turn. Three strips of land alternate with three walkable glass windows.
   - *Swiss Cheese*: holes in the floor. Fall through and the spin flings you out into space.
-  - *Double Decker*: a second deck 10 m up, reached by ramps through slots in it.
+  - *Double Decker*: a second deck 10 m up, reached by ramps through slots in it and by lifts. A lift is a box whose position is a pure function of time (so replays stay exact), and it carries whoever stands on it.
   - *Stanford Torus*: inside a 40 m tube, so the floor curves up into a ceiling.
   - *Half-Pipe*: half a torus, open toward the axis, with nothing over the lips.
   - *The Log*: you stand on the outside of a spinning tube, on the side facing the axis. Too far round and you slide off.

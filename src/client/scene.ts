@@ -137,6 +137,16 @@ export class RingScene {
     this.buildSky(cfg);
   }
 
+  private liftMeshes = new Map<number, THREE.Mesh>();
+  /** Lifts move: follow the sim's boxes (interpolated between ticks by the caller's alpha is overkill at lift speeds). */
+  updateLifts(level: Level) {
+    if (!this.liftMeshes.size) return;
+    for (const b of level.boxes) {
+      const m = this.liftMeshes.get(b.id);
+      if (m) m.position.set(b.center[0], b.center[1], b.center[2]);
+    }
+  }
+
   private buildBoxes(cfg: SimConfig, level: Level) {
     const R = cfg.R;
     const m = new THREE.Matrix4();
@@ -145,9 +155,12 @@ export class RingScene {
     const edgeMat = new THREE.LineBasicMaterial({ color: 0x1a1510 });
     const wallMat = new THREE.MeshStandardMaterial({ map: this.textures.wall, roughness: 0.7, metalness: 0.3 });
     const stairMat = new THREE.MeshStandardMaterial({ map: this.textures.wall, color: 0xd6e2f5, emissive: 0x1c2a40, roughness: 0.6, metalness: 0.15 });
+    const liftMat = new THREE.MeshStandardMaterial({ color: 0x4a5a70, emissive: 0x1a4a7a, roughness: 0.5, metalness: 0.6 });
+    this.liftMeshes.clear();
     for (const b of level.boxes) {
       const geo = new THREE.BoxGeometry(2 * b.half[0], 2 * b.half[1], 2 * b.half[2]);
-      const mesh = new THREE.Mesh(geo, b.kind === 'ramp' ? stairMat : b.kind === 'wall' ? wallMat : boxMat);
+      const mesh = new THREE.Mesh(geo, b.kind === 'ramp' ? stairMat : b.kind === 'wall' ? wallMat : b.kind === 'lift' ? liftMat : boxMat);
+      if (b.lift) this.liftMeshes.set(b.id, mesh);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       basisMatrix(m, b.angle, 0, 0);

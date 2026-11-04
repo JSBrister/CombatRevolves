@@ -409,11 +409,13 @@ export interface Explosion {
 export interface Box {
   id: number;
   type: 'box';
-  kind: 'cover' | 'ramp' | 'wall';
+  kind: 'cover' | 'ramp' | 'wall' | 'lift';
   angle: number; // ring angle of the box centre
   tilt: number; // rotation about the axial direction (ramps): + tips the spinward end up
   center: Vec3;
   half: Vec3; // half extents along (spinward, up, axial) at `angle`
+  /** A lift: `center` moves `travel` m up from `base` and back, on a cycle of `period` s (a pure function of time). */
+  lift?: { base: Vec3; travel: number; period: number; phase: number };
 }
 
 export interface SpawnPoint {

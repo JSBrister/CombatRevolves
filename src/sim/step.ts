@@ -3,7 +3,7 @@
 // is the only clock and the seeded RNG lives in the state.
 
 import { clamp, closestOnSeg, segSegClosest, segSphere } from './geom';
-import { levelSdf, sphereTrace, spawnPosition } from './level';
+import { levelSdf, liftOffset, sphereTrace, spawnPosition } from './level';
 import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setSpinAlpha, viewVectors } from './physics';
 import { rngInt } from './rng';
 import {
@@ -124,6 +124,7 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   setSpinAlpha(spin.alpha);
   pull = planetPullAt(cfg, state.frameAngle);
   state.events = [];
+  moveLifts(state);
 
   const byPlayer = new Map<number, InputCmd>();
   for (const cmd of inputs) byPlayer.set(cmd.playerId, cmd);
@@ -796,6 +797,29 @@ function updateBolts(state: SimState, omega: number) {
     if (!dead) keep.push(b);
   }
   state.bolts = keep;
+}
+
+/**
+ * Lifts move on a fixed schedule. Anyone standing on one moves with it (the
+ * level push-out alone would leave you hopping as it goes down).
+ */
+function moveLifts(state: SimState) {
+  const t = (state.tick + 1) * DT;
+  for (const b of state.level.boxes) {
+    if (!b.lift) continue;
+    const up = localBasis(b.lift.base).up;
+    const next = addScaled(b.lift.base, up, liftOffset(b.lift, t));
+    const delta = sub(next, b.center);
+    if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) continue;
+    const spin: Vec3 = [-up[1], up[0], 0];
+    for (const p of state.players) {
+      if (!p.alive || p.vehicle >= 0) continue;
+      const d = sub(p.pos, b.center);
+      const lu = dot(d, up) - b.half[1] - standHeight(p.size);
+      if (Math.abs(dot(d, spin)) < b.half[0] + 0.3 && Math.abs(d[2]) < b.half[2] + 0.3 && lu > -0.3 && lu < 0.35) p.pos = add(p.pos, delta);
+    }
+    b.center = next;
+  }
 }
 
 /** Seeker hits in quick succession on one target add up to a big blast on them. */

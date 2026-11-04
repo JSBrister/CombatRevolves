@@ -1665,3 +1665,29 @@ describe('32. a changing spin: Euler forces', () => {
     expect(dot(p.vel, up)).toBeGreaterThan(s.config.jumpSpeed * 0.9); // no gravity to slow you
   });
 });
+
+describe('33. lifts', () => {
+  it('stand on a lift at the floor and it carries you up to the deck, smoothly', () => {
+    const { state: s, localId } = startLevel(levelById('s-decks')!);
+    s.players = s.players.filter((p) => p.id === localId);
+    const p = s.players[0];
+    const lift = s.level.boxes.find((b) => b.kind === 'lift')!;
+    expect(lift).toBeTruthy();
+    const dk = s.level.decks![0];
+    // wait until it's at the bottom, then step on
+    let guard = 0;
+    while (Math.hypot(lift.center[0], lift.center[1]) < s.config.R + 0.19 && guard++ < 120 * 30) run(s, 1, () => [cmdFor(s, localId)]);
+    const up = localBasis(lift.center).up;
+    p.pos = addScaled(lift.center, up, lift.half[1] + 0.9);
+    p.vel = [0, 0, 0];
+    let top = Infinity, airborne = 0;
+    for (let i = 0; i < 120 * 12; i++) {
+      step(s, [cmdFor(s, localId)], s.tick);
+      top = Math.min(top, Math.hypot(p.pos[0], p.pos[1]));
+      if (!p.grounded) airborne++;
+    }
+    expect(top).toBeLessThan(dk.r - 0.5); // carried right up to deck level
+    expect(airborne).toBeLessThan(20); // no hopping on the way
+    expect(p.alive).toBe(true);
+  });
+});

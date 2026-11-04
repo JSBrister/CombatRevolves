@@ -385,6 +385,7 @@ function frame(now: number) {
 
   views.cameraPos.copy(camera.position);
   rs.updateSun(fa, camera.position);
+  rs.updateLifts(state.level);
   views.render(state, prev, alpha, dtReal);
   // trajectory preview (real physics, includes the shooter's own velocity)
   const pk = previewKind();

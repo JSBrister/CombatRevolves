@@ -197,6 +197,16 @@ function tubeSdf(p: Vec3, rho: number, R: number, kind: 'inside' | 'half' | 'out
   out.n = [nr * cx, nr * cy, nz];
 }
 
+/** How far up a lift is at time t: waits at the bottom, rises, waits at the top, comes down (smoothly). */
+export function liftOffset(l: NonNullable<Box['lift']>, t: number): number {
+  const u = ((((t / l.period + l.phase) % 1) + 1) % 1) * 4;
+  const smooth = (x: number) => x * x * (3 - 2 * x);
+  if (u < 1) return 0;
+  if (u < 2) return l.travel * smooth(u - 1);
+  if (u < 3) return l.travel;
+  return l.travel * (1 - smooth(u - 3));
+}
+
 /** Signed distance to a hole's prism (positive outside it), and its gradient. */
 function holeSdf(p: Vec3, theta: number, h: Hole, R: number): SdfHit {
   const s = wrapAngle(theta - h.angle) * R;
@@ -529,6 +539,23 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       }
       dk.holes.push({ angle: (lo + hi) / 2, z, halfArc: ((hi - lo) * R) / 2, halfZ: width / 2 + 0.6 });
       stairs.push({ angle: mid, halfArc: rampLen / 2 + 2 });
+    }
+    // lifts: platforms flush with the floor that rise through a shaft to sit flush with the deck
+    const nLifts = Math.max(2, Math.round(playSpan(cfg) / 300));
+    for (let i = 0; i < nLifts; i++) {
+      const a = arcAngle(cfg, (i + 0.75) / nLifts);
+      const z = (i % 2 ? -1 : 1) * Math.min(cfg.halfWidth * 0.5, cfg.halfWidth - 4);
+      if (dk.holes.some((h) => Math.abs(wrapAngle(a - h.angle)) * R < h.halfArc + 6)) continue;
+      const hw = 1.8, th = 0.2;
+      const rc = R + th; // top flush with the floor at the bottom
+      const base: Vec3 = [rc * Math.cos(a), rc * Math.sin(a), z];
+      for (let j = boxes.length - 1; j >= 0; j--) {
+        const b = boxes[j];
+        if (b.kind !== 'wall' && Math.abs(wrapAngle(b.angle - a)) * R < hw + b.half[0] + 2 && Math.abs(b.center[2] - z) < hw + b.half[2] + 2) boxes.splice(j, 1);
+      }
+      boxes.push({ id: nextId(), type: 'box', kind: 'lift', angle: a, tilt: 0, center: [...base] as Vec3, half: [hw, th, hw], lift: { base, travel: D, period: 12, phase: i * 0.37 } });
+      dk.holes.push({ angle: a, z, halfArc: hw + 0.35, halfZ: hw + 0.35 });
+      stairs.push({ angle: a, halfArc: hw + 3 });
     }
     // a few skylights, cover and prizes up top
     const items: ItemKind[] = ['cannon', 'health', 'seeker', 'jetpack', 'rocket', 'sticky'];
