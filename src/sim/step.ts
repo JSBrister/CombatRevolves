@@ -656,7 +656,31 @@ function swing(state: SimState, p: Player, damage: number, knockback: number, re
     pr.vel = addScaled(pr.vel, kick, Math.min(60, knockback * (PLAYER_MASS / pr.mass)));
     pr.contactNormal = null;
   }
-  state.events.push({ type: 'melee', id: p.id, target: nearest?.id ?? -1, pos: addScaled(eye, v.aim, reach * 0.6) });
+  if (all) {
+    // the mallet hits everything in the arc: bikes...
+    for (const vh of state.vehicles) {
+      if (!vh.alive || vh.driver === p.id) continue;
+      const to = sub(vh.pos, eye);
+      if (len(to) - vh.radius > reach || dot(norm(to), v.aim) < minDot) continue;
+      vh.vel = addScaled(vh.vel, kick, knockback * (PLAYER_MASS / BIKE_MASS));
+      vh.contactNormal = null;
+      damageVehicle(state, vh, p.id, damage);
+    }
+    // ...and loose grenades, batted away along your aim (they're yours now)
+    for (const g of state.grenades) {
+      if (g.stuck) continue;
+      const to = sub(g.pos, eye);
+      if (len(to) > reach + 0.5 || dot(norm(to), v.aim) < minDot) continue;
+      g.vel = addScaled(p.vel, v.aim, Math.max(25, knockback));
+      g.owner = p.id;
+      g.armed = true;
+      g.contactNormal = null;
+    }
+  }
+  state.events.push({
+    type: 'melee', id: p.id, target: nearest?.id ?? -1, pos: addScaled(eye, v.aim, reach * 0.6),
+    mallet: all, from: eye, aim: v.aim, up: v.up, reach, cone: minDot,
+  });
 }
 
 function fireBolt(state: SimState, p: Player, kind: BoltKind) {

@@ -2,7 +2,7 @@
 // the previous and current tick.
 
 import * as THREE from 'three';
-import { type Player, type Prediction, type SimState, type Vec3, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS } from '../sim';
+import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_HAMMER } from '../sim';
 import { makeBike, makeGun, makePickup } from './models';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
@@ -136,6 +136,10 @@ export class EntityViews {
   /** If true, the local player's own shield bubble is drawn (free-fly / inertial views). */
   showSelf = false;
   private splashes: { s: THREE.Sprite; t: number; size: number }[] = [];
+  /** Mallet swings: the arc that was hit (sweeps across, then fades) and each swinger's progress. */
+  private arcs: { mesh: THREE.Mesh; t: number; half: number; inner: number; reach: number }[] = [];
+  private swingT = new Map<number, number>();
+  private fpSwing = -1; // first-person swing progress 0..1 (-1 = none)
 
   /** A quick glow where a shot lands (or a shield pops). */
   burst(pos: Vec3, color: number, size: number) {
@@ -159,6 +163,29 @@ export class EntityViews {
     this.beams.push({ line: rod, t: 1 });
   }
 
+  /** A mallet swing: animate the swinger and flash the arc it hit. */
+  swing(e: Extract<SimEvent, { type: 'melee' }>) {
+    if (!e.mallet) return;
+    this.swingT.set(e.id, 0);
+    if (e.id === this.localId) this.fpSwing = 0;
+    const X = new THREE.Vector3(...e.aim).normalize();
+    const Z = new THREE.Vector3(...e.up);
+    Z.addScaledVector(X, -Z.dot(X));
+    if (Z.lengthSq() < 1e-6) Z.set(0, 0, 1);
+    Z.normalize();
+    const Y = new THREE.Vector3().crossVectors(Z, X);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x9ad0ff, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
+    mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
+    // start a little in front of the eye so it doesn't fill your own view
+    mesh.position.set(...e.from);
+    mesh.frustumCulled = false;
+    this.root.add(mesh);
+    this.arcs.push({ mesh, t: 0, half: Math.acos(Math.max(-1, Math.min(1, e.cone))), inner: e.reach * 0.55, reach: e.reach });
+  }
+
   jab = 0; // 0..1, set to 1 on a melee
   reloadDip = 0; // 0..1 while reloading
 
@@ -169,6 +196,7 @@ export class EntityViews {
     this.viewModel.clear();
     const gun = makeGun(weapon);
     gun.traverse((o) => o.layers.set(LAYER_ROT_TRAILS)); // main camera only
+    if (weapon === WEAPON_HAMMER) gun.position.x = 0.3; // pivot at the grip, so a swing sweeps the head
     this.viewModel.add(gun);
     this.viewWeapon = weapon;
   }
@@ -321,6 +349,13 @@ export class EntityViews {
         v.gunWeapon = p.weapon;
       }
       v.gunHolder.rotation.z = p.pitch; // tip the gun up/down with the aim
+      const sw = this.swingT.get(p.id);
+      if (sw !== undefined && p.weapon === WEAPON_HAMMER) {
+        // wind up over the right shoulder, then sweep across to the left
+        const k = sw < 0.25 ? -sw / 0.25 : -1 + 2 * Math.sin(((sw - 0.25) / 0.75) * Math.PI / 2);
+        v.gunHolder.rotation.y = 1.3 * k;
+        v.gunHolder.rotation.x = -0.4 * (1 - Math.abs(k));
+      } else { v.gunHolder.rotation.y = 0; v.gunHolder.rotation.x = 0; }
       v.flame.visible = p.jetting;
       if (p.jetting) v.flame.scale.setScalar(0.7 + Math.random() * 0.5);
       // Shields: the bubble flashes on hits, bursts when the shield breaks,
@@ -481,10 +516,35 @@ export class EntityViews {
       if (sp.t <= 0) sp.s.removeFromParent();
     }
     this.splashes = this.splashes.filter((sp) => sp.t > 0);
-    // first-person gun: jab on melee, dip while reloading
+    // mallet swings: progress, and the arc sweeping across then fading
+    for (const [id, t] of this.swingT) {
+      const nt = t + dtReal / 0.3;
+      if (nt >= 1) this.swingT.delete(id); else this.swingT.set(id, nt);
+    }
+    for (const a of this.arcs) {
+      a.t += dtReal / 0.35;
+      const sweep = Math.min(1, a.t * 3);
+      const len = 2 * a.half * sweep;
+      a.mesh.geometry.dispose();
+      a.mesh.geometry = new THREE.RingGeometry(a.inner, a.reach, 24, 1, -a.half, Math.max(0.001, len));
+      (a.mesh.material as THREE.MeshBasicMaterial).opacity = 0.35 * Math.max(0, 1 - a.t);
+      if (a.t >= 1) { a.mesh.removeFromParent(); a.mesh.geometry.dispose(); }
+    }
+    this.arcs = this.arcs.filter((a) => a.t < 1);
+    // first-person gun: jab on melee, dip while reloading, sweep on a mallet swing
     this.jab = Math.max(0, this.jab - dtReal * 5);
-    this.viewModel.position.set(0.2, -0.17 - 0.18 * this.reloadDip, -0.42 - 0.25 * Math.sin(this.jab * Math.PI));
-    this.viewModel.rotation.x = -0.6 * this.reloadDip;
+    let swingYaw = 0, swingRoll = 0;
+    if (this.fpSwing >= 0) {
+      const sw = this.fpSwing;
+      const k = sw < 0.25 ? -sw / 0.25 : -1 + 2 * Math.sin(((sw - 0.25) / 0.75) * Math.PI / 2);
+      swingYaw = 0.9 * k; // wind up to the right, sweep to the left
+      swingRoll = -0.3 * Math.max(0, k);
+      this.fpSwing += dtReal / 0.3;
+      if (this.fpSwing >= 1) this.fpSwing = -1;
+    }
+    const jab = this.fpSwing >= 0 ? 0 : this.jab;
+    this.viewModel.position.set(0.2 - 0.15 * Math.sin(swingYaw), -0.17 - 0.18 * this.reloadDip, -0.42 - 0.25 * Math.sin(jab * Math.PI));
+    this.viewModel.rotation.set(-0.6 * this.reloadDip + swingRoll, Math.PI / 2 + swingYaw, 0);
     this.flashT = Math.max(0, this.flashT - dtReal * 3);
     this.flashLight.intensity = 60 * this.flashT;
   }

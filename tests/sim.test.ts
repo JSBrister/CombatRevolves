@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, scale, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, scale, addVehicle, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1002,6 +1002,25 @@ describe('21. aim, shot speed and the Grav Mallet', () => {
     }
     expect(Math.hypot(...BK.vel)).toBeLessThan(1);
     expect(BK.health + BK.shield).toBe(170);
+  });
+  it('the Grav Mallet also bats loose grenades and knocks bikes', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    run(s, 20);
+    const p = s.players[0];
+    applyItem(s.config, p, 'hammer', -1);
+    run(s, 40, () => [cmdFor(s, id, { weapon: WEAPON_HAMMER })]);
+    const b = localBasis(p.pos);
+    const g = spawnGrenade(s, 99, addScaled(p.pos, b.spin, 1.5), scale(b.spin, -3), 'bounce');
+    const vid = addVehicle(s, addScaled(addScaled(p.pos, b.spin, 2), b.axial, 0.6), 0);
+    const bike = s.vehicles.find((v) => v.id === vid)!;
+    step(s, [cmdFor(s, id, { weapon: WEAPON_HAMMER, buttons: BTN_FIRE })], s.tick);
+    expect(dot(g.vel, b.spin)).toBeGreaterThan(20);
+    expect(g.owner).toBe(id);
+    expect(dot(bike.vel, b.spin)).toBeGreaterThan(1);
+    expect(bike.health).toBeLessThan(bike.maxHealth);
+    const ev = s.events.find((e) => e.type === 'melee');
+    expect(ev && ev.type === 'melee' && ev.mallet).toBe(true);
   });
 });
 

@@ -400,7 +400,7 @@ export type SimEvent =
   | { type: 'mount'; id: number; vehicle: number; on: boolean }
   | { type: 'vehicleHit'; id: number; damage: number; pos: Vec3 }
   | { type: 'vehicleDestroyed'; id: number; pos: Vec3 }
-  | { type: 'melee'; id: number; target: number; pos: Vec3 }
+  | { type: 'melee'; id: number; target: number; pos: Vec3; mallet: boolean; from: Vec3; aim: Vec3; up: Vec3; reach: number; cone: number }
   | { type: 'pickup'; id: number; item: ItemKind; player: number; pos: Vec3 }
   | { type: 'overheat'; id: number }
   | { type: 'jump'; id: number }

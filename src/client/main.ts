@@ -272,7 +272,8 @@ function handleEvent(e: SimEvent) {
     case 'reload': if (e.id === localId) sfx.reload(); break;
     case 'melee':
       sfx.melee(d(e.pos), e.target >= 0);
-      if (e.id === localId) views.jab = 1;
+      if (e.id === localId && !e.mallet) views.jab = 1;
+      views.swing(e);
       if (e.target >= 0) views.burst(e.pos, 0xffffff, 1.5);
       break;
     case 'stick': sfx.stick(d(e.pos)); break;
