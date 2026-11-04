@@ -13,6 +13,9 @@ export interface SimConfig {
   halfWidth: number; // half of the ring width along Z
   spin: boolean; // false: the world doesn't rotate at all (Earth)
   arena: number; // 0 = the whole ring is playable; >0 = only this many metres of it (end walls), e.g. Earth
+  terrainSphere: boolean; // floor is a band round the inside of a sphere of radius R (curves up at the edges)
+  hills: number; // how many Gaussian hills on the floor (0 = flat)
+  hillHeight: number; // tallest hill (m)
   gravity: number; // real gravity toward the floor (m/s^2), on top of any spin. 0 on a normal ring.
   wallHeight: number;
   wallThickness: number;
@@ -316,8 +319,17 @@ export interface SpawnPoint {
  */
 export type LevelShape = 'ring';
 
+/** A Gaussian hill on the floor. */
+export interface Hill {
+  angle: number; // ring angle of its peak
+  z: number;
+  height: number; // m
+  radius: number; // m (Gaussian sigma)
+}
+
 export interface Level {
   shape: LevelShape;
+  terrain: { sphere: boolean; hills: Hill[] } | null; // null = flat cylinder floor
   boxes: Box[];
   stairTops: Vec3[]; // a floor point on each staircase's lookout (add stand height to place a player)
   spawns: SpawnPoint[];

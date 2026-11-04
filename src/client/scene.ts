@@ -4,7 +4,7 @@
 // trails) are fixed in the non-rotating frame.
 
 import * as THREE from 'three';
-import type { Level, SimConfig } from '../sim';
+import { floorRadius, type Level, type SimConfig } from '../sim';
 import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, wallTexture } from './textures';
 
 export const LAYER_ROT_TRAILS = 1;
@@ -71,9 +71,13 @@ export class RingScene {
     deck.repeat.set((2 * Math.PI * R) / 5, (2 * W) / 5);
     const floorGeo = new THREE.CylinderGeometry(R, R, 2 * W, segs, 1, true);
     floorGeo.rotateX(Math.PI / 2);
-    const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ map: deck, side: THREE.BackSide, roughness: 0.85, metalness: 0.2 }));
-    floor.receiveShadow = true;
-    this.level.add(floor);
+    if (level.terrain) {
+      this.level.add(this.terrainMesh(cfg, level));
+    } else {
+      const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ map: deck, side: THREE.BackSide, roughness: 0.85, metalness: 0.2 }));
+      floor.receiveShadow = true;
+      this.level.add(floor);
+    }
 
     // Center stripe + edge stripes (painted on, slightly above the floor).
     const stripe = (z: number, w: number, color: number) => {
@@ -82,9 +86,11 @@ export class RingScene {
       g.translate(0, 0, z);
       this.level.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, side: THREE.BackSide, roughness: 0.6 })));
     };
-    stripe(0, 0.6, 0xc9a43a);
-    stripe(W - 1.5, 0.4, 0x8a96a8);
-    stripe(-W + 1.5, 0.4, 0x8a96a8);
+    if (!level.terrain) {
+      stripe(0, 0.6, 0xc9a43a);
+      stripe(W - 1.5, 0.4, 0x8a96a8);
+      stripe(-W + 1.5, 0.4, 0x8a96a8);
+    }
 
     // Spinward chevrons (instanced) every 10 m, pointing in the omega x r direction.
     const chev = new THREE.BufferGeometry();
@@ -102,11 +108,11 @@ export class RingScene {
         inst.setMatrixAt(k++, m);
       }
     }
-    this.level.add(inst);
+    if (!level.terrain) this.level.add(inst); // painted arrows only on a flat floor
 
     // Rim walls, one piece per sector so heights can vary (low curbs = you can fall off).
-    this.buildWalls(cfg, level.wallPos, 1, segs);
-    this.buildWalls(cfg, level.wallNeg, -1, segs);
+    this.buildWalls(cfg, level.wallPos, 1, segs, level);
+    this.buildWalls(cfg, level.wallNeg, -1, segs, level);
     const hullGeo = new THREE.CylinderGeometry(R + hull, R + hull, 2 * (W + T), segs, 1, true);
     hullGeo.rotateX(Math.PI / 2);
     this.level.add(new THREE.Mesh(hullGeo, new THREE.MeshStandardMaterial({ color: 0x2a2f38, roughness: 0.9, metalness: 0.5 })));
@@ -222,8 +228,47 @@ export class RingScene {
     this.level.add(sun);
   }
 
-  private buildWalls(cfg: SimConfig, heights: number[], sgn: number, segs: number) {
-    const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
+  /** The floor as a mesh following the terrain (hills / sphere band). */
+  private terrainMesh(cfg: SimConfig, level: Level): THREE.Mesh {
+    const R = cfg.R, W = cfg.halfWidth + cfg.wallThickness;
+    const span = 2 * Math.PI * R;
+    const nu = Math.min(1400, Math.max(96, Math.round(span / 1.5)));
+    const nv = Math.min(120, Math.max(8, Math.round((2 * W) / 1.5)));
+    const pos = new Float32Array((nu + 1) * (nv + 1) * 3);
+    const uv = new Float32Array((nu + 1) * (nv + 1) * 2);
+    const tile = level.terrain!.hills.length ? 4 : 5;
+    let k = 0;
+    for (let i = 0; i <= nu; i++) {
+      const a = (i / nu) * Math.PI * 2;
+      for (let j = 0; j <= nv; j++) {
+        const z = -W + (2 * W * j) / nv;
+        const r = floorRadius(level, cfg, a, z);
+        pos[k * 3] = r * Math.cos(a); pos[k * 3 + 1] = r * Math.sin(a); pos[k * 3 + 2] = z;
+        uv[k * 2] = (a * R) / tile; uv[k * 2 + 1] = z / tile;
+        k++;
+      }
+    }
+    const idx: number[] = [];
+    for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
+      const a = i * (nv + 1) + j, b = (i + 1) * (nv + 1) + j;
+      idx.push(a, a + 1, b, b, a + 1, b + 1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const tex = (level.terrain!.hills.length ? this.textures.grass : this.textures.deck).clone();
+    tex.needsUpdate = true;
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.9, metalness: 0.05 }));
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  private buildWalls(cfg: SimConfig, heights: number[], sgn: number, segs: number, level?: Level) {
+    const W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
+    // walls stand on the floor at the edge: higher up on a sphere band
+    const R = level?.terrain?.sphere ? Math.sqrt(cfg.R * cfg.R - W * W) : cfg.R;
     const n = heights.length;
     if (!n) return;
     const step = (2 * Math.PI) / n;
@@ -241,7 +286,7 @@ export class RingScene {
       const isLow = h < cfg.wallHeight * 0.5;
       const inner = new THREE.Mesh(new THREE.RingGeometry(R - h, R, segsPer, 1, a0, step), isLow ? low : tall);
       inner.position.z = sgn * W;
-      const outer = new THREE.Mesh(new THREE.RingGeometry(R - h, R + hull, segsPer, 1, a0, step), outerMat);
+      const outer = new THREE.Mesh(new THREE.RingGeometry(R - h, cfg.R + hull, segsPer, 1, a0, step), outerMat);
       outer.position.z = sgn * (W + T);
       // Cylinder theta 0 maps to ring angle -pi/2 after rotateX(pi/2).
       const topGeo = new THREE.CylinderGeometry(R - h, R - h, T, segsPer, 1, true, a0 + Math.PI / 2, step);

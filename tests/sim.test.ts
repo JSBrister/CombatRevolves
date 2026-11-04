@@ -1072,3 +1072,47 @@ describe('23. per-level world settings', () => {
     expect([fromEarth.state.config.spin, fromEarth.state.config.gravity, fromEarth.state.config.arena]).toEqual([true, 0, 0]);
   });
 });
+
+describe('24. terrain: hills and the sphere band', () => {
+  it('you can stand on a hilltop; the floor really is up there', () => {
+    const { state, localId } = startLevel(levelById('s-hills')!);
+    const s = state;
+    s.players = s.players.filter((p) => p.id === localId);
+    const p = s.players[0];
+    const hill = [...s.level.terrain!.hills].sort((a, b) => b.height - a.height)[0];
+    const R = s.config.R;
+    const r0 = R - hill.height - 3; // drop onto the peak from 3 m above
+    p.pos = [r0 * Math.cos(hill.angle), r0 * Math.sin(hill.angle), hill.z];
+    p.vel = [0, 0, 0];
+    run(s, 240, () => [cmdFor(s, localId)]);
+    expect(p.grounded).toBe(true);
+    const height = R - Math.hypot(p.pos[0], p.pos[1]) - 0.9;
+    expect(height).toBeGreaterThan(hill.height * 0.8);
+  });
+  it('on the sphere band you weigh g cos^2(latitude), and the edge rises like a hill', () => {
+    const { state, localId } = startLevel(levelById('s-bowl')!);
+    const s = state;
+    s.players = s.players.filter((p) => p.id === localId);
+    const p = s.players[0];
+    const R = s.config.R, z = 40, lat = Math.asin(z / R);
+    const fr = Math.sqrt(R * R - z * z); // floor radius there
+    expect(R - fr).toBeGreaterThan(10); // the floor has climbed > 10 m toward the axis
+    const ang = 0.3;
+    // stand there (capsule centre 0.9 m in from the floor, along the local "up")
+    p.pos = [(fr - 0.9) * Math.cos(ang), (fr - 0.9) * Math.sin(ang), z + 0.9 * Math.sin(lat)];
+    p.vel = [0, 0, 0];
+    run(s, 360, () => [cmdFor(s, localId)]);
+    expect(p.grounded).toBe(true);
+    expect(Math.abs(p.apparentG - Math.cos(lat) ** 2)).toBeLessThan(0.08);
+  });
+  it('every terrain level builds and its players settle on the ground', () => {
+    for (const id of ['s-hills', 's-bowl', 's-wide', 'c6']) {
+      const { state, localId } = startLevel(levelById(id)!);
+      run(state, 120, (st) => [cmdFor(st, localId)]);
+      for (const p of state.players) {
+        expect(p.pos.every(Number.isFinite)).toBe(true);
+        expect(p.grounded).toBe(true);
+      }
+    }
+  });
+});

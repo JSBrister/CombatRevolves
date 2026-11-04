@@ -105,6 +105,16 @@ export const LEVELS: LevelDef[] = [
       { type: 'heavy', angle: 25, z: 0 }, { type: 'soldier', angle: 35, z: -10 }, { type: 'grunt', angle: -20, z: -5 },
     ],
   },
+  {
+    id: 'c6', mode: 'campaign', name: 'Hill Country', seed: 606,
+    blurb: 'A 200 m ring of rolling hills, 100 m wide. Hold the high ground; mind the grenades rolling down it.',
+    config: { R: 200, halfWidth: 50, hills: 26, hillHeight: 9 },
+    enemies: [
+      { type: 'soldier', along: 40, z: -15 }, { type: 'soldier', along: 55, z: 20 }, { type: 'grunt', along: 35, z: 5 },
+      { type: 'grunt', along: 38, z: -5 }, { type: 'heavy', along: 90, z: 0 }, { type: 'skirmisher', along: -45, z: 10 },
+      { type: 'sniper', stair: 1 },
+    ],
+  },
   // ------------------------------------------------------------ sandbox
   { id: 's-earth', mode: 'sandbox', name: 'Earth (reference)', seed: 21, config: { ...EARTH }, bots: 2, sky: 'earth', variedWalls: false,
     blurb: 'Uniform 1 g, flat ground, no spin: what everything "should" do. Compare any trick here and on a ring.' },
@@ -118,6 +128,13 @@ export const LEVELS: LevelDef[] = [
     blurb: 'A 45 s spin and 70 m/s rim speed. Feels almost like home.' },
   { id: 's-huge', mode: 'sandbox', name: 'Huge ring (2000 m)', seed: 14, config: { R: 2000 }, bots: 4,
     blurb: '12.6 km around. The far side is a thin line in the sky.' },
+  { id: 's-hills', mode: 'sandbox', name: 'Rolling Hills (200 m)', seed: 31, config: { R: 200, halfWidth: 50, hills: 30, hillHeight: 10 }, bots: 3,
+    blurb: 'A wide ring of grassy hills. Balls and bouncing grenades roll downhill, and "downhill" changes as you run.' },
+  { id: 's-bowl', mode: 'sandbox', name: 'Bowl World (sphere band)', seed: 32, config: { R: 80, halfWidth: 55, terrainSphere: true, wallHeight: 3 },
+    variedWalls: false, bots: 2,
+    blurb: 'A band round the inside of a spinning sphere, out to 43 degrees latitude. The edges are hills you climb in weaker gravity (g cos^2 of your latitude).' },
+  { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
+    blurb: '140 m across: room to flank, and to watch your shots curve sideways.' },
   { id: 's-hazy', mode: 'sandbox', name: 'Hazy ring (atmosphere)', seed: 16, config: { R: 100, dragType: 'quadratic', dragCoeff: 0.004 }, bots: 2,
     blurb: 'The one ring with air. Bolts slow down and droop, grenades fall short, jetpacks hit a terminal speed.' },
   { id: 's-empty', mode: 'sandbox', name: 'Empty ring (100 m)', seed: 15, config: { R: 100 }, bots: 0,
@@ -125,13 +142,13 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
 /** Floor position at `angleDeg` (from the start, + spinward) and `z`. */
-function floorAt(cfg: SimConfig, startAngle: number, angleDeg: number, z: number, height: number): Vec3 {
-  return spawnPosition(cfg, { angle: startAngle + (angleDeg * Math.PI) / 180, z }, height);
+function floorAt(state: SimState, startAngle: number, angleDeg: number, z: number, height: number): Vec3 {
+  return spawnPosition(state.config, { angle: startAngle + (angleDeg * Math.PI) / 180, z }, height, state.level);
 }
 
 export interface StartedLevel {
@@ -167,7 +184,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
 
   const localId = addPlayer(state, 'human', 'You');
   const me = state.players.find((p) => p.id === localId)!;
-  me.pos = freeSpotNear(state, floorAt(cfg, 0, start.angle, start.z, standHeight(1)), 1);
+  me.pos = freeSpotNear(state, floorAt(state, 0, start.angle, start.z, standHeight(1)), 1);
   if (campaign) {
     me.team = 0;
     me.canRespawn = false;
@@ -200,7 +217,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
       const top = e.stair !== undefined ? state.level.stairTops[e.stair % Math.max(1, state.level.stairTops.length)] : undefined;
       p.pos = freeSpotNear(state, top
         ? addScaled(top, localBasis(top).up, standHeight(t.size))
-        : floorAt(cfg, startAngle, e.along !== undefined ? (e.along / cfg.R) * (180 / Math.PI) : (e.angle ?? 0), e.z ?? 0, standHeight(t.size)), t.size);
+        : floorAt(state, startAngle, e.along !== undefined ? (e.along / cfg.R) * (180 / Math.PI) : (e.angle ?? 0), e.z ?? 0, standHeight(t.size)), t.size);
       // face the player
       p.yaw = (e.angle ?? 0) > 0 ? Math.PI : 0;
       botIds.push(id);

@@ -1028,7 +1028,7 @@ function updateVitals(state: SimState, p: Player) {
   const spawns = state.level.spawns;
   let si = p.homeSpawn;
   if (p.kind !== 'dummy') si = rngInt(state, spawns.length);
-  p.pos = p.homeSpawn < 0 ? dummyHome(cfg, p.homeSpawn) : spawnPosition(cfg, spawns[si], standHeight(p.size));
+  p.pos = p.homeSpawn < 0 ? dummyHome(cfg, p.homeSpawn) : spawnPosition(cfg, spawns[si], standHeight(p.size), state.level);
   p.vel = [0, 0, 0];
   p.alive = true;
   p.health = p.maxHealth;

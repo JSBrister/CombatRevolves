@@ -5,6 +5,7 @@
 import { rngNext, rngRange } from './rng';
 import type { Box, ItemKind, Level, SimConfig, SpawnPoint } from './types';
 import { type Vec3, rhoOf } from './vec';
+import { floorRadius, makeHills, terrainAt } from './terrain';
 
 export interface SdfHit {
   d: number; // signed distance (negative = inside solid)
@@ -82,6 +83,31 @@ function rimWall(p: Vec3, rho: number, theta: number, heights: number[], R: numb
   }
 }
 
+/**
+ * Floor with a height profile: solid where rho > R - h(angle, z), clipped to
+ * the ring's width and the hull's outside. Distance estimate -F/|grad F|.
+ */
+function terrainFloor(level: Level, cfg: SimConfig, p: Vec3, rho: number, theta: number, out: SdfHit) {
+  const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness;
+  const t = terrainAt(level, cfg, theta, p[2]);
+  const F = rho - (R - t.h);
+  // grad F = r_hat + dh/ds * spin_hat + dh/dz * z_hat
+  const g = Math.sqrt(1 + t.dhds * t.dhds + t.dhdz * t.dhdz);
+  const dFloor = -F / g;
+  const dSide = Math.abs(p[2]) - (W + T);
+  const dOut = rho - (R + cfg.hullThickness);
+  const d = Math.max(dFloor, dSide, dOut);
+  if (d >= out.d) return;
+  out.d = d;
+  const ir = rho > 1e-9 ? 1 / rho : 0;
+  const cx = p[0] * ir, cy = p[1] * ir; // r_hat
+  if (d === dFloor) {
+    // outward normal of the solid = -grad F / |grad F|
+    out.n = [(-cx + t.dhds * cy) / g, (-cy - t.dhds * cx) / g, -t.dhdz / g];
+  } else if (d === dSide) out.n = [0, 0, Math.sign(p[2]) || 1];
+  else out.n = [cx, cy, 0];
+}
+
 function boxSdf(p: Vec3, b: Box, out: SdfHit) {
   const c = Math.cos(b.angle), s = Math.sin(b.angle);
   // local axes: spin = (-s, c, 0), up = (-c, -s, 0), axial = (0,0,1)
@@ -129,10 +155,13 @@ function ringSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   const out: SdfHit = { d: Infinity, n: [0, 0, 1] };
   const rho = rhoOf(p);
   const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
-  annulus(p, rho, R, R + hull, -(W + T), W + T, out); // floor / hull
   const theta = Math.atan2(p[1], p[0]);
-  rimWall(p, rho, theta, level.wallPos, R, R + hull, W, W + T, out); // +Z rim wall
-  rimWall(p, rho, theta, level.wallNeg, R, R + hull, -(W + T), -W, out); // -Z rim wall
+  if (level.terrain) terrainFloor(level, cfg, p, rho, theta, out);
+  else annulus(p, rho, R, R + hull, -(W + T), W + T, out); // floor / hull
+  // rim walls stand on the floor at the edge (higher up on a sphere band)
+  const edge = level.terrain?.sphere ? R - Math.sqrt(R * R - W * W) : 0;
+  rimWall(p, rho, theta, level.wallPos, R - edge, R + hull, W, W + T, out); // +Z rim wall
+  rimWall(p, rho, theta, level.wallNeg, R - edge, R + hull, -(W + T), -W, out); // -Z rim wall
   for (const b of level.boxes) boxSdf(p, b, out);
   return out;
 }
@@ -225,10 +254,30 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const walls = makeWalls(cfg, rng, variedWalls);
   const boxes: Box[] = [];
   const R = cfg.R;
+  // where the lookout ramps will go (same formula as below), so hills keep clear of them
+  const span0 = playSpan(cfg);
+  const nRamps0 = withObstacles ? Math.max(2, Math.min(12, Math.round(span0 / 150))) : 0;
+  const H0 = Math.max(2, Math.min(LOOKOUT_HEIGHT, 0.3 * R));
+  const rampClear = Array.from({ length: nRamps0 }, (_, s) => ({
+    angle: arcAngle(cfg, (s + 0.5) / nRamps0 + (cfg.arena > 0 ? 0 : 1 / 16)),
+    halfArc: (H0 / RAMP_SLOPE + STAIR_TOP) / 2 + 2,
+  }));
+  const terrain = cfg.terrainSphere || cfg.hills > 0
+    ? { sphere: cfg.terrainSphere, hills: makeHills(cfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), rampClear) }
+    : null;
+  const probe: Level = { shape: 'ring', terrain, boxes, stairTops: [], spawns, pickupSpots: [], wallPos: [], wallNeg: [] };
+  /** Floor radius here (R on a flat floor). */
+  const Rf = (angle: number, z: number) => floorRadius(probe, cfg, angle, z);
+  /** How much a footprint of this size must be buried to sit on sloping ground. */
+  const bury = (angle: number, z: number, ht: number, hz: number) => {
+    if (!terrain) return 0;
+    const t = terrainAt(probe, cfg, angle, z);
+    return Math.abs(t.dhds) * ht + Math.abs(t.dhdz) * hz + 0.3;
+  };
   const addBox = (angle: number, z: number, ht: number, hu: number, hz: number, kind: Box['kind'] = 'cover') => {
-    const sag = (ht * ht) / (2 * R) + 0.05; // bury the bottom so the curved floor never shows a gap
+    const sag = (ht * ht) / (2 * R) + 0.05 + bury(angle, z, ht, hz); // bury the bottom so the curved floor never shows a gap
     const huTot = hu + sag / 2;
-    const rc = R - 2 * hu + huTot; // top stays at height 2*hu
+    const rc = Rf(angle, z) - 2 * hu + huTot; // top stays at height 2*hu
     boxes.push({ id: nextId(), type: 'box', kind, angle, tilt: 0, center: [rc * Math.cos(angle), rc * Math.sin(angle), z], half: [ht, huTot, hz] });
   };
   /**
@@ -240,6 +289,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
    */
   /** Returns the ring angle where the ramp's top edge ends (the platform starts there). */
   const addRamp = (midAngle: number, z: number, len: number, H: number, dir: number, width = STAIR_WIDTH): number => {
+    const R = Rf(midAngle, z); // the local floor radius (differs from cfg.R on terrain)
     // exact: a point d along the tangent at height y above it sits at radius
     // sqrt((R - y)^2 + d^2), so "h above the floor" means y = R - sqrt((R - h)^2 - d^2)
     const d = len / 2;
@@ -260,7 +310,10 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const stairs: { angle: number; halfArc: number }[] = [];
   const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
   const stairTops: Vec3[] = [];
-  const at = (angle: number, height: number, z: number): Vec3 => [(R - height) * Math.cos(angle), (R - height) * Math.sin(angle), z];
+  const at = (angle: number, height: number, z: number): Vec3 => {
+    const r = Rf(angle, z) - height;
+    return [r * Math.cos(angle), r * Math.sin(angle), z];
+  };
   // Features scale down on small rings so nothing towers over the axis.
   const k = Math.min(1, R / 60);
   const arena = cfg.arena > 0;
@@ -342,7 +395,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       else addBox(angle, z, rngRange(rng, 3, 5) * Math.max(k, 0.5), rngRange(rng, 0.4, 0.6) * k, rngRange(rng, 3, 5)); // low platform
     }
   }
-  return { shape: 'ring', boxes, stairTops, spawns, pickupSpots, ...walls };
+  return { shape: 'ring', terrain, boxes, stairTops, spawns, pickupSpots, ...walls };
 }
 
 export const LOOKOUT_HEIGHT = 11; // m (capped at 30% of the radius on small rings)
@@ -351,7 +404,7 @@ export const RAMP_SLOPE = 0.45; // rise per metre (about 24 degrees): walkable
 export const STAIR_WIDTH = 5; // m across the ring
 export const STAIR_TOP = 6; // lookout platform length
 
-export function spawnPosition(cfg: SimConfig, s: SpawnPoint, heightAboveFloor: number): Vec3 {
-  const r = cfg.R - heightAboveFloor;
+export function spawnPosition(cfg: SimConfig, s: SpawnPoint, heightAboveFloor: number, level?: Level): Vec3 {
+  const r = (level ? floorRadius(level, cfg, s.angle, s.z) : cfg.R) - heightAboveFloor;
   return [r * Math.cos(s.angle), r * Math.sin(s.angle), s.z];
 }

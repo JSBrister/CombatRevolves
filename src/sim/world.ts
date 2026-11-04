@@ -45,7 +45,7 @@ export function createState(opts: WorldOptions = {}): SimState {
     rng: (opts.seed ?? 1234) >>> 0,
     nextId: 1,
     config,
-    level: { shape: 'ring', boxes: [], stairTops: [], spawns: [], pickupSpots: [], wallPos: [], wallNeg: [] },
+    level: { shape: 'ring', terrain: null, boxes: [], stairTops: [], spawns: [], pickupSpots: [], wallPos: [], wallNeg: [] },
     players: [],
     bolts: [],
     grenades: [],
@@ -92,7 +92,7 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
   const id = allocId(state);
   const spawns = state.level.spawns;
   const si = spawnIndex ?? (state.players.filter((p) => p.kind !== 'dummy').length % spawns.length);
-  const pos = spawnPosition(state.config, spawns[si], PLAYER_STAND);
+  const pos = spawnPosition(state.config, spawns[si], PLAYER_STAND, state.level);
   const p: Player = {
     id, type: 'player', kind, name,
     team: id, size: 1, color: -1, enemyType: '',

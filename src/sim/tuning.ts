@@ -21,6 +21,9 @@ export const defaultConfig = (): SimConfig => ({
   halfWidth: 20, // half the ring's width along its axis (m)
   spin: true, // false = no rotation at all (Earth level)
   arena: 0, // 0 = whole ring; >0 = a walled stretch this long (m), used by the Earth level
+  terrainSphere: false, // true = the floor is a band round the inside of a sphere (bowl-shaped across)
+  hills: 0, // number of rolling hills on the floor
+  hillHeight: 8, // tallest hill (m)
   gravity: 0, // real gravity pulling toward the floor (m/s^2): 0 on rings, 9.81 on Earth
   wallHeight: 15, // tallest rim wall (m); capped at 40% of R
   wallThickness: 1.5,

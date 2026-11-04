@@ -12,3 +12,4 @@ export * from './serialize';
 export * from './bots';
 export * from './predict';
 export { rngNext, hash01 } from './rng';
+export * from './terrain';
