@@ -1056,11 +1056,16 @@ describe('22. Earth: the no-spin reference level', () => {
 
 describe('23. per-level world settings', () => {
   it('the hazy ring has air that slows bolts; it does not leak into the next level', () => {
-    const hazy = startLevel(levelById('s-hazy')!);
-    const s = hazy.state;
-    const b = spawnBolt(s, -1, 'rifle', [s.config.R - 5, 0, 0], [0, 80, 0]);
-    run(s, 60);
-    expect(Math.hypot(...b.vel)).toBeLessThan(70); // ~80 m/s in vacuum
+    // the same shot in air and in vacuum: drag takes a good chunk of its speed
+    const speedAfter = (id: string) => {
+      const st = startLevel(levelById(id)!).state;
+      const b = spawnBolt(st, -1, 'rifle', [st.config.R - 5, 0, 0], [0, 80, 0]);
+      run(st, 60);
+      return Math.hypot(...b.vel);
+    };
+    const inAir = speedAfter('s-hazy'), inVacuum = speedAfter('s-standard');
+    expect(inVacuum - inAir).toBeGreaterThan(8);
+    const s = startLevel(levelById('s-hazy')!).state;
     const next = startLevel(levelById('s-standard')!, { ...s.config });
     expect(next.state.config.dragType).toBe('none');
     const fromEarth = startLevel(levelById('s-standard')!, { ...startLevel(levelById('s-earth')!).state.config });
