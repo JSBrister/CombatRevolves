@@ -139,6 +139,19 @@ export const LEVELS: LevelDef[] = [
     blurb: 'The whole inside of a spinning sphere. Gravity is g cos^2 of your latitude; past ~53 degrees the floor is too steep to stand on, and at the poles you float. Jetpacks and bikes recommended.' },
   { id: 's-ridge', mode: 'sandbox', name: 'The Ridge (Lambda)', seed: 36, config: { R: 240, halfWidth: 150, ridgeHeight: 120, ridgePlateau: 12 }, bots: 4,
     blurb: 'A 120 m ridge runs round the middle of a 240 m ring: the floor is a Lambda in cross-section. Gravity on the crest is half what it is at the foot, and the slopes are 40 degrees.' },
+  { id: 's-oneill', mode: 'sandbox', name: "O'Neill Cylinder (1 km x 3 km)", seed: 37, config: { R: 1000, halfWidth: 1500, hills: 60, hillHeight: 35, wallHeight: 1000 },
+    variedWalls: false, bots: 6,
+    blurb: 'A proper space colony: 2 km across, 3 km long, a minute per turn. The land curves up overhead into the far side. Take a bike.' },
+  { id: 's-swiss', mode: 'sandbox', name: 'Swiss Cheese (holes in the floor)', seed: 38, config: { R: 120, floorHoles: 18 }, bots: 3,
+    blurb: 'Somebody forgot the floor plates. Fall through a hole and the spin flings you out into space; so does a good blast.' },
+  { id: 's-decks', mode: 'sandbox', name: 'Double Decker (two levels)', seed: 39, config: { R: 150, halfWidth: 25, deckHeight: 10 }, bots: 4,
+    blurb: 'A second deck 10 m up, with ramps through slots in it. Up top you weigh 93%; underneath it is a long, low tunnel.' },
+  { id: 's-torus', mode: 'sandbox', name: 'Stanford Torus (inside a tube)', seed: 40, config: { R: 150, halfWidth: 20, tube: 'inside', tubeRadius: 20 }, bots: 3,
+    blurb: 'The ring is a 40 m tube: the floor curves up on both sides into the ceiling. Run up the walls, and watch the bolts.' },
+  { id: 's-halfpipe', mode: 'sandbox', name: 'Half-Pipe (half a torus)', seed: 41, config: { R: 120, halfWidth: 25, tube: 'half', tubeRadius: 25, wallHeight: 3 }, bots: 3,
+    blurb: 'Half a torus, open toward the axis. Skate up the sides; over the lip there is nothing at all.' },
+  { id: 's-log', mode: 'sandbox', name: 'The Log (outside a torus)', seed: 42, config: { R: 100, halfWidth: 14, tube: 'outside', tubeRadius: 14 }, bots: 2,
+    blurb: 'You stand on the OUTSIDE of a spinning tube, on the side facing the axis. Stray too far either way and you slide off into space.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
     blurb: '140 m across: room to flank, and to watch your shots curve sideways.' },
   { id: 's-planet', mode: 'sandbox', name: 'Skyhook (planet below)', seed: 34, config: { R: 100, planetPull: 8.8, planetAngle: Math.PI }, bots: 2,
@@ -150,7 +163,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'ridgeHeight', 'ridgePlateau', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 

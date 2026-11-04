@@ -26,6 +26,10 @@ export const defaultConfig = (): SimConfig => ({
   hillHeight: 8, // tallest hill (m)
   ridgeHeight: 0, // a ridge along the middle, this high (m): the floor's cross-section becomes a Lambda
   ridgePlateau: 12, // how rounded its top is (m)
+  tube: 'none', // 'inside' / 'half' / 'outside' a torus whose tube has radius tubeRadius
+  tubeRadius: 20,
+  floorHoles: 0, // holes in the floor you can fall out of
+  deckHeight: 0, // >0: an upper deck this high above the floor
   planetPull: 0, // m/s^2: pull toward a planet below, fixed to the stars (sweeps round once per spin)
   planetAngle: 0, // which way the planet is (radians about the axis, non-rotating frame)
   gravity: 0, // real gravity pulling toward the floor (m/s^2): 0 on rings, 9.81 on Earth

@@ -99,6 +99,18 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 - **Bouncing grenades** (yellow) share one sub-stepped sphere mover with the props and with their own trajectory preview. Their fuse starts at the throw. They bounce off players and props relative to the target's velocity.
 - **Terrain:** the floor can carry a height profile: Gaussian hills, and/or a *sphere band*, where the floor is the inside of a sphere of radius R round the equator, so it curves up toward the axis at the edges. The spin still pulls straight away from the axis, so walking toward an edge is like climbing a slope equal to your latitude in weaker g. Collision uses the height function's own gradient (exact for planes, close for smooth hills). Hills keep clear of ramps and lookouts.
 - **A whole sphere** (*Inside a Sphere*): a band that goes all the way to the poles, which the rim walls close off. You weigh g cos²(latitude); past about 53° the floor is too steep to stand on (an orange ring marks it) and you slide back toward the equator; near the poles you're almost weightless. The height-field distance estimate breaks down near the poles, so a plain sphere uses its exact distance. A glowing line along the axis and latitude rings make the shape readable, since there's no sky.
+- **Silly worlds:**
+  - *O'Neill Cylinder*: 2 km across, 3 km long and hilly, with a minute per turn.
+  - *Swiss Cheese*: holes in the floor. Fall through and the spin flings you out into space.
+  - *Double Decker*: a second deck 10 m up, reached by ramps through slots in it.
+  - *Stanford Torus*: inside a 40 m tube, so the floor curves up into a ceiling.
+  - *Half-Pipe*: half a torus, open toward the axis, with nothing over the lips.
+  - *The Log*: you stand on the outside of a spinning tube, on the side facing the axis. Too far round and you slide off.
+
+  How they're built:
+  - Holes and decks share one mechanism: a floor or deck is a shell with rectangular prisms cut out of it (`max(d_floor, -d_hole)` in the distance field). The renderer builds the shell on a grid that includes every hole edge, so the cut-outs are exact.
+  - Tubes use the exact distance to a circle in the (radius, z) cross-section.
+  - Bots won't walk off a drop of more than 2 m, so they avoid holes, ledges and the log's edges (they can still be blasted off).
 - **The Ridge:** a Lambda-shaped cross-section: straight 40° flanks rising 120 m from the rim walls to a rounded crest on a 240 m ring, so the crest has half the gravity of the foot. On the flanks the floor carries g cos(slope) of your weight.
 - **Skyhook (planet below):** `planetPull` adds a uniform pull toward a planet that is fixed to the stars, so in the ring's frame it sweeps round once per spin. At 0.9 g you go from 1.9 g to almost weightless each turn, and shots curve with it; enemy aim and the trajectory preview use the same field. The ring isn't in orbit: it turns on an axle held up by a tower standing on the planet.
 - **Hover-bikes** (big rings only, or spawn one from the debug panel's *Give*): a bouncy physics sphere with its own health. Frictionless while ridden, so momentum, the spin and slopes all matter; it faces where you look; W/S thrust, A/D strafe, Space hops, Shift boosts. Hitting walls and boxes hard damages the bike; landings only do so at extreme speed, so jump away; the rider is never hurt by crashes. Running people over hurts them (credited to the rider); shots, blasts, the mallet and sticky grenades work on it. At zero health it explodes, throws the rider clear and respawns at its spot later. All of it is tunable in the debug panel.

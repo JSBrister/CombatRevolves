@@ -4,7 +4,7 @@
 // trails) are fixed in the non-rotating frame.
 
 import * as THREE from 'three';
-import { floorRadius, type Level, type SimConfig } from '../sim';
+import { floorRadius, type Hole, type Level, type SimConfig } from '../sim';
 import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, wallTexture } from './textures';
 
 export const LAYER_ROT_TRAILS = 1;
@@ -71,9 +71,14 @@ export class RingScene {
     deck.repeat.set((2 * Math.PI * R) / 5, (2 * W) / 5);
     const floorGeo = new THREE.CylinderGeometry(R, R, 2 * W, segs, 1, true);
     floorGeo.rotateX(Math.PI / 2);
-    if (level.terrain) {
+    const tube = level.terrain?.tube;
+    if (tube && tube.kind !== 'half') {
+      this.level.add(this.tubeMesh(cfg, tube.kind, tube.radius));
+    } else if (level.terrain) {
       this.level.add(this.terrainMesh(cfg, level));
       if (level.terrain.sphere && W > 0.9 * R) this.sphereMarkings(cfg);
+    } else if (level.holes?.length) {
+      this.level.add(this.cutShell(R, W + T, level.holes, R, hull, 'floor'));
     } else {
       const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ map: deck, side: THREE.BackSide, roughness: 0.85, metalness: 0.2 }));
       floor.receiveShadow = true;
@@ -87,7 +92,8 @@ export class RingScene {
       g.translate(0, 0, z);
       this.level.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, side: THREE.BackSide, roughness: 0.6 })));
     };
-    if (!level.terrain) {
+    for (const dk of level.decks ?? []) this.level.add(this.cutShell(dk.r, W, dk.holes, R, dk.thickness, 'deck'));
+    if (!level.terrain && !level.holes?.length) {
       stripe(0, 0.6, 0xc9a43a);
       stripe(W - 1.5, 0.4, 0x8a96a8);
       stripe(-W + 1.5, 0.4, 0x8a96a8);
@@ -109,11 +115,12 @@ export class RingScene {
         inst.setMatrixAt(k++, m);
       }
     }
-    if (!level.terrain) this.level.add(inst); // painted arrows only on a flat floor
+    if (!level.terrain && !level.holes?.length) this.level.add(inst); // painted arrows only on a flat, whole floor
 
     // Rim walls, one piece per sector so heights can vary (low curbs = you can fall off).
     this.buildWalls(cfg, level.wallPos, 1, segs, level);
     this.buildWalls(cfg, level.wallNeg, -1, segs, level);
+    if (tube) { this.buildBoxes(cfg, level); this.buildSky(cfg); return; } // no hull or ribs round a tube
     const hullGeo = new THREE.CylinderGeometry(R + hull, R + hull, 2 * (W + T), segs, 1, true);
     hullGeo.rotateX(Math.PI / 2);
     this.level.add(new THREE.Mesh(hullGeo, new THREE.MeshStandardMaterial({ color: 0x2a2f38, roughness: 0.9, metalness: 0.5 })));
@@ -252,6 +259,108 @@ export class RingScene {
     for (let deg = -75; deg <= 75; deg += 15) ring((deg * Math.PI) / 180, deg === 0 ? 0xc9a43a : 0x8a96a8);
     const steep = Math.acos(0.6); // the walkable limit (ground normal within ~53 degrees of "up")
     for (const sg of [-1, 1]) ring(sg * steep, 0xff5a2a);
+  }
+
+  /** A torus: seen from inside (Stanford torus) or outside (the log). */
+  private tubeMesh(cfg: SimConfig, kind: 'inside' | 'outside', a: number): THREE.Mesh {
+    const R = cfg.R;
+    const rc = kind === 'outside' ? R + a : R - a;
+    const tubular = Math.min(1440, Math.max(192, Math.round((2 * Math.PI * R) / 1.5)));
+    const radial = Math.max(48, Math.round((2 * Math.PI * a) / 1.2));
+    const g = new THREE.TorusGeometry(rc, a, radial, tubular);
+    const tex = this.textures.deck.clone();
+    tex.needsUpdate = true;
+    tex.repeat.set((2 * Math.PI * R) / 5, (2 * Math.PI * a) / 5);
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, side: kind === 'inside' ? THREE.BackSide : THREE.FrontSide, roughness: 0.85, metalness: 0.2 }));
+    mesh.receiveShadow = true;
+    if (kind === 'outside') {
+      // a painted line along the top (the side facing the axis) and the slip-off lines
+      for (const [lat, color] of [[0, 0xc9a43a], [Math.acos(0.6), 0xff5a2a], [-Math.acos(0.6), 0xff5a2a]] as const) {
+        const pts: THREE.Vector3[] = [];
+        const r = rc - (a + 0.03) * Math.cos(lat), z = (a + 0.03) * Math.sin(lat);
+        for (let i = 0; i <= 512; i++) { const t = (i / 512) * Math.PI * 2; pts.push(new THREE.Vector3(r * Math.cos(t), r * Math.sin(t), z)); }
+        mesh.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color })));
+      }
+    }
+    return mesh;
+  }
+
+  /**
+   * A floor or deck shell (walking surface at radius r, `thickness` deep) with
+   * rectangular holes cut out of it. The grid's lines include every hole edge,
+   * so the cut-outs are exact; the holes get walls and an orange hazard edge.
+   */
+  private cutShell(r: number, W: number, holes: Hole[], R: number, thickness: number, kind: 'floor' | 'deck'): THREE.Group {
+    const group = new THREE.Group();
+    const us: number[] = [], vs: number[] = [];
+    const nu = Math.min(720, Math.max(96, Math.round((2 * Math.PI * R) / 2)));
+    for (let i = 0; i <= nu; i++) us.push((i / nu) * Math.PI * 2);
+    const nv = Math.max(4, Math.round((2 * W) / 2));
+    for (let j = 0; j <= nv; j++) vs.push(-W + (2 * W * j) / nv);
+    const wrap = (a: number) => ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    for (const h of holes) {
+      us.push(wrap(h.angle - h.halfArc / R), wrap(h.angle + h.halfArc / R));
+      vs.push(h.z - h.halfZ, h.z + h.halfZ);
+    }
+    const uniq = (a: number[]) => [...new Set(a.map((x) => Math.round(x * 1e6) / 1e6))].sort((x, y) => x - y);
+    const U = uniq(us), V = uniq(vs).filter((v) => v >= -W - 1e-6 && v <= W + 1e-6);
+    const inHole = (a: number, z: number) => holes.some((h) =>
+      Math.abs(Math.atan2(Math.sin(a - h.angle), Math.cos(a - h.angle))) * R < h.halfArc && Math.abs(z - h.z) < h.halfZ);
+    const surface = (rad: number, side: THREE.Side, mat: THREE.Material) => {
+      const pos: number[] = [], uv: number[] = [];
+      for (const a of U) for (const z of V) { pos.push(rad * Math.cos(a), rad * Math.sin(a), z); uv.push((a * R) / 5, z / 5); }
+      const idx: number[] = [];
+      const nV = V.length;
+      for (let i = 0; i < U.length - 1; i++) for (let j = 0; j < nV - 1; j++) {
+        if (inHole((U[i] + U[i + 1]) / 2, (V[j] + V[j + 1]) / 2)) continue;
+        const a = i * nV + j, b = (i + 1) * nV + j;
+        idx.push(a, a + 1, b, b, a + 1, b + 1);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, mat);
+      m.material.side = side;
+      m.receiveShadow = true;
+      m.castShadow = kind === 'deck';
+      return m;
+    };
+    const tex = this.textures.deck.clone();
+    tex.needsUpdate = true;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, 1);
+    group.add(surface(r, THREE.DoubleSide, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0.2 })));
+    if (kind === 'deck') group.add(surface(r + thickness, THREE.DoubleSide, new THREE.MeshStandardMaterial({ color: 0x3a404a, roughness: 0.9, metalness: 0.4 })));
+    // hole walls (through the thickness) and hazard edges
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x4a4f5a, side: THREE.DoubleSide, roughness: 0.8 });
+    const edgeMat = new THREE.LineBasicMaterial({ color: 0xff5a2a });
+    for (const h of holes) {
+      const a0 = h.angle - h.halfArc / R, a1 = h.angle + h.halfArc / R;
+      const z0 = h.z - h.halfZ, z1 = h.z + h.halfZ;
+      const n = Math.max(2, Math.ceil(h.halfArc));
+      const pos: number[] = [];
+      const quad = (p: number[][]) => pos.push(...p[0], ...p[1], ...p[2], ...p[2], ...p[1], ...p[3]);
+      const P = (rad: number, a: number, z: number) => [rad * Math.cos(a), rad * Math.sin(a), z];
+      const r0 = r, r1 = r + thickness;
+      for (const a of [a0, a1]) quad([P(r0, a, z0), P(r0, a, z1), P(r1, a, z0), P(r1, a, z1)]);
+      for (let i = 0; i < n; i++) {
+        const t0 = a0 + ((a1 - a0) * i) / n, t1 = a0 + ((a1 - a0) * (i + 1)) / n;
+        for (const z of [z0, z1]) quad([P(r0, t0, z), P(r0, t1, z), P(r1, t0, z), P(r1, t1, z)]);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.computeVertexNormals();
+      group.add(new THREE.Mesh(g, wallMat));
+      const edge: THREE.Vector3[] = [];
+      const re = r - 0.03;
+      for (let i = 0; i <= n; i++) edge.push(new THREE.Vector3(...P(re, a0 + ((a1 - a0) * i) / n, z0)));
+      for (let i = n; i >= 0; i--) edge.push(new THREE.Vector3(...P(re, a0 + ((a1 - a0) * i) / n, z1)));
+      edge.push(edge[0].clone());
+      group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(edge), edgeMat));
+    }
+    return group;
   }
 
   /** The floor as a mesh following the terrain (hills / sphere band). */

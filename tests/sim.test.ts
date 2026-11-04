@@ -1490,3 +1490,109 @@ describe('30. inside a sphere, and the ridge', () => {
     expect(Math.abs(g - expected)).toBeLessThan(0.03);
   });
 });
+
+describe('31. silly worlds: holes, decks and tubes', () => {
+  const solo = (id: string) => {
+    const { state, localId } = startLevel(levelById(id)!);
+    state.players = state.players.filter((p) => p.id === localId);
+    return { s: state, id: localId, p: state.players[0] };
+  };
+  const place = (p: { pos: Vec3; vel: Vec3 }, angle: number, r: number, z: number) => {
+    p.pos = [r * Math.cos(angle), r * Math.sin(angle), z];
+    p.vel = [0, 0, 0];
+  };
+  it('holes: step over one and the spin flings you out into space; beside it you stand', () => {
+    const { s, id, p } = solo('s-swiss');
+    const h = s.level.holes![0];
+    expect(s.level.holes!.length).toBeGreaterThan(8);
+    expect(levelSdf(s.level, s.config, [s.config.R + 1, 0, 0].map((x, i) => i < 2 ? x : h.z) as Vec3).d).toBeDefined();
+    place(p, h.angle, s.config.R - 0.9, h.z);
+    let died = false;
+    for (let i = 0; i < 120 * 6 && !died; i++) { step(s, [cmdFor(s, id)], s.tick); died = !p.alive; }
+    expect(died).toBe(true);
+    const { s: s2, id: id2, p: p2 } = solo('s-swiss');
+    const h2 = s2.level.holes![0];
+    place(p2, h2.angle + (h2.halfArc + 1.5) / s2.config.R, s2.config.R - 0.9, h2.z);
+    run(s2, 240, () => [cmdFor(s2, id2)]);
+    expect(p2.alive).toBe(true);
+    expect(p2.grounded).toBe(true);
+  });
+  it('double decker: you can stand on the upper deck (in less g), and it blocks shots from below', () => {
+    const { s, id, p } = solo('s-decks');
+    const dk = s.level.decks![0];
+    // somewhere on the deck away from its holes
+    let a = 0;
+    while (dk.holes.some((h) => Math.abs(Math.atan2(Math.sin(a - h.angle), Math.cos(a - h.angle))) * s.config.R < h.halfArc + 4)) a += 0.05;
+    s.level.boxes = [];
+    place(p, a, dk.r - 0.9, 0);
+    run(s, 240, () => [cmdFor(s, id)]);
+    expect(p.grounded).toBe(true);
+    expect(Math.abs(p.apparentG - dk.r / s.config.R)).toBeLessThan(0.03);
+    // a bolt fired straight up from the lower floor stops at the deck
+    const from: Vec3 = [(s.config.R - 1.5) * Math.cos(a), (s.config.R - 1.5) * Math.sin(a), 3];
+    const b = spawnBolt(s, -1, 'cannon', from, scale(localBasis(from).up, 200));
+    run(s, 20, () => [cmdFor(s, id)]);
+    expect(s.bolts).not.toContain(b);
+    expect(s.events.length).toBeGreaterThanOrEqual(0);
+  });
+  it('an enemy follows you up a ramp onto the deck', { timeout: 20000 }, () => {
+    const { state: s, localId } = startLevel(levelById('s-decks')!);
+    s.players = s.players.filter((p) => p.id === localId);
+    const me = s.players[0];
+    me.maxHealth = me.health = 1e6;
+    const eid = addPlayer(s, 'bot', 'E');
+    const e = s.players.find((q) => q.id === eid)!;
+    e.enemyType = 'soldier';
+    const dk = s.level.decks![0];
+    const ramp = dk.holes[0];
+    // you: on the deck just past the top of the first ramp; the enemy: on the floor below, beside it
+    const R = s.config.R;
+    const dir = 1; // the first deck ramp climbs spinward
+    place(me, ramp.angle + dir * (ramp.halfArc + 6) / R, dk.r - 0.9, ramp.z);
+    place(e, ramp.angle - dir * 4 / R, R - 0.9, ramp.z + (ramp.z > 0 ? -7 : 7));
+    let up = false;
+    for (let i = 0; i < 120 * 25 && !up; i++) {
+      step(s, [cmdFor(s, localId), botInput(s, eid)], s.tick);
+      up = e.grounded && Math.hypot(e.pos[0], e.pos[1]) < dk.r;
+    }
+    expect(up).toBe(true);
+  });
+  it('inside a torus: the floor curves up into a ceiling; nothing gets out', () => {
+    const { s, id, p } = solo('s-torus');
+    s.level.boxes = [];
+    const a = s.config.tubeRadius, R = s.config.R;
+    expect(levelSdf(s.level, s.config, [R - a, 0, 0]).d).toBeCloseTo(a, 6); // the tube's centre line
+    expect(levelSdf(s.level, s.config, [R - 2 * a + 1, 0, 0]).d).toBeCloseTo(1, 6); // just under the ceiling
+    run(s, 120, () => [cmdFor(s, id)]);
+    expect(p.grounded).toBe(true);
+    // a bolt fired straight up hits the ceiling, it doesn't fly off
+    const b = spawnBolt(s, -1, 'rifle', addScaled(p.pos, localBasis(p.pos).up, 2), scale(localBasis(p.pos).up, 80));
+    let hit = false;
+    for (let i = 0; i < 120 && !hit; i++) { step(s, [cmdFor(s, id)], s.tick); hit = !s.bolts.includes(b); }
+    expect(hit).toBe(true);
+  });
+  it('the log: stand on top in 1 g; too far down the side and you slide off into space', () => {
+    const { s, id, p } = solo('s-log');
+    s.level.boxes = [];
+    const a = s.config.tubeRadius, R = s.config.R;
+    run(s, 120, () => [cmdFor(s, id)]);
+    place(p, 0, R - 0.9, 0);
+    run(s, 240, () => [cmdFor(s, id)]);
+    expect(p.grounded).toBe(true);
+    expect(Math.abs(p.apparentG - 1)).toBeLessThan(0.05);
+    // 60 degrees round the tube: too steep to stand on
+    const lat = Math.PI / 3, rc = R + a;
+    place(p, 0, rc - (a + 0.9) * Math.cos(lat), (a + 0.9) * Math.sin(lat));
+    let died = false;
+    for (let i = 0; i < 120 * 10 && !died; i++) { step(s, [cmdFor(s, id)], s.tick); died = !p.alive; }
+    expect(died).toBe(true);
+  });
+  it('the half-pipe: over the lip there is nothing', () => {
+    const { s, id, p } = solo('s-halfpipe');
+    const a = s.config.tubeRadius, R = s.config.R;
+    place(p, 0, R - a - 0.5, a + s.config.wallThickness + 1.5); // just outside a lip
+    let died = false;
+    for (let i = 0; i < 120 * 10 && !died; i++) { step(s, [cmdFor(s, id)], s.tick); died = !p.alive; }
+    expect(died).toBe(true);
+  });
+});

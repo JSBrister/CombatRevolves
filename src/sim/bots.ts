@@ -83,12 +83,12 @@ function standAt(state: SimState, p: Player, angle: number, z: number): Vec3 {
   return [r * Math.cos(angle), r * Math.sin(angle), z];
 }
 
-/** Up on a ramp or lookout: don't strafe off the edge. */
+/** Don't walk off a ledge, into a hole or off the edge of the world (slopes are fine). */
 function keepFooting(state: SimState, me: Player, cmd: InputCmd): InputCmd {
-  if ((cmd.moveX === 0 && cmd.moveY === 0) || heightAboveFloor(state, me) < 0.5) return cmd;
+  if (cmd.moveX === 0 && cmd.moveY === 0) return cmd;
   const vv = viewVectors(me.pos, cmd.yaw, 0);
   const d = norm(addScaled(scale(vv.forward, cmd.moveY), vv.right, cmd.moveX));
-  const probe = addScaled(addScaled(me.pos, d, 1.2), vv.up, -(standHeight(me.size) + 0.3));
+  const probe = addScaled(addScaled(me.pos, d, 1.2), vv.up, -(standHeight(me.size) + 2));
   if (levelSdf(state.level, state.config, probe).d > 0.25) { cmd.moveX = 0; cmd.moveY = 0; } // nothing to stand on there
   return cmd;
 }

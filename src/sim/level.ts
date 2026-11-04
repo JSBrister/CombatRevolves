@@ -3,9 +3,9 @@
 // are axis-aligned in the local frame of their ring angle.
 
 import { rngNext, rngRange } from './rng';
-import type { Box, ItemKind, Level, SimConfig, SpawnPoint } from './types';
+import type { Box, Deck, Hole, ItemKind, Level, SimConfig, SpawnPoint } from './types';
 import { type Vec3, rhoOf } from './vec';
-import { floorRadius, makeHills, terrainAt } from './terrain';
+import { edgeHeight, floorRadius, makeHills, terrainAt } from './terrain';
 
 export interface SdfHit {
   d: number; // signed distance (negative = inside solid)
@@ -90,6 +90,17 @@ function rimWall(p: Vec3, rho: number, theta: number, heights: number[], R: numb
 function terrainFloor(level: Level, cfg: SimConfig, p: Vec3, rho: number, theta: number, out: SdfHit) {
   const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness;
   const tr = level.terrain!;
+  if (tr.tube && !tr.hills.length && !tr.ridge && !tr.sphere) {
+    const f: SdfHit = { d: Infinity, n: [0, 0, 1] };
+    tubeSdf(p, rho, cfg.R, tr.tube.kind, tr.tube.radius, f);
+    if (tr.tube.kind === 'half') {
+      // the half-pipe's lips are only a wall's thickness wide: beyond them, space
+      const dSide = Math.abs(p[2]) - (tr.tube.radius + T);
+      if (dSide > f.d) { f.d = dSide; f.n = [0, 0, Math.sign(p[2]) || 1]; }
+    }
+    if (f.d < out.d) { out.d = f.d; out.n = f.n; }
+    return;
+  }
   if (tr.sphere && !tr.hills.length && !tr.ridge) {
     // a plain sphere: the exact distance (the height-field estimate breaks down near the poles)
     const r = Math.hypot(p[0], p[1], p[2]);
@@ -155,6 +166,62 @@ function boxSdf(p: Vec3, b: Box, out: SdfHit) {
   out.n = [-s * ns - c * nu, c * ns - s * nu, nz];
 }
 
+/**
+ * Tube worlds: the cross-section (rho, z) is a circle of radius a touching
+ * rho = R at z = 0. Inside a torus the solid is everything outside the
+ * circle; a half torus is that, but only out from the tube's centre line
+ * (open toward the axis); outside a torus the solid is the circle itself.
+ */
+function tubeSdf(p: Vec3, rho: number, R: number, kind: 'inside' | 'half' | 'outside', a: number, out: SdfHit) {
+  const rc = kind === 'outside' ? R + a : R - a;
+  const qr = rho - rc, qz = p[2];
+  const q = Math.hypot(qr, qz);
+  const ir = rho > 1e-9 ? 1 / rho : 0;
+  const cx = p[0] * ir, cy = p[1] * ir;
+  let d: number, nr: number, nz: number;
+  if (kind === 'half' && qr < 0) {
+    // above the lips: the nearest solid is a lip edge (rc, +-a) or the wall of solid beyond it
+    const zp = Math.abs(qz) >= a ? qz : Math.sign(qz || 1) * a;
+    const vr = qr, vz = qz - zp;
+    d = Math.hypot(vr, vz);
+    if (d < 1e-9) { nr = 0; nz = -Math.sign(qz || 1); } else { nr = vr / d; nz = vz / d; }
+  } else if (kind === 'outside') {
+    d = q - a;
+    nr = q > 1e-9 ? qr / q : -1; nz = q > 1e-9 ? qz / q : 0;
+  } else {
+    d = a - q;
+    nr = q > 1e-9 ? -qr / q : -1; nz = q > 1e-9 ? -qz / q : 0;
+  }
+  if (d >= out.d) return;
+  out.d = d;
+  out.n = [nr * cx, nr * cy, nz];
+}
+
+/** Signed distance to a hole's prism (positive outside it), and its gradient. */
+function holeSdf(p: Vec3, theta: number, h: Hole, R: number): SdfHit {
+  const s = wrapAngle(theta - h.angle) * R;
+  const dz = p[2] - h.z;
+  const qs = Math.abs(s) - h.halfArc, qz = Math.abs(dz) - h.halfZ;
+  let d: number, gs = 0, gz = 0;
+  if (qs > 0 || qz > 0) {
+    const us = Math.max(qs, 0), uz = Math.max(qz, 0);
+    d = Math.hypot(us, uz);
+    gs = (us / d) * Math.sign(s); gz = (uz / d) * Math.sign(dz);
+  } else if (qs > qz) { d = qs; gs = Math.sign(s) || 1; } else { d = qz; gz = Math.sign(dz) || 1; }
+  const c = Math.cos(theta), sn = Math.sin(theta);
+  return { d, n: [-sn * gs, c * gs, gz] };
+}
+
+/** Cut holes out of a solid: intersect it with the outside of each hole's prism. */
+function cutHoles(p: Vec3, theta: number, holes: Hole[], R: number, hit: SdfHit) {
+  for (const h of holes) {
+    // cheap reject: only a point inside (or right by) the prism can change anything
+    if (Math.abs(wrapAngle(theta - h.angle)) * R > h.halfArc + Math.max(0, -hit.d) + 0.5) continue;
+    const hs = holeSdf(p, theta, h, R);
+    if (-hs.d > hit.d) { hit.d = -hs.d; hit.n = [-hs.n[0], -hs.n[1], -hs.n[2]]; }
+  }
+}
+
 /** Signed distance from p to the level. Positive in free space. */
 export function levelSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   switch (level.shape) {
@@ -169,9 +236,20 @@ function ringSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
   const theta = Math.atan2(p[1], p[0]);
   if (level.terrain) terrainFloor(level, cfg, p, rho, theta, out);
-  else annulus(p, rho, R, R + hull, -(W + T), W + T, out); // floor / hull
-  // rim walls stand on the floor at the edge (higher up on a sphere band)
-  const edge = level.terrain?.sphere ? R - Math.sqrt(R * R - W * W) : 0;
+  else if (level.holes?.length) {
+    const f: SdfHit = { d: Infinity, n: [0, 0, 1] };
+    annulus(p, rho, R, R + hull, -(W + T), W + T, f); // floor / hull...
+    cutHoles(p, theta, level.holes, R, f); // ...with holes in it
+    if (f.d < out.d) { out.d = f.d; out.n = f.n; }
+  } else annulus(p, rho, R, R + hull, -(W + T), W + T, out); // floor / hull
+  for (const dk of level.decks ?? []) {
+    const f: SdfHit = { d: Infinity, n: [0, 0, 1] };
+    annulus(p, rho, dk.r, dk.r + dk.thickness, -W, W, f);
+    cutHoles(p, theta, dk.holes, R, f);
+    if (f.d < out.d) { out.d = f.d; out.n = f.n; }
+  }
+  // rim walls stand on the floor at the edge (higher up on a sphere band or in a half-pipe)
+  const edge = edgeHeight(level, cfg);
   rimWall(p, rho, theta, level.wallPos, R - edge, R + hull, W, W + T, out); // +Z rim wall
   rimWall(p, rho, theta, level.wallNeg, R - edge, R + hull, -(W + T), -W, out); // -Z rim wall
   for (const b of level.boxes) boxSdf(p, b, out);
@@ -235,7 +313,8 @@ export function makeSpawns(cfg: SimConfig): SpawnPoint[] {
   const spawns: SpawnPoint[] = [];
   const n = 8;
   const off = cfg.arena > 0 ? 0.5 : 0;
-  for (let i = 0; i < n; i++) spawns.push({ angle: arcAngle(cfg, (i + off) / n), z: i % 2 === 0 ? -8 : 8 });
+  const sz = cfg.tube !== 'none' ? Math.min(8, 0.3 * cfg.tubeRadius) : 8; // (a log is narrow)
+  for (let i = 0; i < n; i++) spawns.push({ angle: arcAngle(cfg, (i + off) / n), z: i % 2 === 0 ? -sz : sz });
   return spawns;
 }
 
@@ -275,12 +354,15 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     halfArc: (H0 / RAMP_SLOPE + STAIR_TOP) / 2 + 2,
   }));
   const ridge = cfg.ridgeHeight > 0 ? { height: cfg.ridgeHeight, plateau: cfg.ridgePlateau } : undefined;
-  const terrain = cfg.terrainSphere || cfg.hills > 0 || ridge
+  const terrain: Level['terrain'] = cfg.terrainSphere || cfg.hills > 0 || ridge || cfg.tube !== 'none'
     ? { sphere: cfg.terrainSphere, hills: makeHills(cfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), rampClear), ...(ridge ? { ridge } : {}) }
     : null;
+  if (cfg.tube !== 'none' && terrain) terrain.tube = { kind: cfg.tube, radius: cfg.tubeRadius };
   // Ramps and mesas need flat ground; on a sphere keep clutter to the lower latitudes.
-  const steep = !!ridge;
-  const Wp = cfg.terrainSphere ? Math.min(cfg.halfWidth, 0.45 * R) : cfg.halfWidth;
+  const tube = cfg.tube !== 'none';
+  const deck = cfg.deckHeight > 0;
+  const steep = !!ridge || tube;
+  const Wp = cfg.terrainSphere ? Math.min(cfg.halfWidth, 0.45 * R) : tube ? Math.min(cfg.halfWidth, (cfg.tube === 'outside' ? 0.35 : 0.5) * cfg.tubeRadius) : cfg.halfWidth;
   const probe: Level = { shape: 'ring', terrain, boxes, stairTops: [], spawns, pickupSpots: [], vehicleSpots: [], wallPos: [], wallNeg: [] };
   /** Floor radius here (R on a flat floor). */
   const Rf = (angle: number, z: number) => floorRadius(probe, cfg, angle, z);
@@ -290,10 +372,10 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     const t = terrainAt(probe, cfg, angle, z);
     return Math.abs(t.dhds) * ht + Math.abs(t.dhdz) * hz + 0.3;
   };
-  const addBox = (angle: number, z: number, ht: number, hu: number, hz: number, kind: Box['kind'] = 'cover') => {
-    const sag = (ht * ht) / (2 * R) + 0.05 + bury(angle, z, ht, hz); // bury the bottom so the curved floor never shows a gap
+  const addBox = (angle: number, z: number, ht: number, hu: number, hz: number, kind: Box['kind'] = 'cover', base?: number) => {
+    const sag = (ht * ht) / (2 * R) + 0.05 + (base ? 0 : bury(angle, z, ht, hz)); // bury the bottom so the curved floor never shows a gap
     const huTot = hu + sag / 2;
-    const rc = Rf(angle, z) - 2 * hu + huTot; // top stays at height 2*hu
+    const rc = (base ?? Rf(angle, z)) - 2 * hu + huTot; // top stays at height 2*hu (on the floor, or on a deck at radius `base`)
     boxes.push({ id: nextId(), type: 'box', kind, angle, tilt: 0, center: [rc * Math.cos(angle), rc * Math.sin(angle), z], half: [ht, huTot, hz] });
   };
   /**
@@ -343,7 +425,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     const circ = playSpan(cfg);
     // Ramps up to lookout platforms, midway between spawn points, alternating
     // which way they climb (climbing spinward vs antispinward feels different!).
-    const nStairs = steep ? 0 : Math.max(2, Math.min(12, Math.round(circ / 150)));
+    const nStairs = steep || deck ? 0 : Math.max(2, Math.min(12, Math.round(circ / 150)));
     const H = Math.max(2, Math.min(LOOKOUT_HEIGHT, 0.3 * R)); // lookout height
     const rampLen = H / RAMP_SLOPE;
     const topItems: ItemKind[] = ['cannon', 'jetpack', 'hammer'];
@@ -420,7 +502,68 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       else addBox(angle, z, rngRange(rng, 3, 5) * Math.max(k, 0.5), rngRange(rng, 0.4, 0.6) * k, rngRange(rng, 3, 5)); // low platform
     }
   }
-  return { shape: 'ring', terrain, boxes, stairTops, spawns, pickupSpots, vehicleSpots, ...walls };
+  // An upper deck: ramps from the floor up through slots in it, and things to fight over on top.
+  const decks: Deck[] = [];
+  if (deck) {
+    const D = cfg.deckHeight, rd = R - D;
+    const dk: Deck = { r: rd, thickness: 0.6, holes: [] };
+    const nRamps = Math.max(2, Math.min(8, Math.round(playSpan(cfg) / 160)));
+    const rampLen = D / RAMP_SLOPE, width = 6;
+    for (let i = 0; i < nRamps; i++) {
+      const mid = arcAngle(cfg, (i + 0.25) / nRamps);
+      const dir = i % 2 ? -1 : 1;
+      const z = (i % 2 ? 1 : -1) * Math.min(cfg.halfWidth * 0.5, cfg.halfWidth - width);
+      // clear anything already sitting on the ramp's footprint
+      const start = mid - (dir * rampLen) / 2 / R;
+      const end = addRamp(mid, z, rampLen, D, dir, width);
+      const lo = Math.min(start, end), hi = Math.max(start, end);
+      for (let j = boxes.length - 2; j >= 0; j--) {
+        const b = boxes[j];
+        if (b.kind === 'wall') continue;
+        const da = Math.atan2(Math.sin(b.angle - (lo + hi) / 2), Math.cos(b.angle - (lo + hi) / 2)) * R;
+        if (Math.abs(da) < (hi - lo) * R / 2 + b.half[0] + 2 && Math.abs(b.center[2] - z) < width / 2 + b.half[2] + 2) boxes.splice(j, 1);
+      }
+      dk.holes.push({ angle: (lo + hi) / 2, z, halfArc: ((hi - lo) * R) / 2, halfZ: width / 2 + 0.6 });
+      stairs.push({ angle: mid, halfArc: rampLen / 2 + 2 });
+    }
+    // a few skylights, cover and prizes up top
+    const items: ItemKind[] = ['cannon', 'health', 'seeker', 'jetpack', 'rocket', 'sticky'];
+    const nTop = Math.max(4, Math.round(playSpan(cfg) / 60));
+    for (let i = 0; i < nTop; i++) {
+      const a = arcAngle(cfg, (i + 0.7) / nTop);
+      if (dk.holes.some((h) => Math.abs(wrapAngle(a - h.angle)) * R < h.halfArc + 6)) continue;
+      const z = (i % 3 - 1) * cfg.halfWidth * 0.45;
+      if (i % 3 === 0) dk.holes.push({ angle: a, z: -z, halfArc: 3, halfZ: 3 }); // a skylight / drop
+      addBox(a, z, rngRange(rng, 1, 2.5), rngRange(rng, 0.5, 1.2) * k, rngRange(rng, 1.5, 3), 'cover', rd);
+      const ap = a + 5 / R;
+      pickupSpots.push({ pos: [(rd - 1) * Math.cos(ap), (rd - 1) * Math.sin(ap), z], item: items[i % items.length] });
+    }
+    decks.push(dk);
+  }
+  // Holes in the floor: clear of spawns, ramps, pickups and bikes; anything sitting over one goes.
+  const holes: Hole[] = [];
+  for (let i = 0; i < cfg.floorHoles; i++) {
+    const halfArc = rngRange(rng, 2.5, 6), halfZ = rngRange(rng, 2.5, 6);
+    const angle = arcAngle(cfg, (i + rngRange(rng, 0.2, 0.8)) / cfg.floorHoles);
+    const z = rngRange(rng, -cfg.halfWidth + halfZ + 1.5, cfg.halfWidth - halfZ - 1.5);
+    const near = (a: number, zz: number, m: number) => Math.abs(wrapAngle(a - angle)) * R < halfArc + m && Math.abs(zz - z) < halfZ + m;
+    if (spawns.some((sp) => near(sp.angle, sp.z, 5))) continue;
+    if (pickupSpots.some((sp) => near(Math.atan2(sp.pos[1], sp.pos[0]), sp.pos[2], 3))) continue;
+    if (vehicleSpots.some((sp) => near(Math.atan2(sp.pos[1], sp.pos[0]), sp.pos[2], 4))) continue;
+    if (stairs.some((st) => Math.abs(wrapAngle(st.angle - angle)) * R < st.halfArc + halfArc + 2)) continue;
+    holes.push({ angle, z, halfArc, halfZ });
+  }
+  const filtered = holes.length
+    ? boxes.filter((b) => b.kind === 'wall' || !holes.some((h) =>
+      Math.abs(wrapAngle(b.angle - h.angle)) * R < h.halfArc + b.half[0] && Math.abs(b.center[2] - h.z) < h.halfZ + b.half[2]))
+    : boxes;
+  // inside or on the outside of a torus, the rim walls would only get in the way
+  const noWalls = cfg.tube === 'inside' || cfg.tube === 'outside';
+  return {
+    shape: 'ring', terrain, boxes: filtered, stairTops, spawns, pickupSpots, vehicleSpots,
+    ...(noWalls ? { wallPos: [], wallNeg: [] } : walls),
+    ...(holes.length ? { holes } : {}), ...(decks.length ? { decks } : {}),
+  };
 }
 
 export const BIKE_RADIUS = 0.8; // hover-bike collision sphere

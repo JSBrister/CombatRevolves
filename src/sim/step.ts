@@ -468,6 +468,11 @@ function despawnIfSpaced(state: SimState, pos: Vec3, vel: Vec3, kill: () => void
 
 /** Distance by which a point lies outside the ring band (0 if inside it). */
 export function distanceOffRing(cfg: SimConfig, pos: Vec3): number {
+  if (cfg.tube === 'outside') {
+    // how far off the log's surface
+    return Math.max(0, Math.hypot(rhoOf(pos) - (cfg.R + cfg.tubeRadius), pos[2]) - cfg.tubeRadius);
+  }
+  if (cfg.tube === 'inside') return 0; // closed: nowhere to fall
   const dz = Math.abs(pos[2]) - (cfg.halfWidth + cfg.wallThickness);
   const dr = rhoOf(pos) - (cfg.R + cfg.hullThickness);
   return Math.max(0, dz, dr);

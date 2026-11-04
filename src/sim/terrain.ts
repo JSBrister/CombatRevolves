@@ -23,6 +23,15 @@ export function terrainAt(level: Level, cfg: SimConfig, angle: number, z: number
     h += R - root;
     dhdz += (Math.sign(z) * zz) / root;
   }
+  if (t.tube) {
+    // circular cross-section of radius a touching R at z = 0: curving up (inside / half) or away (outside)
+    const a = t.tube.radius;
+    const zz = Math.min(Math.abs(z), a * 0.999);
+    const root = Math.sqrt(a * a - zz * zz);
+    const sgn = t.tube.kind === 'outside' ? -1 : 1;
+    h += sgn * (a - root);
+    dhdz += sgn * (Math.sign(z) * zz) / root;
+  }
   if (t.ridge && t.ridge.height > 0) {
     // Lambda: straight flanks from the rim walls up to a rounded crest along z = 0
     const c = t.ridge.plateau, W = cfg.halfWidth;
@@ -71,4 +80,15 @@ export function makeHills(
     hills.push({ angle, z, height, radius });
   }
   return hills;
+}
+
+/** How high the floor is at the ring's edges (z = +-halfWidth): where the rim walls stand. */
+export function edgeHeight(level: Level, cfg: SimConfig): number {
+  const t = level.terrain;
+  if (!t) return 0;
+  const W = cfg.halfWidth;
+  let h = 0;
+  if (t.sphere) h += cfg.R - Math.sqrt(Math.max(0, cfg.R * cfg.R - W * W));
+  if (t.tube && t.tube.kind !== 'outside') { const a = t.tube.radius; h += a - Math.sqrt(Math.max(0, a * a - Math.min(W, a) ** 2)); }
+  return h;
 }

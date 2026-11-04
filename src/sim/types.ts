@@ -18,6 +18,16 @@ export interface SimConfig {
   hillHeight: number; // tallest hill (m)
   ridgeHeight: number; // a ridge along the middle of the ring, this high (m): a Lambda-shaped cross-section
   ridgePlateau: number; // how rounded the ridge's top is (m)
+  /**
+   * Tube worlds (the floor's cross-section is a circle of radius tubeRadius
+   * touching radius R at z = 0): 'inside' a torus (a Stanford torus: the floor
+   * curves up into a ceiling), a 'half' torus (an open half-pipe), or standing
+   * on the 'outside' of one (a log: slip too far and you fall off).
+   */
+  tube: 'none' | 'inside' | 'half' | 'outside';
+  tubeRadius: number;
+  floorHoles: number; // holes in the floor you can fall through into space
+  deckHeight: number; // >0: a second deck this far above the floor, with ramps up through slots in it
   planetPull: number; // m/s^2: a uniform pull fixed relative to the stars (a planet below); it sweeps round as the ring turns
   planetAngle: number; // direction of that pull in the non-rotating frame (radians about the axis)
   gravity: number; // real gravity toward the floor (m/s^2), on top of any spin. 0 on a normal ring.
@@ -380,6 +390,20 @@ export interface SpawnPoint {
  */
 export type LevelShape = 'ring';
 
+/** A rectangular opening in a floor or deck, centred at (angle, z): halfArc metres along the ring (at radius R), halfZ across. */
+export interface Hole {
+  angle: number;
+  z: number;
+  halfArc: number;
+  halfZ: number;
+}
+
+export interface Deck {
+  r: number; // radius of the walking surface
+  thickness: number;
+  holes: Hole[];
+}
+
 /** A Gaussian hill on the floor. */
 export interface Hill {
   angle: number; // ring angle of its peak
@@ -390,7 +414,14 @@ export interface Hill {
 
 export interface Level {
   shape: LevelShape;
-  terrain: { sphere: boolean; hills: Hill[]; ridge?: { height: number; plateau: number } } | null; // null = flat cylinder floor
+  terrain: {
+    sphere: boolean; hills: Hill[]; ridge?: { height: number; plateau: number };
+    tube?: { kind: 'inside' | 'half' | 'outside'; radius: number };
+  } | null; // null = flat cylinder floor
+  /** Openings in the main floor (and hull): fall through into space. */
+  holes?: Hole[];
+  /** Upper decks: a thin floor at radius r (its walking surface), with openings. */
+  decks?: Deck[];
   boxes: Box[];
   stairTops: Vec3[]; // a floor point on each staircase's lookout (add stand height to place a player)
   spawns: SpawnPoint[];
