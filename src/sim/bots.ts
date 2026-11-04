@@ -3,13 +3,15 @@
 // deterministic (uses a stateless hash, never the sim RNG or Math.random), so
 // a server can run bots without disturbing replays.
 
-import { advanceFree, localBasis, planetPullAt } from './physics';
+import { advanceFree, localBasis, planetPullAt, viewVectors } from './physics';
+import { levelSdf } from './level';
+import { floorRadius } from './terrain';
 import { boltStats, launchVelocity, muzzlePoint } from './step';
 import { hash01 } from './rng';
 import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_SPRINT, DT, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_IDS, omegaOf, type BoltKind, type InputCmd, type Player, type SimState } from './types';
-import { type Vec3, addScaled, clone, cross, dot, len, norm, sub } from './vec';
+import { type Vec3, addScaled, clone, cross, dot, len, norm, scale, sub } from './vec';
 import { ENEMY_TYPES } from './tuning';
-import { eyeOffset } from './world';
+import { eyeOffset, standHeight } from './world';
 
 /** Local-frame yaw/pitch that points from `from` toward `to` (straight line, ignoring physics). */
 export function aimAt(from: Vec3, to: Vec3): { yaw: number; pitch: number } {
@@ -69,6 +71,96 @@ export function solveAim(state: SimState, me: Player, target: Player, kind: Bolt
   return aim;
 }
 
+/** How high a player is above the floor beneath them (0 when standing on the floor). */
+function heightAboveFloor(state: SimState, p: Player): number {
+  const ang = Math.atan2(p.pos[1], p.pos[0]);
+  return floorRadius(state.level, state.config, ang, p.pos[2]) - Math.hypot(p.pos[0], p.pos[1]) - standHeight(p.size);
+}
+
+/** A floor point at standing height for this player. */
+function standAt(state: SimState, p: Player, angle: number, z: number): Vec3 {
+  const r = floorRadius(state.level, state.config, angle, z) - standHeight(p.size);
+  return [r * Math.cos(angle), r * Math.sin(angle), z];
+}
+
+/** Up on a ramp or lookout: don't strafe off the edge. */
+function keepFooting(state: SimState, me: Player, cmd: InputCmd): InputCmd {
+  if ((cmd.moveX === 0 && cmd.moveY === 0) || heightAboveFloor(state, me) < 0.5) return cmd;
+  const vv = viewVectors(me.pos, cmd.yaw, 0);
+  const d = norm(addScaled(scale(vv.forward, cmd.moveY), vv.right, cmd.moveX));
+  const probe = addScaled(addScaled(me.pos, d, 1.2), vv.up, -(standHeight(me.size) + 0.3));
+  if (levelSdf(state.level, state.config, probe).d > 0.25) { cmd.moveX = 0; cmd.moveY = 0; } // nothing to stand on there
+  return cmd;
+}
+
+interface Nav {
+  dir: Vec3; // which way to go
+  stop: boolean; // arrived
+  hiding: boolean; // in or heading for cover: don't shoot
+}
+
+/** Cover when shields are low; ramps up to a target on a lookout. */
+function navigate(state: SimState, me: Player, target: Player): Nav | null {
+  const cfg = state.config;
+  const R = cfg.R;
+  // --- cover: get a box between you and the target until shields recover past half
+  if (me.maxShield > 0 && me.shield < 0.5 * me.maxShield) {
+    let bestP: Vec3 | null = null;
+    let bestD = 35;
+    for (const b of state.level.boxes) {
+      if (b.kind === 'wall') continue;
+      if (len(sub(b.center, me.pos)) > bestD + 8) continue;
+      const bl = localBasis(b.center);
+      let away = sub(b.center, target.pos);
+      away = sub(away, scale(bl.up, dot(away, bl.up))); // along the floor
+      if (len(away) < 1e-3) continue;
+      away = norm(away);
+      const extent = Math.abs(dot(away, bl.spin)) * b.half[0] + Math.abs(away[2]) * b.half[2];
+      const spot = addScaled(b.center, away, extent + 0.4 * me.size + 0.8);
+      const ang = Math.atan2(spot[1], spot[0]);
+      const cp = standAt(state, me, ang, spot[2]);
+      if (levelSdf(state.level, cfg, cp).d < 0.4 * me.size + 0.1) continue; // inside something
+      const d = len(sub(cp, me.pos));
+      if (d < bestD) { bestD = d; bestP = cp; }
+    }
+    if (bestP) {
+      const to = sub(bestP, me.pos);
+      return { dir: norm(to), stop: len(to) < 1.2, hiding: true };
+    }
+  }
+  // --- ramps: the target is up on a lookout or mesa and we're not
+  // (once we're up off the floor, keep climbing until level with them, so we
+  // don't wander off the side of the ramp near the top)
+  const mine = heightAboveFloor(state, me);
+  const above = heightAboveFloor(state, target) - mine;
+  if (above > (mine > 0.5 ? 0.6 : 2.5)) {
+    let best: { low: Vec3; high: Vec3; approach: Vec3; lowAngle: number; dir: number; z: number; hz: number } | null = null;
+    let bestD = Infinity;
+    for (const b of state.level.boxes) {
+      if (b.kind !== 'ramp' || !b.tilt) continue;
+      const run = (b.half[0] * Math.cos(b.tilt)) / R; // half the ramp's length, as an angle
+      const dir = Math.sign(b.tilt);
+      const lowAngle = b.angle - dir * (run + 2.5 / R);
+      const low = standAt(state, me, lowAngle, b.center[2]);
+      const high = standAt(state, me, b.angle + dir * (run + 3 / R), b.center[2]);
+      const approach = standAt(state, me, b.angle - dir * (run + 7 / R), b.center[2]);
+      const d = len(sub(high, target.pos));
+      if (d < bestD) { bestD = d; best = { low, high, approach, lowAngle, dir, z: b.center[2], hz: b.half[2] }; }
+    }
+    if (best) {
+      const onRamp = mine > 0.5;
+      // how far past the foot of the ramp we are (beside it: go round to the front first)
+      const myAngle = Math.atan2(me.pos[1], me.pos[0]);
+      const along = Math.atan2(Math.sin(myAngle - best.lowAngle), Math.cos(myAngle - best.lowAngle)) * best.dir * R;
+      const inLine = Math.abs(me.pos[2] - best.z) < best.hz - 0.3;
+      const goal = onRamp || len(sub(best.low, me.pos)) < 2.5 || (inLine && along > -3) ? best.high
+        : along > -2 ? best.approach : best.low;
+      return { dir: norm(sub(goal, me.pos)), stop: false, hiding: false };
+    }
+  }
+  return null;
+}
+
 export function botInput(state: SimState, playerId: number): InputCmd {
   const tick = state.tick;
   const me = state.players.find((p) => p.id === playerId)!;
@@ -94,6 +186,7 @@ export function botInput(state: SimState, playerId: number): InputCmd {
   }
   if (hash01(playerId, epoch, 3) < 0.3) cmd.buttons |= BTN_SPRINT;
 
+  let navigating = false;
   // Target: nearest living opponent (other team, not a dummy) within range.
   let target = null as (typeof state.players)[number] | null;
   let best = range;
@@ -140,6 +233,19 @@ export function botInput(state: SimState, playerId: number): InputCmd {
       cmd.moveY = best > range * 0.75 ? 1 : best < range * 0.35 ? -1 : 0;
       cmd.moveX = side;
     }
+    // Navigation overrides: break for cover when shields are low, use ramps to
+    // reach someone up on a lookout. Movement is set in the bot's facing frame,
+    // so it can keep aiming while it moves.
+    const nav = behaviour === 'hold' ? null : navigate(state, me, target);
+    if (nav) {
+      navigating = true;
+      const vv = viewVectors(me.pos, cmd.yaw, 0);
+      const f = dot(nav.dir, vv.forward), r = dot(nav.dir, vv.right);
+      const m = Math.max(1e-6, Math.hypot(f, r));
+      cmd.moveY = nav.stop ? 0 : f / m;
+      cmd.moveX = nav.stop ? 0 : r / m;
+      if (nav.hiding) return keepFooting(state, me, cmd); // no shooting from (or on the way to) cover
+    }
     const burst = (tick >> 5) % 4 !== 0;
     if (id === 'rifle' || id === 'redRifle') {
       if (burst && me.heat[cmd.weapon] < 0.85) cmd.buttons |= BTN_FIRE;
@@ -161,6 +267,6 @@ export function botInput(state: SimState, playerId: number): InputCmd {
       cmd.buttons |= sticky ? BTN_GRENADE : BTN_GRENADE2;
     }
   }
-  if (behaviour !== 'hold' && hash01(playerId, tick >> 6, 8) < 0.06) cmd.buttons |= BTN_JUMP;
-  return cmd;
+  if (behaviour !== 'hold' && !navigating && heightAboveFloor(state, me) < 0.5 && hash01(playerId, tick >> 6, 8) < 0.06) cmd.buttons |= BTN_JUMP;
+  return keepFooting(state, me, cmd);
 }

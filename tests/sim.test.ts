@@ -1237,3 +1237,68 @@ describe('26. hover-bikes', () => {
     expect(g.stuck?.kind).toBe('vehicle');
   });
 });
+
+describe('27. enemy AI: cover and ramps', () => {
+  const aiWorld = () => {
+    const s = createState({ props: false, dummies: false, pickups: false, vehicles: 0 });
+    s.players = [];
+    const tid = addPlayer(s, 'human', 'Target');
+    const target = s.players.find((p) => p.id === tid)!;
+    target.maxHealth = target.health = 1e6; // just a target
+    const eid = addPlayer(s, 'bot', 'Enemy');
+    const e = s.players.find((p) => p.id === eid)!;
+    return { s, tid, target, eid, e };
+  };
+  const above = (s: SimState, p: { pos: Vec3 }) => s.config.R - Math.hypot(p.pos[0], p.pos[1]);
+  const standOn = (s: SimState, angle: number, z: number): Vec3 => {
+    const r = s.config.R - 0.9;
+    return [r * Math.cos(angle), r * Math.sin(angle), z];
+  };
+
+  it('a soldier with low shields gets a box between itself and you, and holds fire', () => {
+    const { s, tid, target, eid, e } = aiWorld();
+    const box = s.level.boxes.find((b) => b.kind === 'cover' && b.tilt === 0 && Math.abs(b.center[2]) < 8)!;
+    expect(box).toBeTruthy();
+    e.enemyType = 'soldier';
+    e.maxShield = 70;
+    e.shield = 10;
+    // you: 18 m spinward of the box; the soldier: out in the open, 5 m across from it
+    target.pos = standOn(s, box.angle + 18 / s.config.R, box.center[2]);
+    e.pos = standOn(s, box.angle + 2 / s.config.R, box.center[2] + 6);
+    run(s, 20, (st) => [cmdFor(st, tid)]);
+    let shots = 0;
+    for (let i = 0; i < 120 * 3; i++) {
+      e.lastDamageTick = s.tick; // keep the shields from recharging
+      step(s, [cmdFor(s, tid), botInput(s, eid)], s.tick);
+      shots += s.events.filter((ev) => ev.type === 'fire' && ev.owner === eid).length;
+    }
+    expect(shots).toBe(0);
+    // the box is now between you: sample the straight line for a point inside it
+    let blocked = false;
+    for (let k = 1; k < 40 && !blocked; k++) {
+      const q = add(target.pos, scale(add(e.pos, scale(target.pos, -1)), k / 40));
+      blocked = levelSdf(s.level, s.config, q).d < 0;
+    }
+    expect(blocked).toBe(true);
+  });
+
+  it('an enemy takes the ramp up to you on a lookout (from the side: round to the front first)', { timeout: 20000 }, () => {
+    const { s, tid, target, eid, e } = aiWorld();
+    expect(s.level.stairTops.length).toBeGreaterThan(0);
+    e.enemyType = 'soldier';
+    target.pos = s.level.stairTops[0];
+    run(s, 60, (st) => [cmdFor(st, tid)]);
+    const h = above(s, target);
+    expect(h).toBeGreaterThan(4);
+    // start on the floor 15 m off to the side of the lookout
+    const a = angleOf(target.pos);
+    e.pos = standOn(s, a - 15 / s.config.R, Math.max(-12, Math.min(12, target.pos[2] + 10)));
+    let best = 0;
+    for (let i = 0; i < 120 * 20 && best < h - 1.5; i++) {
+      step(s, [cmdFor(s, tid), botInput(s, eid)], s.tick);
+      if (e.grounded) best = Math.max(best, above(s, e));
+    }
+    expect(best).toBeGreaterThan(h - 1.5);
+    expect(e.alive).toBe(true);
+  });
+});

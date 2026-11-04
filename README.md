@@ -14,11 +14,11 @@ npx tsc -p src/sim # proves the sim compiles without DOM types
 **Play online:** this repo builds and deploys itself to GitHub Pages on every push to `main` (enable it under Settings → Pages → Source: GitHub Actions).
 
 **Modes:** *Campaign* (fixed levels: kill every enemy to clear it, no respawns, enemies don't hurt each other) and
-*Debug sandbox* (free-for-all with bots and respawns). Levels are rings of different sizes, plus *Earth* (flat ground, normal gravity, no spin: the reference for what everything should do) and *Boot Camp*, the first campaign level, also on Earth.
+*Debug sandbox* (free-for-all with bots and respawns). Levels are rings of different sizes and widths (some with rolling hills, a bowl-shaped *sphere band*, or a planet's pull), plus *Earth* (flat ground, normal gravity, no spin: the reference for what everything should do) and *Boot Camp*, the first campaign level, also on Earth.
 
 **Controls:** WASD move · Shift toggle sprint (on by default) · Space jump (hold in the air with a jetpack) · mouse look ·
-left click fire · right click show trajectory · 1–5 weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
-(hold to aim, release to throw) · walk over items to pick them up · Esc pause.
+left click fire · right click show trajectory · 1–7 weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
+(hold to aim, release to throw) · R reload · Q melee · E get on/off a hover-bike · walk over items to pick them up · Tab scores · Esc pause.
 The debug panel (ring size 10–5000 m, forces, movement, every weapon's stats, time scale, inertial-frame overlay, free-fly camera,
 hover gun, bots) only appears while paused.
 
@@ -59,7 +59,9 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 | `src/sim/level.ts` | Level SDF (hull, rim walls, local-frame boxes) and swept sphere tracing |
 | `src/sim/step.ts` | Players, weapons, projectiles, sticky grenades, explosions, damage and respawn |
 | `src/sim/serialize.ts` | `snapshot`/`restore` and a compact lossless binary encoder |
-| `src/sim/bots.ts` | Scripted bots and campaign enemy AI: pure `state → InputCmd` |
+| `src/sim/bots.ts` | Scripted bots and campaign enemy AI (aiming, cover, ramps): pure `state → InputCmd` |
+| `src/sim/terrain.ts` | Floor height profile: hills and the sphere band |
+| `src/sim/vehicles.ts` | Hover-bikes: riding, crashes, ramming, damage and respawn |
 | `src/sim/levels.ts`, `src/sim/tuning.ts` | Level definitions and all tunable defaults (see above) |
 | `src/sim/predict.ts` | Trajectory preview using the real physics |
 | `src/client/` | three.js renderer, interpolation, HUD, lil-gui, WebAudio placeholder sounds |
@@ -92,6 +94,11 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 - **Mesas:** low (3.5 m) platforms with ramps, about one per 80 m of ring, plus denser cover, so big rings aren't empty.
 - **Ammo:** `magSize` rounds in the magazine, `ammoMax` spares; reloading takes `reloadTime`. Heat-based weapons have `magSize` 0.
 - **Bouncing grenades** (yellow) share one sub-stepped sphere mover with the props and with their own trajectory preview. Their fuse starts at the throw. They bounce off players and props relative to the target's velocity.
+- **Terrain:** the floor can carry a height profile: Gaussian hills, and/or a *sphere band*, where the floor is the inside of a sphere of radius R round the equator, so it curves up toward the axis at the edges. The spin still pulls straight away from the axis, so walking toward an edge is like climbing a slope equal to your latitude in weaker g. Collision uses the height function's own gradient (exact for planes, close for smooth hills). Hills keep clear of ramps and lookouts.
+- **Why not a whole sphere?** A band works fine: it's a ring with curved walls, which is what the *Bowl* level is. Going all the way to the poles doesn't: there the spin gives no pull at all, and near the axis you'd walk on an almost vertical wall. A sphere world would be a different game (zero-g near the poles), and the `level.shape` seam is where it would go.
+- **Planet below:** `planetPull` adds a uniform pull toward a planet that is fixed to the stars, so in the ring's frame it sweeps round once per spin. You weigh less on the side facing the planet and more on the far side, and shots curve with it; enemy aim and the trajectory preview use the same field.
+- **Hover-bikes** (big rings only): a physics sphere with its own health. Frictionless while ridden, so momentum, the spin and slopes all matter; it faces where you look; W/S thrust, A/D strafe, Space hops, Shift boosts. Hitting things hard damages the bike and, harder still, the rider; running people over hurts them (credited to the rider); shots, blasts and sticky grenades work on it. At zero health it explodes, throws the rider clear and respawns at its spot later.
+- **Enemy movement:** besides chase / strafe / hold, enemies with shields break for cover when shields drop below half: they pick the nearest box and stand on its far side from you, holding fire until the shields recover. If you're up on a lookout or mesa they go round to the foot of the nearest ramp and climb it. Up off the floor they won't strafe off an edge.
 - **Owner self-hits:** a projectile is `armed` against its owner once it has left the owner's capsule. The test fires a bolt antispinward at the local rim speed, and it hits the shooter in the back ≈ 2π/ω later.
 
 ## Known limitations / next steps
@@ -99,5 +106,5 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 - No networking yet. The pieces are in place: inputs are per tick, the state is serializable, and restore-and-replay is exact.
 - Player-vs-player and prop collisions are simple positional pushes. There is no rigid-body rotation, and prop rolling is visual only.
 - Explosions ignore line of sight.
-- Bots aim in a straight line and don't compensate for Coriolis. That is on purpose.
+- Enemy navigation is local (cover and ramps, no path-finding): an enemy that loses sight of you just waits.
 - Pickups are floating items, not physics objects. Dropped items hang where they land, 0.7 m above the floor.
