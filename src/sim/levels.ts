@@ -37,6 +37,7 @@ export interface LevelDef {
   props?: boolean; // default true (the bouncy balls)
   pickups?: boolean; // default true
   bots?: number; // sandbox: free-for-all bots
+  vehicles?: number; // hover-bikes (default: by ring size)
   start?: { angle: number; z: number }; // degrees, metres (default 0, 0)
   sky?: 'space' | 'earth'; // what the client draws around the level (default space)
   enemies?: EnemySpawn[]; // campaign
@@ -178,6 +179,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
     pickups: def.pickups ?? true,
     mode: def.mode,
     levelId: def.id,
+    vehicles: def.vehicles,
   });
   const cfg = state.config;
   // default start: angle 0, or near one end of an arena (so the enemies are ahead of you)

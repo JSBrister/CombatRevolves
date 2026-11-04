@@ -10,12 +10,13 @@ import {
   BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
   omegaOf,
   type Bolt, type BoltKind, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
-  type Outcome, type Player, type Prop, type SimConfig, type SimState, type WeaponId,
+  type Outcome, type Player, type Prop, type SimConfig, type SimState, type Vehicle, type WeaponId,
 } from './types';
 import { type Vec3, add, addScaled, clone, dist, dot, len, norm, rhoOf, scale, sub } from './vec';
 import {
   MAX_GRENADES, PLAYER_MASS, addPickup, allocId, capsuleHalfSeg, capsuleRadius, dummyHome, eyeOffset, standHeight,
 } from './world';
+import { BIKE_MASS, damageVehicle, dismount, handleUse, updateVehicles } from './vehicles';
 
 const secs = (s: number) => Math.round(s / DT);
 
@@ -125,8 +126,10 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
     p.lastInput = cmd ? { ...cmd, tick } : { ...p.lastInput, tick };
   }
 
-  // 2. player motion
-  for (const p of state.players) if (p.alive) movePlayer(state, p, omega);
+  // 2. player motion (E gets on/off bikes; riders move with their bike)
+  for (const p of state.players) handleUse(state, p);
+  for (const p of state.players) if (p.alive && p.vehicle < 0) movePlayer(state, p, omega);
+  updateVehicles(state, omega);
   collidePlayers(state);
 
   // 3. props
@@ -296,10 +299,10 @@ function collidePlayers(state: SimState) {
   const ps = state.players;
   for (let i = 0; i < ps.length; i++) {
     const a = ps[i];
-    if (!a.alive) continue;
+    if (!a.alive || a.vehicle >= 0) continue;
     for (let j = i + 1; j < ps.length; j++) {
       const b = ps[j];
-      if (!b.alive) continue;
+      if (!b.alive || b.vehicle >= 0) continue;
       if (dist(a.pos, b.pos) > 3) continue;
       const [a0, a1] = capsuleEnds(a), [b0, b1] = capsuleEnds(b);
       const c = segSegClosest(a0, a1, b0, b1);
@@ -336,7 +339,7 @@ export interface SphereBody {
  * restitution + Coulomb friction. Shared by props, bouncing grenades and the
  * bouncing-grenade trajectory preview. Returns the largest impact speed.
  */
-export function moveSphereBody(level: Level, cfg: SimConfig, omega: number, b: SphereBody, restitution: number, dt = DT, extra: Vec3 | null = pull): number {
+export function moveSphereBody(level: Level, cfg: SimConfig, omega: number, b: SphereBody, restitution: number, dt = DT, extra: Vec3 | null = pull, mu = cfg.friction): number {
   const support = b.contactNormal;
   const n = clamp(Math.ceil((len(b.vel) * dt) / (0.4 * b.radius)), 1, 32);
   const h = dt / n;
@@ -356,7 +359,7 @@ export function moveSphereBody(level: Level, cfg: SimConfig, omega: number, b: S
       const vn = dot(b.vel, hit.n);
       if (vn < 0) {
         maxImpact = Math.max(maxImpact, -vn);
-        reflect(b.vel, hit.n, vn, -vn > 1.5 ? restitution : 0, cfg.friction);
+        reflect(b.vel, hit.n, vn, -vn > 1.5 ? restitution : 0, mu);
       }
       // Only a resting/sliding contact supports the body next tick; one it is
       // bouncing away from must not cancel the centrifugal force.
@@ -364,8 +367,8 @@ export function moveSphereBody(level: Level, cfg: SimConfig, omega: number, b: S
       if (gap >= 0) break;
     }
   }
-  // rolling resistance while in contact
-  if (contact) {
+  // rolling resistance while in contact (none for frictionless bodies)
+  if (contact && mu > 0) {
     const vn = dot(b.vel, contact);
     const vt = sub(b.vel, scale(contact, vn));
     const l = len(vt);
@@ -662,6 +665,7 @@ interface SweepHit {
   pos: Vec3;
   player: Player | null;
   prop: Prop | null;
+  vehicle?: Vehicle;
 }
 
 /** Sweep a small sphere over p0->p1 against level (optional), players and props; earliest hit wins. */
@@ -683,6 +687,14 @@ function sweep(state: SimState, p0: Vec3, p1: Vec3, radius: number, owner: numbe
   for (const pr of state.props) {
     const s = segSphere(p0, p1, pr.pos, pr.radius + radius);
     if (s !== null && (!best || s < best.s)) best = { s, pos: addScaled(p0, sub(p1, p0), s), player: null, prop: pr };
+  }
+  for (const v of state.vehicles) {
+    if (!v.alive) continue;
+    // a rider's own bike doesn't block their shots until the bolt is clear of them
+    const riderOwn = state.players.some((q) => q.id === owner && q.vehicle === v.id);
+    if (riderOwn && !armed) continue;
+    const s = segSphere(p0, p1, v.pos, v.radius + radius);
+    if (s !== null && (!best || s < best.s)) best = { s, pos: addScaled(p0, sub(p1, p0), s), player: null, prop: null, vehicle: v };
   }
   return best;
 }
@@ -709,12 +721,16 @@ function updateBolts(state: SimState, omega: number) {
         const kb = cfg.weapons[BOLT_WEAPON[b.kind]].knockback * (b.kind === 'overcharge' ? 4 : 1);
         if (kb > 0) hit.player.vel = addScaled(hit.player.vel, norm(sub(b.vel, hit.player.vel)), kb);
         damagePlayer(state, hit.player, b.owner, b.damage, b.shieldDamage, b.kind);
+      } else if (hit.vehicle) {
+        const kb = cfg.weapons[BOLT_WEAPON[b.kind]].knockback * (PLAYER_MASS / BIKE_MASS);
+        hit.vehicle.vel = addScaled(hit.vehicle.vel, norm(sub(b.vel, hit.vehicle.vel)), kb);
+        damageVehicle(state, hit.vehicle, b.owner, b.damage);
       } else if (hit.prop) {
         const k = (b.kind === 'overcharge' ? 4 : 0.6) / hit.prop.mass;
         hit.prop.vel = addScaled(hit.prop.vel, sub(b.vel, hit.prop.vel), k);
         hit.prop.contactNormal = null;
       }
-      state.events.push({ type: 'impact', pos: hit.pos, kind: b.kind, target: hit.player?.id ?? hit.prop?.id ?? -1, owner: b.owner });
+      state.events.push({ type: 'impact', pos: hit.pos, kind: b.kind, target: hit.player?.id ?? hit.prop?.id ?? hit.vehicle?.id ?? -1, owner: b.owner });
       if (b.kind === 'fuelRod') {
         const w = cfg.weapons.launcher;
         detonate(state, hit.pos, b.owner, b.id, { radius: w.blastRadius, damage: w.blastDamage, knockback: w.blastKnockback }, 'fuel rod');
@@ -747,6 +763,9 @@ function updateGrenades(state: SimState, omega: number) {
       } else if (st.kind === 'prop') {
         const pr = state.props.find((q) => q.id === st.id);
         if (pr) { g.pos = add(pr.pos, st.offset); g.vel = clone(pr.vel); } else g.stuck = null;
+      } else if (st.kind === 'vehicle') {
+        const v = state.vehicles.find((q) => q.id === st.id);
+        if (v && v.alive) { g.pos = add(v.pos, st.offset); g.vel = clone(v.vel); } else g.stuck = null;
       }
     } else if (g.variant === 'bounce') {
       if (g.spawnTick !== tick) {
@@ -755,10 +774,10 @@ function updateGrenades(state: SimState, omega: number) {
         if (impact > 1) state.events.push({ type: 'grenadeBounce', id: g.id, pos: clone(g.pos), speed: impact });
         // ...then bounce off players and props (relative to their motion)
         const hit = sweep(state, p0, g.pos, g.radius, g.owner, g.armed, false);
-        if (hit && (hit.player || hit.prop)) {
-          const centre = hit.player ? closestOnSeg(hit.pos, ...capsuleEnds(hit.player)).point : hit.prop!.pos;
+        if (hit && (hit.player || hit.prop || hit.vehicle)) {
+          const centre = hit.player ? closestOnSeg(hit.pos, ...capsuleEnds(hit.player)).point : hit.vehicle ? hit.vehicle.pos : hit.prop!.pos;
           const n = norm(sub(hit.pos, centre));
-          const vt = hit.player ? hit.player.vel : hit.prop!.vel;
+          const vt = hit.player ? hit.player.vel : hit.vehicle ? hit.vehicle.vel : hit.prop!.vel;
           const rel = sub(g.vel, vt);
           const vn = dot(rel, n);
           if (vn < 0) {
@@ -785,6 +804,9 @@ function updateGrenades(state: SimState, omega: number) {
           const d = sub(hit.pos, hit.player.pos);
           g.stuck = { kind: 'player', id: hit.player.id, offset: [dot(d, b.spin), dot(d, b.up), dot(d, b.axial)] };
           g.vel = clone(hit.player.vel);
+        } else if (hit.vehicle) {
+          g.stuck = { kind: 'vehicle', id: hit.vehicle.id, offset: sub(hit.pos, hit.vehicle.pos) };
+          g.vel = clone(hit.vehicle.vel);
         } else if (hit.prop) {
           g.stuck = { kind: 'prop', id: hit.prop.id, offset: sub(hit.pos, hit.prop.pos) };
           g.vel = clone(hit.prop.vel);
@@ -793,7 +815,7 @@ function updateGrenades(state: SimState, omega: number) {
           g.vel = [0, 0, 0];
         }
         if (g.fuseTick < 0) g.fuseTick = tick + secs(cfg.grenadeFuse);
-        state.events.push({ type: 'stick', id: g.id, pos: clone(g.pos), target: hit.player?.id ?? hit.prop?.id ?? -1 });
+        state.events.push({ type: 'stick', id: g.id, pos: clone(g.pos), target: hit.player?.id ?? hit.prop?.id ?? hit.vehicle?.id ?? -1 });
       } else {
         if (!g.armed && !stillInsideOwner(state, g.pos, g.radius, g.owner)) g.armed = true;
         if (tick - g.spawnTick > secs(cfg.grenadeMaxFlight)) explode = true;
@@ -855,6 +877,15 @@ export function detonate(state: SimState, c: Vec3, owner: number, sourceId: numb
     const dmg = b.damage * f * (p.id === owner ? cfg.selfDamageScale : 1);
     if (dmg > 0) damagePlayer(state, p, owner, dmg, dmg, cause);
   }
+  for (const v of state.vehicles) {
+    if (!v.alive || v.id === sourceId) continue;
+    const d = Math.max(0, dist(c, v.pos) - v.radius);
+    if (d >= rad) continue;
+    const f = falloff(cfg, d / rad);
+    v.vel = addScaled(v.vel, knockDir(sub(v.pos, c), localBasis(v.pos).up, cfg.liftBias), kb * f * (PLAYER_MASS / BIKE_MASS) * 2);
+    v.contactNormal = null;
+    damageVehicle(state, v, owner, b.damage * f * 1.5);
+  }
   for (const pr of state.props) {
     const d = Math.max(0, dist(c, pr.pos) - pr.radius);
     if (d >= rad) continue;
@@ -894,6 +925,7 @@ export function damagePlayer(state: SimState, p: Player, attacker: number, damag
 }
 
 function kill(state: SimState, p: Player, killer: number, cause: string) {
+  if (p.vehicle >= 0) dismount(state, p);
   p.alive = false;
   p.health = 0;
   p.deaths++;

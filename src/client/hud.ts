@@ -35,6 +35,12 @@ export class Hud {
       const rows = state.players.filter((p) => p.kind !== 'dummy').sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
       sc.textContent = 'NAME              KILLS  DEATHS\n' + rows.map((p) => `${(p.id === me.id ? '> ' : '  ') + p.name.padEnd(16)}${String(p.kills).padStart(5)}  ${String(p.deaths).padStart(6)}`).join('\n');
     }
+    // hover-bike: health and a prompt when one is in reach
+    const bike = state.vehicles.find((v) => v.id === me.vehicle);
+    const near = !bike && me.alive && state.vehicles.some((v) => v.alive && v.driver < 0 && Math.hypot(v.pos[0] - me.pos[0], v.pos[1] - me.pos[1], v.pos[2] - me.pos[2]) < 2.6);
+    $('vehicle').innerHTML = bike
+      ? `HOVER-BIKE ${Math.ceil(bike.health)} / ${bike.maxHealth} · ${Math.hypot(...bike.vel).toFixed(0)} m/s · <b>E</b> get off`
+      : near ? '<b>E</b> ride hover-bike' : '';
     const enemies = state.players.filter((p) => p.enemyType !== '');
     $('objective').textContent = state.mode === 'campaign' && state.outcome === 'playing'
       ? `Enemies left: ${enemies.filter((p) => p.alive).length} / ${enemies.length}` : '';

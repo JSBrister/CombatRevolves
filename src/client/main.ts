@@ -94,6 +94,7 @@ function capture(s: SimState): PosMap {
   for (const b of s.bolts) m.set(b.id, [...b.pos] as Vec3);
   for (const g of s.grenades) m.set(g.id, [...g.pos] as Vec3);
   for (const p of s.props) m.set(p.id, [...p.pos] as Vec3);
+  for (const v of s.vehicles) m.set(v.id, [...v.pos] as Vec3);
   return m;
 }
 
@@ -263,6 +264,8 @@ function handleEvent(e: SimEvent) {
     case 'bodyImpact': sfx.thud(d(e.pos)); break;
     case 'grenadeBounce': sfx.bounce(d(e.pos), e.speed); break;
     case 'pickup': if (e.player === localId) sfx.pickup(); break;
+    case 'mount': if (e.id === localId) sfx.pickup(); break;
+    case 'vehicleHit': sfx.thud(d(e.pos)); break;
   }
   hud.onEvent(state, e, localId);
 }
@@ -329,7 +332,14 @@ function frame(now: number) {
     const eo = eyeOffset(me);
     const eye = new THREE.Vector3(pos[0] + v.up[0] * eo, pos[1] + v.up[1] * eo, pos[2] + v.up[2] * eo);
     camera.up.set(...v.up);
-    if (me.alive) {
+    const riding = me.alive && me.vehicle >= 0;
+    // third person on a bike: behind and above, looking where you aim
+    if (riding) camera.layers.enable(LAYER_SELF);
+    else if (!view.freefly) camera.layers.disable(LAYER_SELF);
+    if (riding) {
+      camera.position.set(eye.x - v.aim[0] * 6 + v.up[0] * 1.6, eye.y - v.aim[1] * 6 + v.up[1] * 1.6, eye.z - v.aim[2] * 6 + v.up[2] * 1.6);
+      camera.lookAt(eye.x + v.aim[0] * 12, eye.y + v.aim[1] * 12, eye.z + v.aim[2] * 12);
+    } else if (me.alive) {
       camera.position.copy(eye);
       camera.lookAt(eye.x + v.aim[0], eye.y + v.aim[1], eye.z + v.aim[2]);
     } else {
@@ -347,7 +357,7 @@ function frame(now: number) {
   const maxT = pk === 'laconic' ? cfg.weapons.laconic.lifetime : 22;
   views.setPreview(pk ? predictTrajectory(state, localId, pk, input.yaw, input.pitch, maxT) : null, BOLT_COLORS[pk ?? 'rifle']);
   // first-person gun, mouse slowdown while charging the laser, owned list for the wheel
-  views.setViewWeapon(me?.weapon ?? 0, !!me && me.alive && !view.freefly);
+  views.setViewWeapon(me?.weapon ?? 0, !!me && me.alive && !view.freefly && me.vehicle < 0);
   input.lookScale = me && isLaconicBusy(me, state.tick) ? cfg.weapons.laconic.chargeLookScale : 1;
   views.reloadDip = me && me.reloadUntil > state.tick ? Math.min(1, views.reloadDip + dtReal * 6) : Math.max(0, views.reloadDip - dtReal * 6);
   if (me) input.owned = me.owned;

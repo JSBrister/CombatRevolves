@@ -77,6 +77,34 @@ export function makeGun(weapon: number): THREE.Group {
   return g;
 }
 
+/** Hover-bike, nose along +X, about 2.4 m long; its centre is the collision sphere's. */
+export function makeBike(): THREE.Group {
+  const g = new THREE.Group();
+  const hull = mat(0x3a2a5a, 0x0a0618, 0.7);
+  const trim = mat(0x6ad8ff, 0x2a88ff, 0.4);
+  const dark = mat(0x22252e);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.32, 0.8), hull);
+  body.position.set(0, 0.05, 0);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.7, 4), hull);
+  nose.rotation.z = -Math.PI / 2;
+  nose.rotation.x = Math.PI / 4;
+  nose.position.set(1.32, 0.05, 0);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.18, 0.45), dark);
+  seat.position.set(-0.2, 0.3, 0);
+  g.add(body, nose, seat);
+  for (const z of [-0.55, 0.55]) {
+    const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.2, 1.6, 12), hull);
+    pod.rotation.z = Math.PI / 2;
+    pod.position.set(-0.1, -0.12, z);
+    const glow = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.05, 12), trim);
+    glow.rotation.z = Math.PI / 2;
+    glow.position.set(-0.92, -0.12, z);
+    g.add(pod, glow);
+  }
+  g.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+  return g;
+}
+
 const ITEM_WEAPON: Partial<Record<ItemKind, number>> = { rifle: 0, pistol: 1, redRifle: 2, launcher: 3, cannon: 4, laconic: 5, hammer: 6 };
 
 /** Floating pickup model (about 0.6 m across). */

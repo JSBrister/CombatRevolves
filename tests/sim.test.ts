@@ -4,7 +4,7 @@ import {
   addPlayer, addProp, botInput, createState, decode, detonate, encode, falloff, hash01, integrate,
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
-  isLaconicBusy, predictTrajectory, solveAim, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
+  isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
   LEVELS, levelById, startLevel, add, scale, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
@@ -1146,5 +1146,94 @@ describe('25. planet below: a pull fixed to the stars', () => {
     for (let i = 0; i < 2000 && !g.stuck; i++) step(state, [cmdFor(state, localId, { yaw: 0, pitch: 0.4 })], state.tick);
     expect(pred.hit).not.toBeNull();
     expect(Math.hypot(g.pos[0] - pred.hit![0], g.pos[1] - pred.hit![1], g.pos[2] - pred.hit![2])).toBeLessThan(0.6);
+  });
+});
+
+describe('26. hover-bikes', () => {
+  const bikeWorld = () => {
+    const { state, localId } = startLevel(levelById('s-large')!);
+    state.players = state.players.filter((p) => p.id === localId);
+    state.level.boxes = []; // an open floor, so the tests measure the bike and not the layout
+    const p = state.players[0];
+    const v = state.vehicles[0];
+    // stand next to the first bike
+    p.pos = addScaled(v.pos, localBasis(v.pos).up, 0.2);
+    p.vel = [0, 0, 0];
+    return { s: state, id: localId, p, v };
+  };
+  it('only bigger rings have bikes', () => {
+    expect(startLevel(levelById('s-standard')!).state.vehicles.length).toBe(0);
+    expect(startLevel(levelById('s-large')!).state.vehicles.length).toBeGreaterThan(3);
+    expect(startLevel(levelById('s-hills')!).state.vehicles.length).toBeGreaterThan(0);
+  });
+  it('E gets on and off; the throttle gets you moving fast, frictionless', () => {
+    const { s, id, p, v } = bikeWorld();
+    step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
+    expect(p.vehicle).toBe(v.id);
+    expect(v.driver).toBe(id);
+    const yaw = v.homeYaw;
+    run(s, 120 * 3, () => [cmdFor(s, id, { moveY: 1, yaw })]);
+    expect(Math.hypot(...v.vel)).toBeGreaterThan(25);
+    expect(dist(p.pos, v.pos)).toBeLessThan(1.5); // the rider rides along
+    // coast: barely slows (frictionless; just a little damping)
+    const v0 = Math.hypot(...v.vel);
+    run(s, 60, () => [cmdFor(s, id, { yaw })]);
+    expect(Math.hypot(...v.vel)).toBeGreaterThan(v0 * 0.85);
+    step(s, [cmdFor(s, id, { yaw, buttons: BTN_USE })], s.tick);
+    expect(p.vehicle).toBe(-1);
+    expect(v.driver).toBe(-1);
+  });
+  it('slamming into a wall hurts the bike and the rider', () => {
+    const { s, id, p, v } = bikeWorld();
+    step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
+    // hurl it across the ring at the rim wall at 35 m/s
+    v.vel = [0, 0, 35 * Math.sign(-v.pos[2] || 1) * -1];
+    v.vel = [0, 0, v.pos[2] > 0 ? 35 : -35];
+    const hp0 = v.health, me0 = p.health + p.shield;
+    run(s, 120 * 2, () => [cmdFor(s, id)]);
+    expect(v.health).toBeLessThan(hp0);
+    expect(p.health + p.shield).toBeLessThan(me0);
+  });
+  it('running someone over hurts them and sends them flying', () => {
+    const { s, id, v } = bikeWorld();
+    const vid = addPlayer(s, 'human', 'Pedestrian');
+    const ped = s.players.find((q) => q.id === vid)!;
+    step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
+    const b = localBasis(v.pos);
+    ped.pos = addScaled(add(v.pos, scale(b.axial, 6)), b.up, 0.1);
+    ped.vel = [0, 0, 0];
+    v.vel = scale(b.axial, 20);
+    let hurt = false;
+    for (let i = 0; i < 120 && !hurt; i++) {
+      step(s, [cmdFor(s, id, { yaw: Math.PI / 2 }), cmdFor(s, vid)], s.tick);
+      hurt = s.events.some((e) => e.type === 'hit' && e.target === vid);
+    }
+    expect(hurt).toBe(true);
+    expect(Math.hypot(...ped.vel)).toBeGreaterThan(8);
+  });
+  it('a destroyed bike explodes, throws the rider off, and comes back later', () => {
+    const { s, id, p, v } = bikeWorld();
+    step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
+    p.maxHealth = p.health = 1e6;
+    damageVehicle(s, v, -1, 1e6);
+    expect(v.alive).toBe(false);
+    expect(p.vehicle).toBe(-1);
+    expect(s.events.some((e) => e.type === 'vehicleDestroyed')).toBe(true);
+    expect(s.explosions.length).toBeGreaterThan(0);
+    p.pos = addScaled(p.pos, localBasis(p.pos).spin, 20); // get off the spot
+    run(s, Math.round(s.config.bikeRespawn / DT) + 10, () => [cmdFor(s, id)]);
+    expect(v.alive).toBe(true);
+    expect(v.health).toBe(v.maxHealth);
+  });
+  it('shots and sticky grenades work on bikes', () => {
+    const { s, v } = bikeWorld();
+    const hp0 = v.health;
+    const b = localBasis(v.pos);
+    spawnBolt(s, -1, 'cannon', add(v.pos, scale(b.axial, -6)), scale(b.axial, 200));
+    run(s, 10);
+    expect(v.health).toBeLessThan(hp0);
+    const g = spawnGrenade(s, -1, add(v.pos, scale(b.axial, -4)), scale(b.axial, 30));
+    run(s, 20);
+    expect(g.stuck?.kind).toBe('vehicle');
   });
 });

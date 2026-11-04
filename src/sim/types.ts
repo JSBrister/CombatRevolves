@@ -75,6 +75,25 @@ export interface SimConfig {
   shieldRegenDelay: number; // s
   shieldRegenRate: number; // per s
   respawnTime: number; // s
+  // hover-bikes
+  vehicleMinRadius: number; // rings at least this big get hover-bikes
+  vehicleSpacing: number; // one bike per this many metres of ring
+  bikeHealth: number;
+  bikeThrust: number; // m/s^2
+  bikeStrafe: number; // m/s^2
+  bikeMaxSpeed: number; // m/s (thrust stops adding speed beyond this)
+  bikeDamping: number; // fraction of speed lost per second while ridden
+  bikeHop: number; // m/s
+  bikeCrashSpeed: number; // impacts faster than this damage the bike
+  bikeCrashDamage: number; // per m/s above that
+  riderCrashSpeed: number; // impacts faster than this also hurt the rider
+  riderCrashDamage: number; // per m/s above that
+  bikeRamSpeed: number; // closing speed above which a bike hurts whoever it hits
+  bikeRamDamage: number; // per m/s above that
+  bikeRespawn: number; // s
+  bikeBlastRadius: number;
+  bikeBlastDamage: number;
+  bikeBlastKnockback: number;
   meleeDamage: number;
   meleeKnockback: number; // m/s kick
   meleeRange: number; // m in front of you
@@ -95,6 +114,7 @@ export const BTN_GRENADE = 16; // sticky grenade: hold to aim, release to throw
 export const BTN_GRENADE2 = 32; // bouncing grenade: hold to aim, release to throw
 export const BTN_RELOAD = 64;
 export const BTN_MELEE = 128;
+export const BTN_USE = 256; // get on / off a vehicle
 
 // Weapons are addressed by a fixed slot index (also the 1-5 number keys).
 export const WEAPON_IDS = ['rifle', 'pistol', 'redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'hover'] as const;
@@ -206,6 +226,7 @@ export interface Player {
   needRelease: boolean; // release the trigger before charging again
   burstUntil: number; // Laconic Laser: firing until this tick
   meleeReadyTick: number;
+  vehicle: number; // id of the vehicle being ridden, or -1
   fireReadyTick: number;
   hasJetpack: boolean;
   jetFuel: number; // 0..1
@@ -259,7 +280,8 @@ export type ThrownKind = 'grenade' | 'bounceGrenade';
 export type StickTarget =
   | { kind: 'world' }
   | { kind: 'player'; id: number; offset: Vec3 } // offset in target's local (spin, up, axial) basis
-  | { kind: 'prop'; id: number; offset: Vec3 };
+  | { kind: 'prop'; id: number; offset: Vec3 }
+  | { kind: 'vehicle'; id: number; offset: Vec3 };
 
 export interface Grenade {
   id: number;
@@ -286,6 +308,27 @@ export interface Prop {
   radius: number;
   mass: number;
   contactNormal: Vec3 | null;
+}
+
+/** Hover-bike: a frictionless (when ridden) physics sphere with its own health. */
+export interface Vehicle {
+  id: number;
+  type: 'vehicle';
+  kind: 'bike';
+  pos: Vec3; // centre of the collision sphere
+  vel: Vec3;
+  yaw: number; // local-frame facing
+  radius: number;
+  health: number;
+  maxHealth: number;
+  driver: number; // player id, or -1
+  alive: boolean;
+  respawnTick: number;
+  home: Vec3;
+  homeYaw: number;
+  contactNormal: Vec3 | null;
+  lastAttacker: number;
+  lastDamageTick: number;
 }
 
 export interface Explosion {
@@ -336,6 +379,7 @@ export interface Level {
   stairTops: Vec3[]; // a floor point on each staircase's lookout (add stand height to place a player)
   spawns: SpawnPoint[];
   pickupSpots: { pos: Vec3; item: ItemKind }[];
+  vehicleSpots: { pos: Vec3; yaw: number }[];
   /** Rim wall height per equal angular sector, for the +Z and -Z walls. */
   wallPos: number[];
   wallNeg: number[];
@@ -352,6 +396,9 @@ export type SimEvent =
   | { type: 'respawn'; id: number }
   | { type: 'outcome'; outcome: Outcome }
   | { type: 'reload'; id: number }
+  | { type: 'mount'; id: number; vehicle: number; on: boolean }
+  | { type: 'vehicleHit'; id: number; damage: number; pos: Vec3 }
+  | { type: 'vehicleDestroyed'; id: number; pos: Vec3 }
   | { type: 'melee'; id: number; target: number; pos: Vec3 }
   | { type: 'pickup'; id: number; item: ItemKind; player: number; pos: Vec3 }
   | { type: 'overheat'; id: number }
@@ -378,5 +425,6 @@ export interface SimState {
   props: Prop[];
   explosions: Explosion[];
   pickups: Pickup[];
+  vehicles: Vehicle[];
   events: SimEvent[]; // emitted during the most recent step
 }

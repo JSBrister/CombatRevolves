@@ -1,4 +1,4 @@
-import { generateLevel, levelSdf, spawnPosition } from './level';
+import { BIKE_RADIUS, generateLevel, levelSdf, spawnPosition } from './level';
 import { localBasis } from './physics';
 import { rngRange } from './rng';
 import { defaultConfig } from './tuning';
@@ -32,6 +32,8 @@ export interface WorldOptions {
   pickups?: boolean;
   mode?: GameMode;
   levelId?: string;
+  /** Number of hover-bikes (default: by ring size, see tuning.ts). */
+  vehicles?: number;
 }
 
 export function createState(opts: WorldOptions = {}): SimState {
@@ -45,16 +47,18 @@ export function createState(opts: WorldOptions = {}): SimState {
     rng: (opts.seed ?? 1234) >>> 0,
     nextId: 1,
     config,
-    level: { shape: 'ring', terrain: null, boxes: [], stairTops: [], spawns: [], pickupSpots: [], wallPos: [], wallNeg: [] },
+    level: { shape: 'ring', terrain: null, boxes: [], stairTops: [], spawns: [], pickupSpots: [], vehicleSpots: [], wallPos: [], wallNeg: [] },
     players: [],
     bolts: [],
     grenades: [],
     props: [],
     explosions: [],
     pickups: [],
+    vehicles: [],
     events: [],
   };
-  state.level = generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true);
+  state.level = generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true, opts.vehicles ?? -1);
+  for (const spot of state.level.vehicleSpots) addVehicle(state, spot.pos, spot.yaw);
   if (opts.pickups ?? opts.obstacles ?? true) {
     for (const spot of state.level.pickupSpots) addPickup(state, spot.item, spot.pos, -1, Math.round(config.pickupRespawn / DT), -1);
   }
@@ -107,7 +111,7 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
     weapon: 0, owned: [...STARTING_WEAPONS],
     heat: WEAPON_IDS.map(() => 0), overheatUntil: WEAPON_IDS.map(() => 0), ammo: WEAPON_IDS.map(() => 0),
     mag: WEAPON_IDS.map(() => 0), reloadUntil: 0, infiniteAmmo: false,
-    charge: 0, holdTicks: 0, needRelease: false, burstUntil: 0, meleeReadyTick: 0,
+    charge: 0, holdTicks: 0, needRelease: false, burstUntil: 0, meleeReadyTick: 0, vehicle: -1,
     fireReadyTick: 0, hasJetpack: false, jetFuel: 0, jetting: false, lastGroundTick: -1e9, lastJumpTick: -1e9,
     grenades: MAX_GRENADES, bounceGrenades: MAX_GRENADES, grenadeReadyTick: 0,
     prevButtons: 0, lastInput: neutralInput(id, 0),
@@ -159,4 +163,15 @@ export function freeSpotNear(state: SimState, pos: Vec3, size: number): Vec3 {
     }
   }
   return pos;
+}
+
+export function addVehicle(state: SimState, pos: Vec3, yaw: number): number {
+  const id = allocId(state);
+  const hp = state.config.bikeHealth;
+  state.vehicles.push({
+    id, type: 'vehicle', kind: 'bike', pos: [...pos] as Vec3, vel: [0, 0, 0], yaw, radius: BIKE_RADIUS,
+    health: hp, maxHealth: hp, driver: -1, alive: true, respawnTick: 0, home: [...pos] as Vec3, homeYaw: yaw,
+    contactNormal: null, lastAttacker: -1, lastDamageTick: -1e9,
+  });
+  return id;
 }

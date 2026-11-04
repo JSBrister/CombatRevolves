@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { type Player, type Prediction, type SimState, type Vec3, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS } from '../sim';
-import { makeGun, makePickup } from './models';
+import { makeBike, makeGun, makePickup } from './models';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
 const PICKUP_GLOW: Record<string, number> = {
@@ -101,6 +101,7 @@ export class EntityViews {
   props = new Map<number, THREE.Mesh>();
   explosions = new Map<number, THREE.Mesh>();
   pickups = new Map<number, PickupView>();
+  vehicles = new Map<number, { group: THREE.Group; glow: THREE.Sprite }>();
   /** First-person gun, attached to the camera (main view only). */
   viewModel = new THREE.Group();
   private viewWeapon = -1;
@@ -178,6 +179,8 @@ export class EntityViews {
     for (const v of this.props.values()) v.removeFromParent();
     for (const v of this.explosions.values()) v.removeFromParent();
     for (const v of this.pickups.values()) v.group.removeFromParent();
+    for (const v of this.vehicles.values()) v.group.removeFromParent();
+    this.vehicles.clear();
     this.players.clear(); this.projs.clear(); this.props.clear(); this.explosions.clear(); this.pickups.clear();
   }
 
@@ -421,6 +424,31 @@ export class EntityViews {
       v.model.rotation.y = tNow * 1.5 + it.id;
     }
     for (const [id, v] of this.pickups) if (!seenK.has(id)) { v.group.removeFromParent(); this.pickups.delete(id); }
+
+    // hover-bikes
+    for (const veh of state.vehicles) {
+      let vw = this.vehicles.get(veh.id);
+      if (!vw) {
+        const group = new THREE.Group();
+        const glow = this.makeGlow(0x6ad8ff, 2.2);
+        glow.position.set(0, -0.55, 0);
+        glow.material.opacity = 0.5;
+        group.add(makeBike(), glow);
+        this.root.add(group);
+        vw = { group, glow };
+        this.vehicles.set(veh.id, vw);
+      }
+      vw.group.visible = veh.alive;
+      if (!veh.alive) continue;
+      const pos = lerpPos(veh.id, veh.pos);
+      const b = localBasis(pos);
+      m.makeBasis(new THREE.Vector3(...b.spin), new THREE.Vector3(...b.up), new THREE.Vector3(...b.axial));
+      q.setFromRotationMatrix(m);
+      qy.setFromAxisAngle(Y, -veh.yaw);
+      vw.group.quaternion.copy(q).multiply(qy);
+      vw.group.position.set(pos[0], pos[1], pos[2]);
+      vw.glow.material.opacity = veh.driver >= 0 ? 0.65 + 0.2 * Math.sin(performance.now() * 0.03) : 0.35;
+    }
 
     // explosions
     const seenE = new Set<number>();

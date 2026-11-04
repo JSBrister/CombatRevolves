@@ -83,6 +83,25 @@ export const defaultConfig = (): SimConfig => ({
   shieldRegenDelay: 4, // shields start recharging this long after a hit (s)
   shieldRegenRate: 35, // shield points per second
   respawnTime: 3, // (s) sandbox only; campaign has no respawns
+  // --- hover-bikes (E to ride) -----------------------------------------------------
+  vehicleMinRadius: 150, // only rings at least this big get bikes
+  vehicleSpacing: 400, // one bike per this many metres of ring (max 10)
+  bikeHealth: 300,
+  bikeThrust: 18, // m/s^2 (W/S)
+  bikeStrafe: 8, // m/s^2 (A/D)
+  bikeMaxSpeed: 40, // m/s: throttle stops adding speed beyond this (the spin can add more!)
+  bikeDamping: 0.08, // fraction of speed lost per second while ridden (it's frictionless otherwise)
+  bikeHop: 6, // Space while riding (m/s)
+  bikeCrashSpeed: 10, // hitting something faster than this damages the bike...
+  bikeCrashDamage: 9, // ...this much per m/s above it
+  riderCrashSpeed: 16, // ...and above this also hurts the rider
+  riderCrashDamage: 5,
+  bikeRamSpeed: 6, // running someone over faster than this hurts them
+  bikeRamDamage: 6, // per m/s of closing speed above it
+  bikeRespawn: 20, // s before a destroyed bike reappears at its spot
+  bikeBlastRadius: 6, // when a bike blows up
+  bikeBlastDamage: 70,
+  bikeBlastKnockback: 18,
   meleeDamage: 40, // melee (Q): a hammer-like shove
   meleeKnockback: 18, // m/s kick: enough to knock someone off the ring
   meleeRange: 2.2, // m in front of you

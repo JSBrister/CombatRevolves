@@ -249,7 +249,7 @@ export function makeWalls(cfg: SimConfig, rng: { rng: number }, varied: boolean)
 /** Rim walls are at most 40% of the radius, so tiny rings still have a sky. */
 export const fullWallHeight = (cfg: SimConfig) => Math.min(cfg.wallHeight, 0.4 * cfg.R);
 
-export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacles: boolean, nextId: () => number, variedWalls = true): Level {
+export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacles: boolean, nextId: () => number, variedWalls = true, vehicleCount = -1): Level {
   const spawns = makeSpawns(cfg);
   const walls = makeWalls(cfg, rng, variedWalls);
   const boxes: Box[] = [];
@@ -265,7 +265,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const terrain = cfg.terrainSphere || cfg.hills > 0
     ? { sphere: cfg.terrainSphere, hills: makeHills(cfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), rampClear) }
     : null;
-  const probe: Level = { shape: 'ring', terrain, boxes, stairTops: [], spawns, pickupSpots: [], wallPos: [], wallNeg: [] };
+  const probe: Level = { shape: 'ring', terrain, boxes, stairTops: [], spawns, pickupSpots: [], vehicleSpots: [], wallPos: [], wallNeg: [] };
   /** Floor radius here (R on a flat floor). */
   const Rf = (angle: number, z: number) => floorRadius(probe, cfg, angle, z);
   /** How much a footprint of this size must be buried to sit on sloping ground. */
@@ -310,6 +310,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const stairs: { angle: number; halfArc: number }[] = [];
   const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
   const stairTops: Vec3[] = [];
+  const vehicleSpots: { pos: Vec3; yaw: number }[] = [];
   const at = (angle: number, height: number, z: number): Vec3 => {
     const r = Rf(angle, z) - height;
     return [r * Math.cos(angle), r * Math.sin(angle), z];
@@ -355,6 +356,13 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       if (taken) continue;
       pickupSpots.push({ pos: at(a, 1, 0), item: floorItems[fi++ % floorItems.length] });
     }
+    // Hover-bikes on big rings, parked between spawn points.
+    const nBikes = vehicleCount >= 0 ? vehicleCount : cfg.R >= cfg.vehicleMinRadius ? Math.min(10, Math.floor(circ / cfg.vehicleSpacing)) : 0;
+    for (let i = 0; i < nBikes; i++) {
+      const a = arcAngle(cfg, (i + 0.3) / nBikes);
+      const z = i % 2 ? 5 : -5;
+      vehicleSpots.push({ pos: at(a, BIKE_RADIUS, z), yaw: i % 2 ? Math.PI : 0 });
+    }
     // Mesas: low raised platforms with a ramp, for some verticality on bigger rings.
     const angDist = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) * R;
     const nMesas = Math.min(40, Math.floor((circ / 80) * widthScale));
@@ -370,7 +378,8 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       const clear = (a: number, half: number) =>
         !spawns.some((sp) => angDist(a, sp.angle) < half + 6) &&
         !stairs.some((st) => angDist(a, st.angle) < half + st.halfArc + 3) &&
-        !pickupSpots.some((sp) => angDist(a, Math.atan2(sp.pos[1], sp.pos[0])) < half + 3);
+        !pickupSpots.some((sp) => angDist(a, Math.atan2(sp.pos[1], sp.pos[0])) < half + 3) &&
+        !vehicleSpots.some((sp) => angDist(a, Math.atan2(sp.pos[1], sp.pos[0])) < half + 4);
       if (!clear(mid, total / 2)) continue;
       const start = mid - (dir * total) / 2 / R;
       const rampEnd = addRamp(start + (dir * rampLen) / 2 / R, z, rampLen, mh, dir, width);
@@ -388,6 +397,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       if (onStairs) continue;
       const nearPickup = pickupSpots.some((sp) => Math.abs(Math.atan2(Math.sin(angle - Math.atan2(sp.pos[1], sp.pos[0])), Math.cos(angle - Math.atan2(sp.pos[1], sp.pos[0])))) * R < 4);
       if (nearPickup) continue;
+      if (vehicleSpots.some((sp) => Math.abs(Math.atan2(Math.sin(angle - Math.atan2(sp.pos[1], sp.pos[0])), Math.cos(angle - Math.atan2(sp.pos[1], sp.pos[0])))) * R < 5)) continue;
       const kind = rngNext(rng);
       const z = rngRange(rng, -cfg.halfWidth + 4, cfg.halfWidth - 4);
       if (kind < 0.5) addBox(angle, z, rngRange(rng, 0.8, 2.2), rngRange(rng, 0.5, 0.9) * k, rngRange(rng, 1.5, 3.5)); // low cover
@@ -395,9 +405,10 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       else addBox(angle, z, rngRange(rng, 3, 5) * Math.max(k, 0.5), rngRange(rng, 0.4, 0.6) * k, rngRange(rng, 3, 5)); // low platform
     }
   }
-  return { shape: 'ring', terrain, boxes, stairTops, spawns, pickupSpots, ...walls };
+  return { shape: 'ring', terrain, boxes, stairTops, spawns, pickupSpots, vehicleSpots, ...walls };
 }
 
+export const BIKE_RADIUS = 0.8; // hover-bike collision sphere
 export const LOOKOUT_HEIGHT = 11; // m (capped at 30% of the radius on small rings)
 export const MESA_HEIGHT = 3.5; // m: low raised platforms (capped at 15% of the radius)
 export const RAMP_SLOPE = 0.45; // rise per metre (about 24 degrees): walkable

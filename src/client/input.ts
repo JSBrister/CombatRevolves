@@ -2,7 +2,7 @@
 // exclusively through these commands, exactly like bots and (later) remote
 // clients.
 
-import { BTN_AIM, BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_RELOAD, BTN_SPRINT, PLAYER_WEAPON_SLOTS, type InputCmd } from '../sim';
+import { BTN_AIM, BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_RELOAD, BTN_SPRINT, BTN_USE, PLAYER_WEAPON_SLOTS, type InputCmd } from '../sim';
 
 export class InputSampler {
   keys = new Set<string>();
@@ -31,6 +31,7 @@ export class InputSampler {
       if (e.code === 'KeyF') this.latched |= BTN_GRENADE2;
       if (e.code === 'KeyR') this.latched |= BTN_RELOAD;
       if (e.code === 'KeyQ') this.latched |= BTN_MELEE;
+      if (e.code === 'KeyE') this.latched |= BTN_USE;
       if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && this.enabled) this.sprintOn = !this.sprintOn;
       if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5)) - 1;
@@ -82,6 +83,7 @@ export class InputSampler {
     if (k.has('KeyF')) buttons |= BTN_GRENADE2;
     if (k.has('KeyR')) buttons |= BTN_RELOAD;
     if (k.has('KeyQ')) buttons |= BTN_MELEE;
+    if (k.has('KeyE')) buttons |= BTN_USE;
     const moveY = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
     const moveX = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
     return { playerId, tick, moveX, moveY, yaw: this.yaw, pitch: this.pitch, buttons, weapon: this.weapon };
