@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, scale, addVehicle, WEAPON_ROCKET, terrainAt, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, sub, scale, addVehicle, WEAPON_ROCKET, terrainAt, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1616,5 +1616,52 @@ describe('31. silly worlds: holes, decks and tubes', () => {
     let died = false;
     for (let i = 0; i < 120 * 10 && !died; i++) { step(s, [cmdFor(s, id)], s.tick); died = !p.alive; }
     expect(died).toBe(true);
+  });
+});
+
+describe('32. a changing spin: Euler forces', () => {
+  const cycle = { R: 400, spinChange: 1, spinPeriod: 40 };
+  it('the spin winds down to a stop and back up; frameAngle is the integral of omega', () => {
+    const s = empty(cycle);
+    const T = s.config.spinPeriod, w0 = omegaOf(s.config);
+    expect(spinFactor(s.config, 0.2 * T).f).toBe(1);
+    expect(spinFactor(s.config, 0.65 * T).f).toBe(0);
+    let integral = 0;
+    for (let i = 0; i < Math.round(T / DT); i++) { integral += spinAt(s.config, s.tick).omega * DT; step(s, [], s.tick); }
+    expect(s.frameAngle).toBeCloseTo(integral, 9);
+    // average spin: 1 for 45%, 0 for 15%, and the two smooth ramps average 1/2 each
+    expect(s.frameAngle / (w0 * T)).toBeCloseTo(0.45 + 0.15 * 0.5 * 2 + 0.1, 3);
+  });
+  it('a free bolt flies a straight line in the inertial frame while the spin changes', () => {
+    const s = empty(cycle);
+    const T = s.config.spinPeriod;
+    run(s, Math.round((0.47 * T) / DT)); // into the spin-down, where the Euler force is strong
+    expect(Math.abs(spinAt(s.config, s.tick).alpha)).toBeGreaterThan(0.005);
+    const toIn = (p: Vec3): Vec3 => { const c = Math.cos(s.frameAngle), sn = Math.sin(s.frameAngle); return [c * p[0] - sn * p[1], sn * p[0] + c * p[1], p[2]]; };
+    const w = spinAt(s.config, s.tick).omega;
+    const r: Vec3 = [0, -250, 0];
+    const b = spawnBolt(s, -1, 'rifle', r, [w * r[1] + 8, -w * r[0] + 3, 0.5]); // slow, so it stays inside for seconds
+    run(s, 1);
+    const pts: Vec3[] = [];
+    for (let i = 0; i < 6; i++) { pts.push(toIn(b.pos)); run(s, 120); }
+    expect(s.bolts).toContain(b);
+    // equal steps in time -> equal steps in inertial space, all on one line
+    const d0 = sub(pts[1], pts[0]);
+    for (let i = 2; i < pts.length; i++) {
+      const di = sub(pts[i], pts[i - 1]);
+      for (let k = 0; k < 3; k++) expect(Math.abs(di[k] - d0[k])).toBeLessThan(1e-3);
+    }
+  });
+  it('with the spin stopped you weigh nothing; a jump keeps going', () => {
+    const s = empty(cycle);
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    run(s, Math.round((0.66 * s.config.spinPeriod) / DT), () => [cmdFor(s, id)]);
+    expect(spinAt(s.config, s.tick).omega).toBe(0);
+    expect(p.apparentG).toBeLessThan(0.01);
+    const up = localBasis(p.pos).up;
+    step(s, [cmdFor(s, id, { buttons: BTN_JUMP })], s.tick);
+    run(s, 120, () => [cmdFor(s, id)]);
+    expect(dot(p.vel, up)).toBeGreaterThan(s.config.jumpSpeed * 0.9); // no gravity to slow you
   });
 });

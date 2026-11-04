@@ -136,6 +136,16 @@ export const LEVELS: LevelDef[] = [
       { type: 'soldier', along: 55, z: 0 }, { type: 'swarmer', along: -60, z: 0 }, { type: 'heavy', along: 100, z: 0 },
     ],
   },
+  {
+    id: 'c9', mode: 'campaign', name: 'Power Cut', seed: 909,
+    blurb: 'The spin motors keep failing: every 60 s the ring winds down to a fifth of its spin, then back up. Low g is coming; so is the Euler shove.',
+    config: { R: 120, spinChange: 0.8, spinPeriod: 60 },
+    enemies: [
+      { type: 'grunt', along: 25, z: -5 }, { type: 'grunt', along: 28, z: 5 }, { type: 'soldier', along: 45, z: 0 },
+      { type: 'skirmisher', along: -35, z: 6 }, { type: 'swarmer', along: 70, z: -4 }, { type: 'heavy', along: 100, z: 0 },
+      { type: 'sniper', stair: 0 },
+    ],
+  },
   // ------------------------------------------------------------ sandbox
   { id: 's-earth', mode: 'sandbox', name: 'Earth (reference)', seed: 21, config: { ...EARTH }, bots: 2, sky: 'earth', variedWalls: false,
     blurb: 'Uniform 1 g, flat ground, no spin: what everything "should" do. Compare any trick here and on a ring.' },
@@ -172,6 +182,8 @@ export const LEVELS: LevelDef[] = [
     blurb: 'Half a torus, open toward the axis. Skate up the sides; over the lip there is nothing at all.' },
   { id: 's-log', mode: 'sandbox', name: 'The Log (outside a torus)', seed: 42, config: { R: 100, halfWidth: 14, tube: 'outside', tubeRadius: 14 }, bots: 2,
     blurb: 'You stand on the OUTSIDE of a spinning tube, on the side facing the axis. Stray too far either way and you slide off into space.' },
+  { id: 's-spincycle', mode: 'sandbox', name: 'Spin Cycle (spin stops and starts)', seed: 43, config: { R: 100, spinChange: 1, spinPeriod: 90 }, bots: 3,
+    blurb: 'Every 90 s the ring spins down to a dead stop, floats weightless for 13 s, then spins back up. While it changes, the Euler force pushes everything along the floor.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
     blurb: '140 m across: room to flank, and to watch your shots curve sideways.' },
   { id: 's-planet', mode: 'sandbox', name: 'Skyhook (planet below)', seed: 34, config: { R: 100, planetPull: 8.8, planetAngle: Math.PI }, bots: 2,
@@ -183,7 +195,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 

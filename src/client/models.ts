@@ -174,6 +174,6 @@ export function makePickup(item: ItemKind): THREE.Group {
 }
 
 export const ITEM_NAMES: Record<ItemKind, string> = {
-  health: 'Health', sticky: 'Sticky grenades', bounce: 'Bouncing grenades', redRifle: 'Red Plasma Rifle',
+  health: 'Health', sticky: 'Sticky grenades', bounce: 'Bouncing grenades', redRifle: 'Overclocked Plasma Rifle',
   launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', hammer: 'Grav Mallet', rocket: 'Torch Rocket', seeker: 'Seeker Swarm', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack',
 };

@@ -1,7 +1,8 @@
 // Rotating-frame physics. The frame spins at +omega about world Z; the level is
 // static in this frame. Free bodies feel only fictitious forces (+ optional drag):
 //
-//   a = omega^2 r_perp  (centrifugal, outward)  -  2 omega x v  (Coriolis)  +  a_drag
+//   a = omega^2 r_perp  (centrifugal, outward)  -  2 omega x v  (Coriolis)
+//       - (d omega/dt) x r  (Euler, only while the spin rate changes)  +  a_drag
 //
 // There is no real gravity anywhere.
 
@@ -39,7 +40,18 @@ export function viewVectors(r: Vec3, yaw: number, pitch: number) {
 }
 
 /**
- * Position-dependent acceleration: centrifugal (if spinning) plus any real
+ * Angular acceleration of the frame (rad/s^2) for the current tick: set by
+ * step() (and by anything else that runs physics, from the same state) via
+ * setSpinAlpha. While the spin rate changes, bodies feel the Euler force
+ * -alpha z_hat x r: a push against the change, along the floor.
+ */
+let spinAlpha = 0;
+export function setSpinAlpha(a: number) { spinAlpha = a; }
+export const getSpinAlpha = () => spinAlpha;
+
+/**
+ * Position-dependent acceleration: centrifugal (if spinning), the Euler force
+ * while the spin rate is changing, plus any real
  * gravity toward the floor (`cfg.gravity`, outward from the axis: on the
  * Earth level the "ring" is so big and slow it's just flat ground).
  */
@@ -50,7 +62,8 @@ export function centrifugalAccel(r: Vec3, omega: number, cfg: SimConfig): Vec3 {
     const rho = Math.sqrt(r[0] * r[0] + r[1] * r[1]);
     if (rho > 1e-9) { gx = (cfg.gravity * r[0]) / rho; gy = (cfg.gravity * r[1]) / rho; }
   }
-  return [w2 * r[0] + gx, w2 * r[1] + gy, 0];
+  // Euler: -alpha z_hat x r = (alpha y, -alpha x, 0)
+  return [w2 * r[0] + gx + spinAlpha * r[1], w2 * r[1] + gy - spinAlpha * r[0], 0];
 }
 
 /**
@@ -82,7 +95,7 @@ export function jacobi(r: Vec3, v: Vec3, omega: number): number {
 
 /** True when free flight is exactly a straight inertial line (analytic path is valid). */
 export function analyticValid(cfg: SimConfig): boolean {
-  return cfg.centrifugal && cfg.coriolis && !cfg.gravity && !cfg.planetPull && (cfg.dragType === 'none' || cfg.dragCoeff === 0);
+  return cfg.centrifugal && cfg.coriolis && !cfg.gravity && !cfg.planetPull && spinAlpha === 0 && (cfg.dragType === 'none' || cfg.dragCoeff === 0);
 }
 
 /**

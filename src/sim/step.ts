@@ -4,11 +4,11 @@
 
 import { clamp, closestOnSeg, segSegClosest, segSphere } from './geom';
 import { levelSdf, sphereTrace, spawnPosition } from './level';
-import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, viewVectors } from './physics';
+import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setSpinAlpha, viewVectors } from './physics';
 import { rngInt } from './rng';
 import {
   BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
-  omegaOf,
+  omegaOf, spinAt,
   type Bolt, type BoltKind, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
   type Outcome, type Player, type Prop, type SimConfig, type SimState, type Vehicle, type WeaponId, type WeaponStats,
 } from './types';
@@ -119,7 +119,9 @@ const capsuleEnds = (p: Player): [Vec3, Vec3] => {
 export function step(state: SimState, inputs: readonly InputCmd[], tick: number = state.tick): SimState {
   if (tick !== state.tick) throw new Error(`step: expected tick ${state.tick}, got ${tick}`);
   const cfg = state.config;
-  const omega = omegaOf(cfg);
+  const spin = spinAt(cfg, state.tick);
+  const omega = spin.omega;
+  setSpinAlpha(spin.alpha);
   pull = planetPullAt(cfg, state.frameAngle);
   state.events = [];
 

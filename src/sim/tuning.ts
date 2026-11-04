@@ -29,6 +29,8 @@ export const defaultConfig = (): SimConfig => ({
   tube: 'none', // 'inside' / 'half' / 'outside' a torus whose tube has radius tubeRadius
   tubeRadius: 20,
   floorHoles: 0, // holes in the floor you can fall out of
+  spinChange: 0, // >0: every spinPeriod s the spin winds down by this fraction (1 = to a stop) and back up
+  spinPeriod: 120,
   comboHits: 6, // Seeker Swarm: this many hits on one target, each within comboWindow s of the last,
   comboWindow: 0.6, // ...set off a "supercombine" blast on them
   comboDamage: 90,
@@ -163,7 +165,7 @@ export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
     radius: 0.12, knockback: 0.6 }),
   pistol: w({ muzzle: 90, damage: 13, shieldDamage: 13, interval: 0.15, heatPerShot: 0.08, coolRate: 0.3, overheatLock: 2,
     radius: 0.15, knockback: 1.5, chargeTime: 0.9, ocMuzzle: 40, ocDamage: 20, ocShieldDamage: 120, ocHeat: 0.35 }),
-  redRifle: w({ muzzle: 110, damage: 6, shieldDamage: 6, interval: 0.06, heatPerShot: 0.075, coolRate: 0.5, overheatLock: 3,
+  redRifle: w({ muzzle: 110, damage: 7, shieldDamage: 7, interval: 0.06, heatPerShot: 0.075, coolRate: 0.5, overheatLock: 3,
     radius: 0.1, knockback: 0.5 }),
   launcher: w({ muzzle: 45, damage: 30, shieldDamage: 30, interval: 0.6, radius: 0.3, knockback: 4,
     magSize: 3, ammoMax: 9, reloadTime: 2.2, blastRadius: 5, blastDamage: 100, blastKnockback: 22 }),

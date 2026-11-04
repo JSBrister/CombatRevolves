@@ -27,6 +27,8 @@ export interface SimConfig {
   tube: 'none' | 'inside' | 'half' | 'outside';
   tubeRadius: number;
   floorHoles: number; // holes in the floor you can fall through into space
+  spinChange: number; // 0 = steady spin; >0: the spin periodically drops by this fraction (1 = stops dead) and comes back
+  spinPeriod: number; // s per spin-change cycle
   comboHits: number; // this many seeker hits on one target, each within comboWindow s of the last...
   comboWindow: number;
   comboDamage: number; // ...set off a supercombine: a blast this strong
@@ -119,7 +121,35 @@ export interface SimConfig {
 }
 
 /** Spin rate (rad/s): sqrt(g/R) gives g at the floor; 0 when the world doesn't spin (Earth). */
+/** The ring's base spin rate: sqrt(g/R), or 0 for a world that doesn't spin. */
 export const omegaOf = (c: SimConfig) => (c.spin ? Math.sqrt(c.g / c.R) : 0);
+
+/**
+ * Spin schedule: the multiplier on the base spin rate at time t (seconds), and
+ * its time derivative. With spinChange = 0 the spin is constant. Otherwise it
+ * runs a cycle every spinPeriod seconds: full spin, a smooth spin-down to
+ * (1 - spinChange) of full, a hold, and a smooth spin-up again.
+ */
+export function spinFactor(c: SimConfig, t: number): { f: number; df: number } {
+  const A = c.spinChange, T = c.spinPeriod;
+  if (!A || T <= 0) return { f: 1, df: 0 };
+  const u = (((t / T) % 1) + 1) % 1;
+  const ramp = 0.15; // each change takes 15% of the cycle
+  const smooth = (x: number) => x * x * (3 - 2 * x), dsmooth = (x: number) => 6 * x * (1 - x);
+  if (u < 0.45) return { f: 1, df: 0 };
+  if (u < 0.45 + ramp) { const x = (u - 0.45) / ramp; return { f: 1 - A * smooth(x), df: (-A * dsmooth(x)) / (ramp * T) }; }
+  if (u < 0.75) return { f: 1 - A, df: 0 };
+  if (u < 0.75 + ramp) { const x = (u - 0.75) / ramp; return { f: 1 - A + A * smooth(x), df: (A * dsmooth(x)) / (ramp * T) }; }
+  return { f: 1, df: 0 };
+}
+
+/** Spin rate and angular acceleration (Euler force) for a tick, taken at its midpoint (2nd-order accurate). */
+export function spinAt(c: SimConfig, tick: number): { omega: number; alpha: number } {
+  const w0 = omegaOf(c);
+  if (!w0) return { omega: 0, alpha: 0 };
+  const { f, df } = spinFactor(c, (tick + 0.5) * DT);
+  return { omega: w0 * f, alpha: w0 * df };
+}
 
 // ---------------------------------------------------------------- input
 
@@ -147,7 +177,7 @@ export const WEAPON_ROCKET = 7;
 export const WEAPON_SEEKER = 8;
 export const WEAPON_HOVER = 9;
 export const WEAPON_NAMES = [
-  'Plasma Rifle', 'Plasma Pistol', 'Red Plasma Rifle', 'Fuel Rod Launcher', 'Plasma Bolt Cannon', 'Laconic Laser', 'Grav Mallet',
+  'Plasma Rifle', 'Plasma Pistol', 'Overclocked Plasma Rifle', 'Fuel Rod Launcher', 'Plasma Bolt Cannon', 'Laconic Laser', 'Grav Mallet',
   'Torch Rocket', 'Seeker Swarm', 'Hover Gun (debug)',
 ];
 /** Number keys 1..N select the first N weapons; the hover gun is debug-panel only. */

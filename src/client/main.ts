@@ -110,6 +110,8 @@ fRing.add(cfg, 'coriolis').name('Coriolis force');
 fRing.add(cfg, 'dragType', ['none', 'linear', 'quadratic']).name('air drag');
 fRing.add(cfg, 'dragCoeff', 0, 1, 0.001).name('drag coeff');
 fRing.add(cfg, 'fallKillDistance', 2, 500, 1).name('fall-off kill distance (m)');
+fRing.add(cfg, 'spinChange', 0, 1, 0.05).name('spin change (fraction lost each cycle)').listen();
+fRing.add(cfg, 'spinPeriod', 5, 600, 1).name('spin change cycle (s)').listen();
 fRing.add(cfg, 'planetPull', 0, 30, 0.05).name('planet pull (m/s²)').listen();
 fRing.add(cfg, 'gravity', 0, 30, 0.05).name('real gravity to the floor (m/s²)').listen();
 
@@ -473,7 +475,7 @@ document.addEventListener('pointerlockchange', () => {
 
 const fmtSpin = (R: number) => `${((2 * Math.PI) / Math.sqrt(cfg.g / R)).toFixed(1)} s spin`;
 function showLevels(mode: GameMode) {
-  $('levels-title').textContent = mode === 'campaign' ? 'CAMPAIGN' : 'DEBUG SANDBOX';
+  $('levels-title').textContent = mode === 'campaign' ? 'CAMPAIGN' : 'DEATHMATCH';
   const list = $('level-list');
   list.innerHTML = '';
   delete list.dataset.last;
@@ -481,7 +483,7 @@ function showLevels(mode: GameMode) {
   const groupOf = (d: LevelDef) => {
     const c = d.config;
     if (d.mode === 'campaign') return '';
-    if (c.floorHoles || c.deckHeight || c.planetPull || (c.dragType && c.dragType !== 'none')) return 'GIMMICKS';
+    if (c.floorHoles || c.deckHeight || c.spinChange || c.planetPull || (c.dragType && c.dragType !== 'none')) return 'GIMMICKS';
     if (c.tube || c.terrainSphere || c.hills || c.ridgeHeight) return 'SHAPES AND TERRAIN';
     return 'RINGS';
   };

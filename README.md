@@ -14,7 +14,7 @@ npx tsc -p src/sim # proves the sim compiles without DOM types
 **Play online:** this repo builds and deploys itself to GitHub Pages on every push to `main` (enable it under Settings → Pages → Source: GitHub Actions).
 
 **Modes:** *Campaign* (fixed levels: kill every enemy to clear it, no respawns, enemies don't hurt each other) and
-*Debug sandbox* (free-for-all with bots and respawns). Levels are rings of different sizes and widths (some with rolling hills, a bowl-shaped *sphere band*, or a planet's pull), plus *Earth* (flat ground, normal gravity, no spin: the reference for what everything should do) and *Boot Camp*, the first campaign level, also on Earth.
+*Deathmatch* (free-for-all with bots and respawns; the debug panel is in the pause menu). Levels are rings of different sizes and widths (some with rolling hills, a bowl-shaped *sphere band*, or a planet's pull), plus *Earth* (flat ground, normal gravity, no spin: the reference for what everything should do) and *Boot Camp*, the first campaign level, also on Earth.
 
 **Controls:** WASD move · Shift toggle sprint (on by default) · Space jump (hold in the air with a jetpack) · mouse look ·
 left click fire · right click show trajectory · 1–9 weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
@@ -28,7 +28,7 @@ hover gun, bots) only appears while paused.
 |---|---|---|
 | 1 | Plasma rifle | Automatic, overheats. Starting weapon. |
 | 2 | Plasma pistol | Tap to fire, hold to overcharge (strips shields). Starting weapon. |
-| 3 | Red plasma rifle | Faster bolts, overheats sooner. |
+| 3 | Overclocked Plasma Rifle | Red: faster bolts and a faster rate of fire, hits as hard as the blue rifle, but overheats sooner. |
 | 4 | Fuel rod launcher | 3-round magazine plus 9 spares; reload with R (or automatically). Slow bolt that explodes on impact with its own blast settings. |
 | 5 | Plasma bolt cannon | The "sniper": one fast (65 m/s), hard-hitting magenta bolt, then it overheats for ~1 s. |
 | 6 | Laconic Laser | Superweapon: hold to charge (1.2 s), then it streams very fast red bolts for 0.5 s. You move and aim slowly the whole time. Most of a stream kills. |
@@ -113,6 +113,7 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
   - Tubes use the exact distance to a circle in the (radius, z) cross-section.
   - Bots won't walk off a drop of more than 2 m, so they avoid holes, ledges and the log's edges (they can still be blasted off).
 - **The Ridge:** a Lambda-shaped cross-section: straight 40° flanks rising 120 m from the rim walls to a rounded crest on a 240 m ring, so the crest has half the gravity of the foot. On the flanks the floor carries g cos(slope) of your weight.
+- **Changing spin (Euler force):** a level can set `spinChange` and `spinPeriod`. Every cycle the spin winds smoothly down by that fraction (to a dead stop at 1), holds, and winds back up. The spin rate is a pure function of time (taken at mid-tick, so the frame angle is second-order accurate). While it changes, every free body also feels the Euler acceleration −(dω/dt) × r, a push along the floor against the change. It goes into the same kick as the centrifugal force, so contacts, apparent weight, the aim solver and the preview all include it. The exact straight-line projectile path is used only while the spin is steady. A test checks that a free bolt flies a straight inertial line, to within a millimetre, through a spin-down. See *Spin Cycle* (deathmatch) and *Power Cut* (campaign 9).
 - **Skyhook (planet below):** `planetPull` adds a uniform pull toward a planet that is fixed to the stars, so in the ring's frame it sweeps round once per spin. At 0.9 g you go from 1.9 g to almost weightless each turn, and shots curve with it; enemy aim and the trajectory preview use the same field. The ring isn't in orbit: it turns on an axle held up by a tower standing on the planet.
 - **Hover-bikes** (big rings only, or spawn one from the debug panel's *Give*): a bouncy physics sphere with its own health. Frictionless while ridden, so momentum, the spin and slopes all matter; it faces where you look; W/S thrust, A/D strafe, Space hops, Shift boosts. Hitting walls and boxes hard damages the bike; landings only do so at extreme speed, so jump away; the rider is never hurt by crashes. Running people over hurts them (credited to the rider); shots, blasts, the mallet and sticky grenades work on it. At zero health it explodes, throws the rider clear and respawns at its spot later. All of it is tunable in the debug panel.
 - **Enemy movement:** besides chase / strafe / hold, enemies with shields break for cover when shields drop below half: they pick the nearest box and stand on its far side from you, holding fire until the shields recover. If you're up on a lookout or mesa they go round to the foot of the nearest ramp and climb it. Up off the floor they won't strafe off an edge.

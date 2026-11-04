@@ -3,12 +3,12 @@
 // deterministic (uses a stateless hash, never the sim RNG or Math.random), so
 // a server can run bots without disturbing replays.
 
-import { advanceFree, localBasis, planetPullAt, viewVectors } from './physics';
+import { advanceFree, localBasis, planetPullAt, setSpinAlpha, viewVectors } from './physics';
 import { levelSdf } from './level';
 import { floorRadius, terrainAt } from './terrain';
 import { boltStats, launchVelocity, muzzlePoint } from './step';
 import { hash01 } from './rng';
-import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_SPRINT, DT, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_IDS, omegaOf, type BoltKind, type InputCmd, type Player, type SimState } from './types';
+import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_SPRINT, DT, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_IDS, spinAt, type BoltKind, type InputCmd, type Player, type SimState } from './types';
 import { type Vec3, addScaled, clone, cross, dot, len, norm, scale, sub } from './vec';
 import { ENEMY_TYPES } from './tuning';
 import { eyeOffset, standHeight } from './world';
@@ -29,7 +29,9 @@ export function aimAt(from: Vec3, to: Vec3): { yaw: number; pitch: number } {
  */
 export function solveAim(state: SimState, me: Player, target: Player, kind: BoltKind): { yaw: number; pitch: number } {
   const cfg = state.config;
-  const omega = omegaOf(cfg);
+  const spin = spinAt(cfg, state.tick);
+  const omega = spin.omega;
+  setSpinAlpha(spin.alpha);
   const eye = addScaled(me.pos, localBasis(me.pos).up, eyeOffset(me));
   const los = sub(target.pos, eye);
   const range = len(los);
@@ -278,6 +280,6 @@ export function botInput(state: SimState, playerId: number): InputCmd {
       cmd.buttons |= sticky ? BTN_GRENADE : BTN_GRENADE2;
     }
   }
-  if (behaviour !== 'hold' && !navigating && heightAboveFloor(state, me) < 0.5 && hash01(playerId, tick >> 6, 8) < 0.06) cmd.buttons |= BTN_JUMP;
+  if (behaviour !== 'hold' && !navigating && me.apparentG > 0.6 && heightAboveFloor(state, me) < 0.5 && hash01(playerId, tick >> 6, 8) < 0.06) cmd.buttons |= BTN_JUMP;
   return keepFooting(state, me, cmd);
 }

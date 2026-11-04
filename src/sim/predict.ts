@@ -2,9 +2,9 @@
 // same propagation, same level sweep). Pure: does not touch the state.
 
 import { sphereTrace } from './level';
-import { advanceFree, planetPullAt } from './physics';
+import { advanceFree, planetPullAt, setSpinAlpha } from './physics';
 import { GRENADE_RADIUS, boltStats, launchVelocity, moveSphereBody, muzzlePoint, type SphereBody } from './step';
-import { DT, omegaOf, type BoltKind, type SimState, type ThrownKind } from './types';
+import { DT, spinAt, type BoltKind, type SimState, type ThrownKind } from './types';
 import { type Vec3, clone } from './vec';
 
 export interface Prediction {
@@ -23,7 +23,9 @@ export function predictTrajectory(
   const r = clone(from);
   const v = launchVelocity(state.config, p, kind, from, yaw, pitch);
   const radius = thrown ? GRENADE_RADIUS : boltStats(state.config, kind as BoltKind).radius;
-  const omega = omegaOf(state.config);
+  const spin = spinAt(state.config, state.tick);
+  const omega = spin.omega;
+  setSpinAlpha(spin.alpha);
   const points: Vec3[] = [clone(r)];
   if (kind === 'bounceGrenade') {
     // Bounces until the fuse runs out; the "hit" marker is where it goes off.

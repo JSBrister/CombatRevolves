@@ -1,4 +1,4 @@
-import { DT, PLAYER_WEAPON_SLOTS, WEAPON_IDS, WEAPON_NAMES, omegaOf, type Player, type SimEvent, type SimState } from '../sim';
+import { DT, PLAYER_WEAPON_SLOTS, WEAPON_IDS, WEAPON_NAMES, omegaOf, spinAt, type Player, type SimEvent, type SimState } from '../sim';
 import { ITEM_NAMES } from './models';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -9,12 +9,20 @@ export class Hud {
 
   update(state: SimState, me: Player | undefined, opts: { yaw: number; timeScale: number; paused: boolean; freefly: boolean; sprintOn: boolean; showScores: boolean }) {
     const cfg = state.config;
-    const w = omegaOf(cfg);
+    const sp = spinAt(cfg, state.tick);
+    const w = sp.omega;
+    const w0 = omegaOf(cfg);
+    // a changing spin: how much is left, which way it's going, and the Euler push along the floor
+    const change = cfg.spin && cfg.spinChange
+      ? `<span style="color:${sp.alpha ? '#ff6a3d' : '#ffd27a'}">spin ${(100 * w / w0).toFixed(0)}%` +
+        (sp.alpha ? ` · SPINNING ${sp.alpha < 0 ? 'DOWN' : 'UP'} · Euler ${(Math.abs(sp.alpha) * cfg.R).toFixed(1)} m/s² ${sp.alpha < 0 ? 'spinward' : 'antispinward'}` : '') +
+        '</span><br/>'
+      : '';
     $('ringinfo').innerHTML =
       (cfg.spin
         ? `R ${cfg.R.toFixed(0)} m · g ${cfg.g.toFixed(2)}<br/>` +
-          `ω ${w.toFixed(4)} rad/s · period ${((2 * Math.PI) / w).toFixed(1)} s<br/>` +
-          `rim speed ${(w * cfg.R).toFixed(1)} m/s<br/>`
+          `ω ${w.toFixed(4)} rad/s · period ${w > 1e-6 ? ((2 * Math.PI) / w).toFixed(1) + ' s' : '∞'}<br/>` +
+          `rim speed ${(w * cfg.R).toFixed(1)} m/s<br/>` + change
         : `Earth · g ${cfg.gravity.toFixed(2)} · no spin<br/>`) +
       (cfg.dragType !== 'none' && cfg.dragCoeff > 0 ? `atmosphere: ${cfg.dragType} drag ${cfg.dragCoeff}<br/>` : '') +
       (cfg.spin && cfg.gravity ? `+ real gravity ${cfg.gravity.toFixed(2)} m/s²<br/>` : '') +
