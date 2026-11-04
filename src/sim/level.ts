@@ -178,10 +178,23 @@ export function sphereTrace(level: Level, cfg: SimConfig, p0: Vec3, p1: Vec3, ra
 
 // ------------------------------------------------------------- generation
 
+/**
+ * Where along the playable floor a fraction u (0..1) lies, as a ring angle.
+ * Whole ring: u * 2pi. With an `arena` (a fixed-length stretch, e.g. Earth),
+ * u spans the arena, centred on angle 0.
+ */
+export function arcAngle(cfg: SimConfig, u: number): number {
+  return cfg.arena > 0 ? ((u - 0.5) * cfg.arena) / cfg.R : u * Math.PI * 2;
+}
+
+/** Length of the playable floor along the ring (m). */
+export const playSpan = (cfg: SimConfig) => (cfg.arena > 0 ? cfg.arena : 2 * Math.PI * cfg.R);
+
 export function makeSpawns(cfg: SimConfig): SpawnPoint[] {
   const spawns: SpawnPoint[] = [];
   const n = 8;
-  for (let i = 0; i < n; i++) spawns.push({ angle: (i / n) * Math.PI * 2, z: i % 2 === 0 ? -8 : 8 });
+  const off = cfg.arena > 0 ? 0.5 : 0;
+  for (let i = 0; i < n; i++) spawns.push({ angle: arcAngle(cfg, (i + off) / n), z: i % 2 === 0 ? -8 : 8 });
   return spawns;
 }
 
@@ -250,8 +263,15 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const at = (angle: number, height: number, z: number): Vec3 => [(R - height) * Math.cos(angle), (R - height) * Math.sin(angle), z];
   // Features scale down on small rings so nothing towers over the axis.
   const k = Math.min(1, R / 60);
+  const arena = cfg.arena > 0;
+  if (arena) {
+    // end walls closing off the arena
+    const wh = fullWallHeight(cfg);
+    for (const sgn of [-1, 1]) addBox((sgn * (cfg.arena / 2 + 0.75)) / R, 0, 0.75, wh / 2, cfg.halfWidth + cfg.wallThickness, 'wall');
+  }
   if (withObstacles) {
-    const circ = 2 * Math.PI * R;
+    const circ = playSpan(cfg);
+    const widthScale = Math.max(1, cfg.halfWidth / 20); // wider floors get more stuff
     // Ramps up to lookout platforms, midway between spawn points, alternating
     // which way they climb (climbing spinward vs antispinward feels different!).
     const nStairs = Math.max(2, Math.min(12, Math.round(circ / 150)));
@@ -259,7 +279,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     const rampLen = H / RAMP_SLOPE;
     const topItems: ItemKind[] = ['cannon', 'jetpack', 'hammer'];
     for (let s = 0; s < nStairs; s++) {
-      const mid = ((s + 0.5) / nStairs) * Math.PI * 2 + Math.PI / spawns.length / 2;
+      const mid = arcAngle(cfg, (s + 0.5) / nStairs + (arena ? 0 : 1 / (2 * spawns.length)));
       const dir = s % 2 === 0 ? 1 : -1;
       const z = s % 2 === 0 ? -7 : 7;
       const total = rampLen + STAIR_TOP;
@@ -276,15 +296,15 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     // Floor pickups at the midpoints between spawns that have no staircase.
     const floorItems: ItemKind[] = ['launcher', 'health', 'redRifle', 'sticky', 'laconic', 'bounce', 'health', 'sticky'];
     let fi = 0;
-    for (let i = 0; i < spawns.length; i++) {
-      const a = ((i + 0.5) / spawns.length) * Math.PI * 2;
+    for (let i = 0; i < spawns.length - (arena ? 1 : 0); i++) {
+      const a = arcAngle(cfg, (i + (arena ? 1 : 0.5)) / spawns.length);
       const taken = stairs.some((s) => Math.abs(Math.atan2(Math.sin(a - s.angle), Math.cos(a - s.angle))) * R < s.halfArc + 2);
       if (taken) continue;
       pickupSpots.push({ pos: at(a, 1, 0), item: floorItems[fi++ % floorItems.length] });
     }
     // Mesas: low raised platforms with a ramp, for some verticality on bigger rings.
     const angDist = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) * R;
-    const nMesas = Math.min(40, Math.floor(circ / 80));
+    const nMesas = Math.min(40, Math.floor((circ / 80) * widthScale));
     const mh = Math.min(MESA_HEIGHT, 0.15 * R);
     for (let i = 0; i < nMesas; i++) {
       const plat = rngRange(rng, 6, 9);
@@ -293,7 +313,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       const z = rngRange(rng, -cfg.halfWidth + width / 2 + 2, cfg.halfWidth - width / 2 - 2);
       const rampLen = mh / RAMP_SLOPE;
       const total = rampLen + plat;
-      const mid = ((i + rngRange(rng, 0.25, 0.75)) / nMesas) * Math.PI * 2;
+      const mid = arcAngle(cfg, (i + rngRange(rng, 0.25, 0.75)) / nMesas);
       const clear = (a: number, half: number) =>
         !spawns.some((sp) => angDist(a, sp.angle) < half + 6) &&
         !stairs.some((st) => angDist(a, st.angle) < half + st.halfArc + 3) &&
@@ -305,9 +325,9 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       addBox(topAngle, z, plat / 2, mh / 2, width / 2, 'ramp');
       stairs.push({ angle: mid, halfArc: total / 2 });
     }
-    const count = Math.max(4, Math.min(300, Math.round(circ / 16)));
+    const count = Math.max(4, Math.min(300, Math.round((circ / 16) * widthScale)));
     for (let i = 0; i < count; i++) {
-      const angle = ((i + rngRange(rng, 0.2, 0.8)) / count) * Math.PI * 2;
+      const angle = arcAngle(cfg, (i + rngRange(rng, 0.2, 0.8)) / count);
       // keep spawns clear
       const near = spawns.some((s) => Math.abs(Math.atan2(Math.sin(angle - s.angle), Math.cos(angle - s.angle))) * R < 5);
       if (near) continue;

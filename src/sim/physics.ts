@@ -38,11 +38,19 @@ export function viewVectors(r: Vec3, yaw: number, pitch: number) {
   return { ...b, forward, right, aim };
 }
 
-/** Position-dependent part (centrifugal) of the fictitious acceleration. */
+/**
+ * Position-dependent acceleration: centrifugal (if spinning) plus any real
+ * gravity toward the floor (`cfg.gravity`, outward from the axis: on the
+ * Earth level the "ring" is so big and slow it's just flat ground).
+ */
 export function centrifugalAccel(r: Vec3, omega: number, cfg: SimConfig): Vec3 {
-  if (!cfg.centrifugal) return [0, 0, 0];
-  const w2 = omega * omega;
-  return [w2 * r[0], w2 * r[1], 0];
+  const w2 = cfg.centrifugal ? omega * omega : 0;
+  let gx = 0, gy = 0;
+  if (cfg.gravity) {
+    const rho = Math.sqrt(r[0] * r[0] + r[1] * r[1]);
+    if (rho > 1e-9) { gx = (cfg.gravity * r[0]) / rho; gy = (cfg.gravity * r[1]) / rho; }
+  }
+  return [w2 * r[0] + gx, w2 * r[1] + gy, 0];
 }
 
 /** Full fictitious acceleration (used for diagnostics and apparent weight). */
@@ -63,7 +71,7 @@ export function jacobi(r: Vec3, v: Vec3, omega: number): number {
 
 /** True when free flight is exactly a straight inertial line (analytic path is valid). */
 export function analyticValid(cfg: SimConfig): boolean {
-  return cfg.centrifugal && cfg.coriolis && (cfg.dragType === 'none' || cfg.dragCoeff === 0);
+  return cfg.centrifugal && cfg.coriolis && !cfg.gravity && (cfg.dragType === 'none' || cfg.dragCoeff === 0);
 }
 
 /**
@@ -96,8 +104,8 @@ function applyDrag(v: Vec3, h: number, cfg: SimConfig) {
 }
 
 function kick(r: Vec3, v: Vec3, h: number, omega: number, cfg: SimConfig, support: Vec3 | null) {
-  const w2 = cfg.centrifugal ? omega * omega : 0;
-  let ax = w2 * r[0], ay = w2 * r[1], az = 0;
+  const a0 = centrifugalAccel(r, omega, cfg);
+  let ax = a0[0], ay = a0[1], az = 0;
   if (support) {
     // Contact constraint: a surface we rest on supplies a normal force that
     // cancels the part of the TOTAL fictitious acceleration (centrifugal +

@@ -19,6 +19,9 @@ export const defaultConfig = (): SimConfig => ({
   R: 100, // floor radius (m). Each level sets its own.
   g: 9.81, // apparent gravity at the floor (m/s^2); spin rate omega = sqrt(g / R)
   halfWidth: 20, // half the ring's width along its axis (m)
+  spin: true, // false = no rotation at all (Earth level)
+  arena: 0, // 0 = whole ring; >0 = a walled stretch this long (m), used by the Earth level
+  gravity: 0, // real gravity pulling toward the floor (m/s^2): 0 on rings, 9.81 on Earth
   wallHeight: 15, // tallest rim wall (m); capped at 40% of R
   wallThickness: 1.5,
   hullThickness: 3,

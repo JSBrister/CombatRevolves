@@ -118,3 +118,20 @@ export function planetTexture(): THREE.Texture {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+
+/** Grass for the Earth level (one tile = 4 m). */
+export function grassTexture(): THREE.Texture {
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#4f7a3a';
+  g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 5000; i++) {
+    const v = Math.random();
+    g.fillStyle = v < 0.5 ? 'rgba(70,110,50,0.5)' : v < 0.8 ? 'rgba(95,140,60,0.5)' : 'rgba(60,90,40,0.6)';
+    g.fillRect(Math.random() * 256, Math.random() * 256, 2, 3);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}

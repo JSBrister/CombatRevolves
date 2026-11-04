@@ -14,7 +14,7 @@ npx tsc -p src/sim # proves the sim compiles without DOM types
 **Play online:** this repo builds and deploys itself to GitHub Pages on every push to `main` (enable it under Settings → Pages → Source: GitHub Actions).
 
 **Modes:** *Campaign* (fixed levels: kill every enemy to clear it, no respawns, enemies don't hurt each other) and
-*Debug sandbox* (free-for-all with bots and respawns). Levels are rings of different sizes for now.
+*Debug sandbox* (free-for-all with bots and respawns). Levels are rings of different sizes, plus *Earth* (flat ground, normal gravity, no spin: the reference for what everything should do) and *Boot Camp*, the first campaign level, also on Earth.
 
 **Controls:** WASD move · Shift toggle sprint (on by default) · Space jump (hold in the air with a jetpack) · mouse look ·
 left click fire · right click show trajectory · 1–5 weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
@@ -75,6 +75,10 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 - **Jumping** works for 0.12 s after leaving a surface ("coyote time"). In the air you get a little control, but only up to walk speed.
 - **Weapons are data:** every stat lives in `config.weapons` (per weapon), so the debug panel can tune them live and the state still serializes.
 - **Impact damage:** hitting a surface faster than 22 m/s (normal component) hurts; a knock into a wall credits whoever hit you.
+- **Earth** is a "ring" 100 km in radius with `spin: false` and real gravity (`gravity: 9.81`, pulling toward the floor) over a walled 120 m `arena`. Across the arena the floor curves by about 2 cm, so it's flat ground and every other system (collision, "up", spawns, bots) works unchanged. Tests check it behaves like Earth: drops fall straight down in √(2h/g), a 45° throw lands at v²/g, a jump peaks at v²/2g. The renderer draws only the arena and nearby ground, built around the arena centre: 100 km coordinates in single precision are only good to about a centimetre.
+- **World settings** (size, g, spin, gravity, arena, width, walls, air) reset for every level; other debug-panel tweaks carry over.
+- **Shadows:** one shadow-casting sun that follows the camera. On rings the sun is fixed relative to the stars, 40° off the axis, so in the ring's frame it circles once per spin: each spot gets a day, with long shadows sweeping round, and a night.
+- **Atmosphere** is off everywhere except the *Hazy ring* sandbox level (quadratic drag relative to the air, which moves with the floor).
 - **Levels** are data (`levels.ts`): a ring size and seed fix the layout; enemies are placed by angle and z, or on a ramp's lookout platform; a placement that lands inside cover is nudged clear. `level.shape` is the seam for other kinds of world (only `'ring'` exists): the collision shape, force field and renderer switch on it.
 - **Campaign rules:** teams (you vs enemies) with friendly fire off, no respawns, won when every enemy is dead, lost when you die. Enemy types differ in size (their hitbox scales too), colour, health, speed, weapon, range, accuracy and behaviour (chase, strafe, hold).
 - **Ring size** scales the map: rim walls are capped at 40% of the radius, ramps and cover shrink on small rings.

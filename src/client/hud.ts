@@ -7,21 +7,33 @@ export class Hud {
   private feed: { text: string; until: number }[] = [];
   private hitUntil = 0;
 
-  update(state: SimState, me: Player | undefined, opts: { yaw: number; timeScale: number; paused: boolean; freefly: boolean; sprintOn: boolean }) {
+  update(state: SimState, me: Player | undefined, opts: { yaw: number; timeScale: number; paused: boolean; freefly: boolean; sprintOn: boolean; showScores: boolean }) {
     const cfg = state.config;
     const w = omegaOf(cfg);
     $('ringinfo').innerHTML =
-      `R ${cfg.R.toFixed(0)} m · g ${cfg.g.toFixed(2)}<br/>` +
-      `ω ${w.toFixed(4)} rad/s · period ${((2 * Math.PI) / w).toFixed(1)} s<br/>` +
-      `rim speed ${(w * cfg.R).toFixed(1)} m/s<br/>` +
+      (cfg.spin
+        ? `R ${cfg.R.toFixed(0)} m · g ${cfg.g.toFixed(2)}<br/>` +
+          `ω ${w.toFixed(4)} rad/s · period ${((2 * Math.PI) / w).toFixed(1)} s<br/>` +
+          `rim speed ${(w * cfg.R).toFixed(1)} m/s<br/>`
+        : `Earth · g ${cfg.gravity.toFixed(2)} · no spin<br/>`) +
+      (cfg.dragType !== 'none' && cfg.dragCoeff > 0 ? `atmosphere: ${cfg.dragType} drag ${cfg.dragCoeff}<br/>` : '') +
+      (cfg.spin && cfg.gravity ? `+ real gravity ${cfg.gravity.toFixed(2)} m/s²<br/>` : '') +
       (!cfg.coriolis || !cfg.centrifugal ? `<span style="color:#ff6a3d">${!cfg.centrifugal ? 'CENTRIFUGAL OFF ' : ''}${!cfg.coriolis ? 'CORIOLIS OFF' : ''}</span><br/>` : '') +
       (opts.timeScale !== 1 ? `<span style="color:#ffd27a">time ×${opts.timeScale.toFixed(2)}</span><br/>` : '') +
       (opts.freefly ? '<span style="color:#ffd27a">FREE-FLY CAMERA</span><br/>' : '');
     // Spinward is yaw = 0 in the local frame; show it relative to where we face.
     $('spin-arrow').style.transform = `rotate(${-opts.yaw}rad)`;
+    $('compass').style.display = cfg.spin ? '' : 'none';
     if (!me) return;
     $('shield-fill').style.width = `${(100 * me.shield) / Math.max(1, me.maxShield)}%`;
     $('health-fill').style.width = `${(100 * Math.max(0, me.health)) / me.maxHealth}%`;
+    // Tab: scoreboard
+    const sc = $('scores');
+    sc.classList.toggle('hidden', !opts.showScores);
+    if (opts.showScores) {
+      const rows = state.players.filter((p) => p.kind !== 'dummy').sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+      sc.textContent = 'NAME              KILLS  DEATHS\n' + rows.map((p) => `${(p.id === me.id ? '> ' : '  ') + p.name.padEnd(16)}${String(p.kills).padStart(5)}  ${String(p.deaths).padStart(6)}`).join('\n');
+    }
     const enemies = state.players.filter((p) => p.enemyType !== '');
     $('objective').textContent = state.mode === 'campaign' && state.outcome === 'playing'
       ? `Enemies left: ${enemies.filter((p) => p.alive).length} / ${enemies.length}` : '';

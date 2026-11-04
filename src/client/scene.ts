@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import type { Level, SimConfig } from '../sim';
-import { ballTexture, crateTexture, deckTexture, glowTexture, planetTexture, wallTexture } from './textures';
+import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, wallTexture } from './textures';
 
 export const LAYER_ROT_TRAILS = 1;
 export const LAYER_INERTIAL_ONLY = 2;
@@ -16,21 +16,50 @@ export class RingScene {
   inertial = new THREE.Group(); // fixed in the inertial frame
   level = new THREE.Group();
   glow = glowTexture();
-  textures = { deck: deckTexture(), wall: wallTexture(), crate: crateTexture(), ball: ballTexture(), planet: planetTexture() };
+  textures = { deck: deckTexture(), wall: wallTexture(), crate: crateTexture(), ball: ballTexture(), planet: planetTexture(), grass: grassTexture() };
   starRadius = 4000;
+  sky: 'space' | 'earth' = 'space';
+  ambient = new THREE.AmbientLight(0x9aa8c0, 0.6);
+  axisLight = new THREE.PointLight(0xfff2dd, 0.85, 0, 0); // light from the axis: the "sky" of a ring habitat
+  /**
+   * The sun: fixed relative to the stars, so in the ring's (rotating) frame it
+   * circles once per spin and the shadows sweep round. It casts shadows in a
+   * box that follows the camera.
+   */
+  sunLight = new THREE.DirectionalLight(0xfff1d6, 2.6);
+  // Inertial-frame direction toward the sun: 40 degrees off the ring's axis, so
+  // each part of the floor gets a day (with sweeping shadows) and a night per spin.
+  sunDir = new THREE.Vector3(Math.sin(0.7), 0, Math.cos(0.7));
 
   constructor() {
     this.scene.background = new THREE.Color(0x02030a);
-    this.scene.add(this.inertial, this.level);
-    this.scene.add(new THREE.AmbientLight(0x9aa8c0, 0.9));
-    // Light from the axis: the "sky" of a ring habitat.
-    const axisLight = new THREE.PointLight(0xfff2dd, 1.6, 0, 0);
-    this.scene.add(axisLight);
+    this.scene.add(this.inertial, this.level, this.ambient, this.axisLight, this.sunLight, this.sunLight.target);
+    const sh = this.sunLight.shadow;
+    sh.mapSize.set(2048, 2048);
+    sh.camera.left = -40; sh.camera.right = 40; sh.camera.top = 40; sh.camera.bottom = -40;
+    sh.camera.near = 1; sh.camera.far = 400;
+    sh.bias = -0.0004;
+    sh.normalBias = 0.04;
+    this.sunLight.castShadow = true;
   }
 
-  build(cfg: SimConfig, level: Level) {
+  /** Point the sun (and its shadow box) at `focus`, for the current spin angle. */
+  updateSun(frameAngle: number, focus: THREE.Vector3) {
+    const d = this.sunDir.clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), -frameAngle);
+    this.sunLight.position.copy(focus).addScaledVector(d, 200);
+    this.sunLight.target.position.copy(focus);
+  }
+
+  build(cfg: SimConfig, level: Level, sky: 'space' | 'earth' = 'space') {
     this.level.clear();
     this.inertial.clear();
+    this.sky = sky;
+    if (sky === 'earth') return this.buildEarth(cfg, level);
+    this.scene.background = new THREE.Color(0x02030a);
+    this.ambient.intensity = 0.6;
+    this.axisLight.intensity = 0.85;
+    this.sunLight.intensity = 2.6;
+    this.sunDir.set(Math.sin(0.7), 0, Math.cos(0.7));
     const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
     const segs = Math.min(720, Math.max(192, Math.round(R * 2.4)));
     this.starRadius = Math.max(4000, R * 12);
@@ -43,6 +72,7 @@ export class RingScene {
     const floorGeo = new THREE.CylinderGeometry(R, R, 2 * W, segs, 1, true);
     floorGeo.rotateX(Math.PI / 2);
     const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ map: deck, side: THREE.BackSide, roughness: 0.85, metalness: 0.2 }));
+    floor.receiveShadow = true;
     this.level.add(floor);
 
     // Center stripe + edge stripes (painted on, slightly above the floor).
@@ -89,13 +119,23 @@ export class RingScene {
     }
     this.level.add(ribs);
 
+    this.buildBoxes(cfg, level);
+    this.buildSky();
+  }
+
+  private buildBoxes(cfg: SimConfig, level: Level) {
+    const R = cfg.R;
+    const m = new THREE.Matrix4();
     // Obstacles.
     const boxMat = new THREE.MeshStandardMaterial({ map: this.textures.crate, roughness: 0.8 });
     const edgeMat = new THREE.LineBasicMaterial({ color: 0x1a1510 });
+    const wallMat = new THREE.MeshStandardMaterial({ map: this.textures.wall, roughness: 0.7, metalness: 0.3 });
     const stairMat = new THREE.MeshStandardMaterial({ map: this.textures.wall, color: 0xd6e2f5, emissive: 0x1c2a40, roughness: 0.6, metalness: 0.15 });
     for (const b of level.boxes) {
       const geo = new THREE.BoxGeometry(2 * b.half[0], 2 * b.half[1], 2 * b.half[2]);
-      const mesh = new THREE.Mesh(geo, b.kind === 'ramp' ? stairMat : boxMat);
+      const mesh = new THREE.Mesh(geo, b.kind === 'ramp' ? stairMat : b.kind === 'wall' ? wallMat : boxMat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       basisMatrix(m, b.angle, 0, 0);
       mesh.quaternion.setFromRotationMatrix(m);
       if (b.tilt) mesh.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), b.tilt));
@@ -115,7 +155,71 @@ export class RingScene {
       this.level.add(holder);
     }
 
-    this.buildSky();
+  }
+
+  /**
+   * Earth: a 100 km "ring" that doesn't spin. Only the arena and a wide apron
+   * of ground around it are drawn (finely: the whole circumference would put
+   * the drawn floor metres away from where the physics has it).
+   */
+  private buildEarth(cfg: SimConfig, level: Level) {
+    const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness;
+    const sky = new THREE.Color(0x8fc4ff);
+    this.scene.background = sky;
+    this.scene.fog = new THREE.Fog(0xb8d8f5, 120, 700);
+    this.ambient.intensity = 1.0;
+    this.axisLight.intensity = 0;
+    this.sunLight.intensity = 2.2;
+    // sun high in the sky over the arena (around angle 0, "up" is -x)
+    this.sunDir.set(-0.8, 0.25, 0.45).normalize();
+    const half = 600; // metres of ground drawn each way
+    const arc = (2 * half) / R;
+    const grass = this.textures.grass.clone();
+    grass.needsUpdate = true;
+    grass.repeat.set((2 * half) / 4, (2 * half) / 4);
+    const segs = Math.round((2 * half) / 2);
+    // Geometry is built around the arena centre (R, 0, 0) and the mesh moved
+    // there: 100 km coordinates in single precision are only good to ~1 cm.
+    const centre = new THREE.Vector3(R, 0, 0);
+    const g = new THREE.CylinderGeometry(R, R, 2 * half, segs, 1, true, -arc / 2 + Math.PI / 2, arc);
+    g.rotateX(Math.PI / 2);
+    g.translate(-R, 0, 0);
+    const ground = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: grass, side: THREE.BackSide, roughness: 1 }));
+    ground.position.copy(centre);
+    ground.receiveShadow = true;
+    this.level.add(ground);
+    // painted arena floor on top of the grass
+    const deck = this.textures.deck.clone();
+    deck.needsUpdate = true;
+    deck.repeat.set(cfg.arena / 5, (2 * W) / 5);
+    const a2 = cfg.arena / R;
+    const fg = new THREE.CylinderGeometry(R - 0.03, R - 0.03, 2 * W, Math.round(cfg.arena / 2), 1, true, -a2 / 2 + Math.PI / 2, a2);
+    fg.rotateX(Math.PI / 2);
+    fg.translate(-R, 0, 0);
+    const floor = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: deck, side: THREE.BackSide, roughness: 0.85, metalness: 0.1 }));
+    floor.position.copy(centre);
+    floor.receiveShadow = true;
+    this.level.add(floor);
+    // side fences (the rim walls), only along the arena
+    const wallMat = new THREE.MeshStandardMaterial({ map: this.textures.wall, side: THREE.DoubleSide, roughness: 0.7, metalness: 0.3 });
+    const h = level.wallPos[0] ?? cfg.wallHeight;
+    for (const sgn of [1, -1]) {
+      const geo = new THREE.BoxGeometry(cfg.arena + 3, h, T);
+      const fence = new THREE.Mesh(geo, wallMat);
+      const m = new THREE.Matrix4();
+      basisMatrix(m, 0, R - h / 2, sgn * (W + T / 2));
+      fence.applyMatrix4(m);
+      fence.castShadow = true;
+      fence.receiveShadow = true;
+      this.level.add(fence);
+    }
+    this.buildBoxes(cfg, level);
+    // a sun in the sky (no stars by day)
+    this.starRadius = 4000;
+    const sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glow, color: 0xfff6d0, fog: false, depthWrite: false, blending: THREE.AdditiveBlending }));
+    sun.position.copy(this.sunDir).multiplyScalar(3500).add(new THREE.Vector3(R, 0, 0));
+    sun.scale.setScalar(400);
+    this.level.add(sun);
   }
 
   private buildWalls(cfg: SimConfig, heights: number[], sgn: number, segs: number) {
@@ -183,9 +287,7 @@ export class RingScene {
     sun.position.copy(sunDir).multiplyScalar(Rs * 0.9);
     sun.scale.setScalar(Rs * 0.12);
     this.inertial.add(sun);
-    const light = new THREE.DirectionalLight(0xfff1d6, 1.3);
-    light.position.copy(sunDir).multiplyScalar(100);
-    this.inertial.add(light);
+    // (the light itself is this.sunLight, steered every frame by updateSun)
 
     // A gas giant hanging off to one side.
     const planet = new THREE.Mesh(

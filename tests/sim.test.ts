@@ -1004,3 +1004,66 @@ describe('21. aim, shot speed and the Grav Mallet', () => {
     expect(BK.health + BK.shield).toBe(170);
   });
 });
+
+describe('22. Earth: the no-spin reference level', () => {
+  const earth = () => {
+    const { state, localId } = startLevel(levelById('s-earth')!);
+    state.players = state.players.filter((p) => p.id === localId); // no bots
+    return { s: state, id: localId, p: state.players[0] };
+  };
+  it('does not spin; you weigh exactly 1 g standing still', () => {
+    const { s, id, p } = earth();
+    expect(omegaOf(s.config)).toBe(0);
+    run(s, 240, () => [cmdFor(s, id)]);
+    expect(s.frameAngle).toBe(0);
+    expect(p.apparentG).toBeCloseTo(1, 2);
+  });
+  it('a dropped object falls straight down in sqrt(2h/g)', () => {
+    const { s } = earth();
+    const g = s.config.gravity, R = s.config.R, h = 10;
+    const Re = R - GRENADE_RADIUS;
+    const gr = spawnGrenade(s, -1, [Re - h, 0, 5], [0, 0, 0]);
+    let t = 0;
+    while (!gr.stuck && t < 1000) { step(s, [], s.tick); t++; }
+    expect(Math.abs(t * DT - Math.sqrt((2 * h) / g))).toBeLessThan(0.02);
+    expect(Math.abs(angleOf(gr.pos) * R)).toBeLessThan(0.01); // lands right below
+  });
+  it('a 45 degree throw lands at v^2/g; a jump peaks at v^2/2g', () => {
+    const { s, id, p } = earth();
+    const g = s.config.gravity, R = s.config.R, v = 15;
+    const Re = R - GRENADE_RADIUS;
+    const gr = spawnGrenade(s, -1, [Re, 0, -20], [-v / Math.SQRT2, v / Math.SQRT2, 0]);
+    while (!gr.stuck && s.tick < 2000) step(s, [], s.tick);
+    expect(Math.abs(angleOf(gr.pos) * R - (v * v) / g)).toBeLessThan(0.1);
+    // jump
+    run(s, 20, () => [cmdFor(s, id)]);
+    const r0 = Math.hypot(p.pos[0], p.pos[1]);
+    step(s, [cmdFor(s, id, { buttons: BTN_JUMP })], s.tick);
+    let apex = 0;
+    for (let i = 0; i < 400; i++) { step(s, [cmdFor(s, id)], s.tick); apex = Math.max(apex, r0 - Math.hypot(p.pos[0], p.pos[1])); }
+    expect(Math.abs(apex - s.config.jumpSpeed ** 2 / (2 * g))).toBeLessThan(0.05);
+  });
+  it('the arena is walled in and the Boot Camp level plays', () => {
+    const { s } = earth();
+    expect(s.level.boxes.filter((b) => b.kind === 'wall').length).toBe(2);
+    for (const sp of s.level.spawns) expect(Math.abs(sp.angle * s.config.R)).toBeLessThan(s.config.arena / 2);
+    const { state, localId, botIds } = startLevel(levelById('c0')!);
+    expect(botIds.length).toBe(3);
+    run(state, 600, (st) => [cmdFor(st, localId), ...botIds.map((b) => botInput(st, b))]);
+    for (const q of state.players) expect(q.pos.every(Number.isFinite)).toBe(true);
+  });
+});
+
+describe('23. per-level world settings', () => {
+  it('the hazy ring has air that slows bolts; it does not leak into the next level', () => {
+    const hazy = startLevel(levelById('s-hazy')!);
+    const s = hazy.state;
+    const b = spawnBolt(s, -1, 'rifle', [s.config.R - 5, 0, 0], [0, 80, 0]);
+    run(s, 60);
+    expect(Math.hypot(...b.vel)).toBeLessThan(70); // ~80 m/s in vacuum
+    const next = startLevel(levelById('s-standard')!, { ...s.config });
+    expect(next.state.config.dragType).toBe('none');
+    const fromEarth = startLevel(levelById('s-standard')!, { ...startLevel(levelById('s-earth')!).state.config });
+    expect([fromEarth.state.config.spin, fromEarth.state.config.gravity, fromEarth.state.config.arena]).toEqual([true, 0, 0]);
+  });
+});

@@ -254,6 +254,8 @@ export class EntityViews {
       new THREE.CapsuleGeometry(PLAYER_RADIUS * 1.25, PLAYER_HALF_SEG * 2 + 0.1, 6, 16),
       new THREE.MeshBasicMaterial({ color: 0x6ad0ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
     );
+    body.castShadow = true;
+    pack.castShadow = true;
     group.add(body, visor, pack, gunHolder, flame, shell);
     if (kind === 'dummy') {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.05, 6, 20), new THREE.MeshBasicMaterial({ color: 0xff3020 }));
@@ -372,6 +374,7 @@ export class EntityViews {
       let mesh = this.props.get(pr.id);
       if (!mesh) {
         mesh = new THREE.Mesh(new THREE.SphereGeometry(pr.radius, 20, 14), new THREE.MeshStandardMaterial({ map: this.rs.textures.ball, roughness: 0.5 }));
+        mesh.castShadow = true;
         this.root.add(mesh);
         this.props.set(pr.id, mesh);
       }

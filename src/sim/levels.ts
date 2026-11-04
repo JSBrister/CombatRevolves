@@ -13,7 +13,7 @@
 
 import { localBasis } from './physics';
 import { spawnPosition } from './level';
-import { ENEMY_TYPES } from './tuning';
+import { ENEMY_TYPES, defaultConfig } from './tuning';
 import { WEAPON_IDS, type GameMode, type SimConfig, type SimState } from './types';
 import { type Vec3, addScaled } from './vec';
 import { addPlayer, createState, freeSpotNear, standHeight } from './world';
@@ -21,6 +21,7 @@ import { addPlayer, createState, freeSpotNear, standHeight } from './world';
 export interface EnemySpawn {
   type: keyof typeof ENEMY_TYPES;
   angle?: number; // degrees from the player start, + = spinward
+  along?: number; // or metres along the floor from the start (handy on Earth, where a degree is 1.7 km)
   z?: number; // metres across the ring
   stair?: number; // or: stand on this staircase's lookout
 }
@@ -37,11 +38,26 @@ export interface LevelDef {
   pickups?: boolean; // default true
   bots?: number; // sandbox: free-for-all bots
   start?: { angle: number; z: number }; // degrees, metres (default 0, 0)
+  sky?: 'space' | 'earth'; // what the client draws around the level (default space)
   enemies?: EnemySpawn[]; // campaign
 }
 
+/**
+ * Earth: a "ring" 100 km in radius that doesn't spin, with real 1 g gravity
+ * toward the floor. Over the 120 m arena the floor curves by about 2 cm, so
+ * it's flat ground: the reference for what everything "should" do.
+ */
+const EARTH: Partial<SimConfig> = { R: 100000, spin: false, gravity: 9.81, arena: 120, halfWidth: 40, wallHeight: 5 };
+
 export const LEVELS: LevelDef[] = [
   // ------------------------------------------------------------ campaign
+  {
+    id: 'c0', mode: 'campaign', name: 'Boot Camp', seed: 11, sky: 'earth', variedWalls: false,
+    blurb: 'Flat ground, normal gravity, no spin. Three grunts. Learn the guns before physics gets weird.',
+    config: { ...EARTH },
+    start: { angle: 0, z: 0 },
+    enemies: [{ type: 'grunt', along: 25, z: -10 }, { type: 'grunt', along: 35, z: 8 }, { type: 'grunt', along: 45, z: 0 }],
+  },
   {
     id: 'c1', mode: 'campaign', name: 'First Contact', seed: 101,
     blurb: 'A standard 100 m ring. Four grunts and a soldier. Mind the Coriolis drift on your shots.',
@@ -90,6 +106,8 @@ export const LEVELS: LevelDef[] = [
     ],
   },
   // ------------------------------------------------------------ sandbox
+  { id: 's-earth', mode: 'sandbox', name: 'Earth (reference)', seed: 21, config: { ...EARTH }, bots: 2, sky: 'earth', variedWalls: false,
+    blurb: 'Uniform 1 g, flat ground, no spin: what everything "should" do. Compare any trick here and on a ring.' },
   { id: 's-standard', mode: 'sandbox', name: 'Standard ring (100 m)', seed: 1234, config: { R: 100 }, bots: 3,
     blurb: '1 g at the floor, a 20 s spin, 31 m/s rim speed. Three bots.' },
   { id: 's-tiny', mode: 'sandbox', name: 'Tiny ring (12 m)', seed: 11, config: { R: 12 }, bots: 1,
@@ -100,9 +118,14 @@ export const LEVELS: LevelDef[] = [
     blurb: 'A 45 s spin and 70 m/s rim speed. Feels almost like home.' },
   { id: 's-huge', mode: 'sandbox', name: 'Huge ring (2000 m)', seed: 14, config: { R: 2000 }, bots: 4,
     blurb: '12.6 km around. The far side is a thin line in the sky.' },
+  { id: 's-hazy', mode: 'sandbox', name: 'Hazy ring (atmosphere)', seed: 16, config: { R: 100, dragType: 'quadratic', dragCoeff: 0.004 }, bots: 2,
+    blurb: 'The one ring with air. Bolts slow down and droop, grenades fall short, jetpacks hit a terminal speed.' },
   { id: 's-empty', mode: 'sandbox', name: 'Empty ring (100 m)', seed: 15, config: { R: 100 }, bots: 0,
     blurb: 'No bots, no clutter: a physics playground.' },
 ];
+
+/** Settings that describe the world itself: reset for every level. */
+export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
@@ -123,9 +146,14 @@ export interface StartedLevel {
  */
 export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): StartedLevel {
   const campaign = def.mode === 'campaign';
+  // World settings always come from the defaults plus this level, never from
+  // whatever level ran before (other debug tweaks do carry over).
+  const defaults = defaultConfig();
+  const world: Partial<SimConfig> = {};
+  for (const k of WORLD_KEYS) (world as Record<string, unknown>)[k] = defaults[k];
   const state = createState({
     seed: def.seed,
-    config: { ...baseConfig, ...def.config, friendlyFire: !campaign },
+    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign },
     variedWalls: def.variedWalls ?? true,
     props: def.props ?? true,
     pickups: def.pickups ?? true,
@@ -133,7 +161,8 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
     levelId: def.id,
   });
   const cfg = state.config;
-  const start = def.start ?? { angle: 0, z: 0 };
+  // default start: angle 0, or near one end of an arena (so the enemies are ahead of you)
+  const start = def.start ?? { angle: cfg.arena > 0 ? ((-cfg.arena / 2 + 8) / cfg.R) * (180 / Math.PI) : 0, z: 0 };
   const startAngle = (start.angle * Math.PI) / 180;
 
   const localId = addPlayer(state, 'human', 'You');
@@ -171,7 +200,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
       const top = e.stair !== undefined ? state.level.stairTops[e.stair % Math.max(1, state.level.stairTops.length)] : undefined;
       p.pos = freeSpotNear(state, top
         ? addScaled(top, localBasis(top).up, standHeight(t.size))
-        : floorAt(cfg, startAngle, e.angle ?? 0, e.z ?? 0, standHeight(t.size)), t.size);
+        : floorAt(cfg, startAngle, e.along !== undefined ? (e.along / cfg.R) * (180 / Math.PI) : (e.angle ?? 0), e.z ?? 0, standHeight(t.size)), t.size);
       // face the player
       p.yaw = (e.angle ?? 0) > 0 ? Math.PI : 0;
       botIds.push(id);

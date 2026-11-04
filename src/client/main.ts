@@ -18,6 +18,8 @@ import './style.css';
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const rs = new RingScene();
 const views = new EntityViews(rs);
 const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 2e5);
@@ -66,7 +68,7 @@ function startGame(def: LevelDef) {
   view.bots = state.mode === 'sandbox' ? botIds.length : 0;
   outcomeAt = 0;
   gui.controllersRecursive().forEach((c) => c.updateDisplay());
-  rs.build(cfg, state.level);
+  rs.build(cfg, state.level, currentLevel.sky ?? 'space');
   views.reset();
   views.localId = localId;
   input.yaw = state.players.find((p) => p.id === localId)!.yaw;
@@ -338,6 +340,7 @@ function frame(now: number) {
   }
 
   views.cameraPos.copy(camera.position);
+  rs.updateSun(fa, camera.position);
   views.render(state, prev, alpha, dtReal);
   // trajectory preview (real physics, includes the shooter's own velocity)
   const pk = previewKind();
@@ -357,7 +360,7 @@ function frame(now: number) {
 
   // inertial picture-in-picture: a camera fixed in the NON-rotating frame
   document.getElementById('pip-label')!.classList.toggle('hidden', !view.inertial);
-  if (view.inertial) {
+  if (view.inertial && rs.sky !== 'earth') {
     const R = cfg.R;
     const pw = Math.round(Math.min(W * 0.42, H * 0.5)), ph = Math.round(pw * 0.72);
     const x = W - pw - 16, y = 96;
@@ -379,7 +382,7 @@ function frame(now: number) {
   }
 
   checkOutcome(now);
-  hud.update(state, me, { yaw: input.yaw, timeScale: view.timeScale, paused: view.paused, freefly: view.freefly, sprintOn: input.sprintOn });
+  hud.update(state, me, { yaw: input.yaw, timeScale: view.timeScale, paused: view.paused, freefly: view.freefly, sprintOn: input.sprintOn, showScores: input.keys.has('Tab') });
   requestAnimationFrame(frame);
 }
 
@@ -493,5 +496,5 @@ requestAnimationFrame((t) => {
 // Debug handle (console / automated checks).
 (window as unknown as { __game: unknown }).__game = {
   get state() { return state; }, get localId() { return localId; }, get screen() { return screen; }, sim, input, view, cfg, gui, views,
-  newWorld, startGame, levelById, show, setFreefly, localBasis, omegaOf,
+  newWorld, startGame, levelById, show, setFreefly, localBasis, omegaOf, rs, renderer,
 };

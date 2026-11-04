@@ -11,6 +11,9 @@ export interface SimConfig {
   R: number; // floor radius (m)
   g: number; // target apparent gravity at the floor (m/s^2); omega = sqrt(g/R)
   halfWidth: number; // half of the ring width along Z
+  spin: boolean; // false: the world doesn't rotate at all (Earth)
+  arena: number; // 0 = the whole ring is playable; >0 = only this many metres of it (end walls), e.g. Earth
+  gravity: number; // real gravity toward the floor (m/s^2), on top of any spin. 0 on a normal ring.
   wallHeight: number;
   wallThickness: number;
   hullThickness: number;
@@ -74,7 +77,8 @@ export interface SimConfig {
   friendlyFire: boolean; // false: teammates can't hurt each other (campaign enemies)
 }
 
-export const omegaOf = (c: SimConfig) => Math.sqrt(c.g / c.R);
+/** Spin rate (rad/s): sqrt(g/R) gives g at the floor; 0 when the world doesn't spin (Earth). */
+export const omegaOf = (c: SimConfig) => (c.spin ? Math.sqrt(c.g / c.R) : 0);
 
 // ---------------------------------------------------------------- input
 
@@ -293,7 +297,7 @@ export interface Explosion {
 export interface Box {
   id: number;
   type: 'box';
-  kind: 'cover' | 'ramp';
+  kind: 'cover' | 'ramp' | 'wall';
   angle: number; // ring angle of the box centre
   tilt: number; // rotation about the axial direction (ramps): + tips the spinward end up
   center: Vec3;
