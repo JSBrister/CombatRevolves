@@ -86,8 +86,12 @@ function boxSdf(p: Vec3, b: Box, out: SdfHit) {
   const c = Math.cos(b.angle), s = Math.sin(b.angle);
   // local axes: spin = (-s, c, 0), up = (-c, -s, 0), axial = (0,0,1)
   const dx = p[0] - b.center[0], dy = p[1] - b.center[1], dz = p[2] - b.center[2];
-  const lx = -s * dx + c * dy;
-  const ly = -c * dx - s * dy;
+  // (spinward, up) components, then rotate into the box's tilted frame
+  const ls = -s * dx + c * dy;
+  const lu = -c * dx - s * dy;
+  const ct = Math.cos(b.tilt), st = Math.sin(b.tilt);
+  const lx = ct * ls + st * lu;
+  const ly = -st * ls + ct * lu;
   const lz = dz;
   // cheap reject: can't beat the current best distance (squared, no sqrt/hypot)
   const h0 = b.half[0], h1 = b.half[1], h2 = b.half[2];
@@ -108,8 +112,9 @@ function boxSdf(p: Vec3, b: Box, out: SdfHit) {
     else nz = Math.sign(lz) || 1;
   }
   out.d = d;
-  // back to world: spin*nx + up*ny + axial*nz
-  out.n = [-s * nx - c * ny, c * nx - s * ny, nz];
+  // undo the tilt, then back to world: spin*ns + up*nu + axial*nz
+  const ns = ct * nx - st * ny, nu = st * nx + ct * ny;
+  out.n = [-s * ns - c * nu, c * ns - s * nu, nz];
 }
 
 /** Signed distance from p to the level. Positive in free space. */
@@ -211,7 +216,33 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     const sag = (ht * ht) / (2 * R) + 0.05; // bury the bottom so the curved floor never shows a gap
     const huTot = hu + sag / 2;
     const rc = R - 2 * hu + huTot; // top stays at height 2*hu
-    boxes.push({ id: nextId(), type: 'box', kind, angle, center: [rc * Math.cos(angle), rc * Math.sin(angle), z], half: [ht, huTot, hz] });
+    boxes.push({ id: nextId(), type: 'box', kind, angle, tilt: 0, center: [rc * Math.cos(angle), rc * Math.sin(angle), z], half: [ht, huTot, hz] });
+  };
+  /**
+   * A ramp: one straight tilted slab, centred at `midAngle`, climbing `H` over
+   * `len` metres of ring in direction `dir` (+1 spinward). The floor curves up
+   * away from the slab's middle, so the slab's ends are raised to match: its
+   * low end meets the floor and its high end is exactly H above it. The slab
+   * reaches well below the floor so you can't get under it.
+   */
+  /** Returns the ring angle where the ramp's top edge ends (the platform starts there). */
+  const addRamp = (midAngle: number, z: number, len: number, H: number, dir: number): number => {
+    // exact: a point d along the tangent at height y above it sits at radius
+    // sqrt((R - y)^2 + d^2), so "h above the floor" means y = R - sqrt((R - h)^2 - d^2)
+    const d = len / 2;
+    const y0 = R - Math.sqrt(R * R - d * d), y1 = R - Math.sqrt((R - H) ** 2 - d * d);
+    const tilt = dir * Math.atan2(y1 - y0, len);
+    const ct = Math.cos(tilt), st = Math.sin(tilt);
+    const ymid = (y0 + y1) / 2;
+    const hy = (ymid + H / 2 + 1.5) / (2 * ct); // half-thickness: deep enough to bury the bottom
+    const hx = len / 2 / ct;
+    const c = Math.cos(midAngle), sn = Math.sin(midAngle);
+    const top: Vec3 = [(R - ymid) * c, (R - ymid) * sn, z]; // middle of the top surface
+    const spin: Vec3 = [-sn, c, 0], up: Vec3 = [-c, -sn, 0];
+    const n: Vec3 = [-st * spin[0] + ct * up[0], -st * spin[1] + ct * up[1], 0]; // the slab's own "up"
+    boxes.push({ id: nextId(), type: 'box', kind: 'ramp', angle: midAngle, tilt, center: [top[0] - n[0] * hy, top[1] - n[1] * hy, z], half: [hx, hy, STAIR_WIDTH / 2] });
+    // the high end is nearer the axis, so it reaches a little further round the ring than len/2R
+    return midAngle + dir * Math.atan2(d, R - y1);
   };
   const stairs: { angle: number; halfArc: number }[] = [];
   const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
@@ -221,33 +252,29 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const k = Math.min(1, R / 60);
   if (withObstacles) {
     const circ = 2 * Math.PI * R;
-    // Staircases: solid steps each STAIR_RISE high (one jump per step) up to a
-    // lookout platform. Placed midway between spawn points, alternating which
-    // way they climb (climbing spinward vs antispinward feels different!).
+    // Ramps up to lookout platforms, midway between spawn points, alternating
+    // which way they climb (climbing spinward vs antispinward feels different!).
     const nStairs = Math.max(2, Math.min(12, Math.round(circ / 150)));
-    const steps = Math.max(1, Math.min(STAIR_STEPS, Math.floor((0.3 * R) / STAIR_RISE)));
-    const topItems: ItemKind[] = ['laser', 'jetpack'];
+    const H = Math.max(2, Math.min(LOOKOUT_HEIGHT, 0.3 * R)); // lookout height
+    const rampLen = H / RAMP_SLOPE;
+    const topItems: ItemKind[] = ['cannon', 'jetpack'];
     for (let s = 0; s < nStairs; s++) {
       const mid = ((s + 0.5) / nStairs) * Math.PI * 2 + Math.PI / spawns.length / 2;
       const dir = s % 2 === 0 ? 1 : -1;
       const z = s % 2 === 0 ? -7 : 7;
-      const total = steps * STAIR_TREAD + STAIR_TOP;
+      const total = rampLen + STAIR_TOP;
       const start = mid - (dir * total) / 2 / R;
-      for (let i = 0; i < steps; i++) {
-        const along = (i + 0.5) * STAIR_TREAD;
-        addBox(start + (dir * along) / R, z, STAIR_TREAD / 2, ((i + 1) * STAIR_RISE) / 2, STAIR_WIDTH / 2, 'stair');
-      }
-      const along = steps * STAIR_TREAD + STAIR_TOP / 2;
-      const topAngle = start + (dir * along) / R;
-      addBox(topAngle, z, STAIR_TOP / 2, (steps * STAIR_RISE) / 2, STAIR_WIDTH / 2, 'stair');
+      const rampEnd = addRamp(start + (dir * rampLen) / 2 / R, z, rampLen, H, dir);
+      const topAngle = rampEnd + (dir * STAIR_TOP) / 2 / (R - H);
+      addBox(topAngle, z, STAIR_TOP / 2, H / 2, STAIR_WIDTH / 2, 'ramp');
       stairs.push({ angle: mid, halfArc: total / 2 });
       // a standing spot on the lookout, a little back from the pickup
-      stairTops.push(at(topAngle + (dir * (STAIR_TOP / 2 - 1.2)) / R, steps * STAIR_RISE, z));
-      // the lookout's prize: a pulse laser or a jetpack
-      pickupSpots.push({ pos: at(topAngle, steps * STAIR_RISE + 1, z), item: topItems[s % 2] });
+      stairTops.push(at(topAngle + (dir * (STAIR_TOP / 2 - 1.2)) / R, H, z));
+      // the lookout's prize: a plasma bolt cannon or a jetpack
+      pickupSpots.push({ pos: at(topAngle, H + 1, z), item: topItems[s % 2] });
     }
     // Floor pickups at the midpoints between spawns that have no staircase.
-    const floorItems: ItemKind[] = ['launcher', 'health', 'redRifle', 'sticky', 'health', 'bounce', 'launcher', 'sticky'];
+    const floorItems: ItemKind[] = ['launcher', 'health', 'redRifle', 'sticky', 'laconic', 'bounce', 'health', 'sticky'];
     let fi = 0;
     for (let i = 0; i < spawns.length; i++) {
       const a = ((i + 0.5) / spawns.length) * Math.PI * 2;
@@ -275,9 +302,8 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   return { shape: 'ring', boxes, stairTops, spawns, pickupSpots, ...walls };
 }
 
-export const STAIR_STEPS = 5;
-export const STAIR_RISE = 2.2; // m per step: needs a jump each
-export const STAIR_TREAD = 2.6; // m along the ring
+export const LOOKOUT_HEIGHT = 11; // m (capped at 30% of the radius on small rings)
+export const RAMP_SLOPE = 0.45; // rise per metre (about 24 degrees): walkable
 export const STAIR_WIDTH = 5; // m across the ring
 export const STAIR_TOP = 6; // lookout platform length
 

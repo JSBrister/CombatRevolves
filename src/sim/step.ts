@@ -7,7 +7,7 @@ import { levelSdf, sphereTrace, spawnPosition } from './level';
 import { advanceFree, fictitiousAccel, integrate, localBasis, viewVectors } from './physics';
 import { rngInt } from './rng';
 import {
-  BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LASER,
+  BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
   omegaOf,
   type Bolt, type BoltKind, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
   type Outcome, type Player, type Prop, type SimConfig, type SimState, type WeaponId,
@@ -24,10 +24,11 @@ const PISTOL_CHARGE_DELAY = 30; // ticks of holding before the overcharge starts
 
 /** Which weapon's stats a bolt kind uses. */
 export const BOLT_WEAPON: Record<BoltKind, WeaponId> = {
-  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', overcharge: 'pistol', fuelRod: 'launcher', laser: 'laser', hover: 'hover',
+  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', overcharge: 'pistol', fuelRod: 'launcher', cannon: 'cannon', laconic: 'laconic',
+  hover: 'hover',
 };
 const WEAPON_BOLT: Record<WeaponId, BoltKind> = {
-  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', laser: 'laser', hover: 'hover',
+  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', cannon: 'cannon', laconic: 'laconic', hover: 'hover',
 };
 
 /** Muzzle speed, damage, radius and lifetime of a bolt kind, from the live config. */
@@ -157,8 +158,8 @@ function movePlayer(state: SimState, p: Player, omega: number) {
   let mx = clamp(inp.moveX, -1, 1), my = clamp(inp.moveY, -1, 1);
   const ml = Math.hypot(mx, my);
   if (ml > 1) { mx /= ml; my /= ml; }
-  // Charging the pulse laser slows you right down.
-  const chargeSlow = p.weapon === WEAPON_LASER && p.charge > 0 ? cfg.weapons.laser.chargeMoveScale : 1;
+  // Charging or firing the Laconic Laser slows you right down.
+  const chargeSlow = isLaconicBusy(p, tick) ? cfg.weapons.laconic.chargeMoveScale : 1;
 
   if (p.grounded && p.groundNormal) {
     // On the ground, input sets velocity RELATIVE TO THE FLOOR (which is the
@@ -270,6 +271,12 @@ function resolvePlayerLevel(state: SimState, p: Player): { ground: Vec3 | null; 
         }
         const u = dot(hit.n, up);
         if (u > bestUp) { bestUp = u; ground = hit.n; }
+      }
+      if (k === -1 && !ground) {
+        // Wedged against a wall, the nearest surface to the foot can be the wall
+        // even while standing on the floor: probe a touch lower to find the floor.
+        const probe = levelSdf(state.level, cfg, addScaled(c, up, -0.03));
+        if (probe.d - capsuleRadius(p) < 0.004 + 0.03 && dot(probe.n, up) > bestUp) { bestUp = dot(probe.n, up); ground = probe.n; }
       }
     }
     if (!any) break;
@@ -447,6 +454,9 @@ export function distanceOffRing(cfg: SimConfig, pos: Vec3): number {
 
 // =========================================================================== weapons
 
+/** True while the Laconic Laser is charging or streaming (movement and aim are slowed). */
+export const isLaconicBusy = (p: Player, tick: number) => p.weapon === WEAPON_LACONIC && (p.charge > 0 || tick < p.burstUntil);
+
 export const isOwned = (cfg: SimConfig, p: Player, w: number) => p.owned.includes(w) || (w === WEAPON_HOVER && cfg.allowHoverGun);
 
 function updateWeapons(state: SimState, p: Player, omega: number) {
@@ -456,13 +466,15 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
   const btn = inp.buttons;
   const pressed = btn & ~p.prevButtons;
   const released = p.prevButtons & ~btn;
+  const bursting = tick < p.burstUntil;
 
-  // Switch to the requested weapon if we own it.
-  if (inp.weapon !== p.weapon && inp.weapon >= 0 && inp.weapon < WEAPON_IDS.length && isOwned(cfg, p, inp.weapon)) {
+  // Switch to the requested weapon if we own it (not mid-stream).
+  if (!bursting && inp.weapon !== p.weapon && inp.weapon >= 0 && inp.weapon < WEAPON_IDS.length && isOwned(cfg, p, inp.weapon)) {
     p.weapon = inp.weapon;
     p.charge = 0;
     p.holdTicks = 0;
     p.needRelease = false;
+    p.reloadUntil = 0; // switching cancels a reload
     p.fireReadyTick = Math.max(p.fireReadyTick, tick + secs(0.25));
   }
   if (!isOwned(cfg, p, p.weapon)) p.weapon = p.owned[0] ?? 0;
@@ -472,12 +484,30 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
   const st = cfg.weapons[id];
   const held = (btn & BTN_FIRE) !== 0;
   const locked = tick < p.overheatUntil[wi];
-  const hasAmmo = st.ammoMax === 0 || p.ammo[wi] > 0;
-  const ready = tick >= p.fireReadyTick && !locked && hasAmmo && p.heat[wi] < 1;
+  const usesAmmo = st.magSize > 0;
 
-  // Passive cooling (the active weapon doesn't cool while its trigger is held).
+  // Reloading: finish, or start one (R, or automatically on an empty magazine).
+  if (usesAmmo) {
+    if (p.reloadUntil && tick >= p.reloadUntil) {
+      const want = st.magSize - p.mag[wi];
+      const got = p.infiniteAmmo ? want : Math.min(want, p.ammo[wi]);
+      p.mag[wi] += got;
+      if (!p.infiniteAmmo) p.ammo[wi] -= got;
+      p.reloadUntil = 0;
+    }
+    const canReload = p.mag[wi] < st.magSize && (p.infiniteAmmo || p.ammo[wi] > 0);
+    if (!p.reloadUntil && canReload && (p.mag[wi] === 0 || pressed & BTN_RELOAD)) {
+      p.reloadUntil = tick + Math.max(1, secs(st.reloadTime));
+      state.events.push({ type: 'reload', id: p.id });
+    }
+  }
+  const reloading = p.reloadUntil > 0;
+  const hasAmmo = !usesAmmo || p.mag[wi] > 0;
+  const ready = tick >= p.fireReadyTick && !locked && !reloading && hasAmmo && p.heat[wi] < 1;
+
+  // Passive cooling (the active weapon doesn't cool while its trigger is held or it is streaming).
   for (let i = 0; i < WEAPON_IDS.length; i++) {
-    if (i === wi && held && !locked) continue;
+    if (i === wi && ((held && !locked) || bursting)) continue;
     const ws = cfg.weapons[WEAPON_IDS[i]];
     const rate = tick < p.overheatUntil[i] ? 1 / Math.max(0.1, ws.overheatLock) : ws.coolRate;
     p.heat[i] = Math.max(0, p.heat[i] - rate * DT);
@@ -486,10 +516,10 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
   const shoot = (kind: BoltKind, heat: number, interval: number) => {
     fireBolt(state, p, kind);
     p.fireReadyTick = tick + Math.max(1, secs(interval));
-    if (st.ammoMax > 0) p.ammo[wi]--;
+    if (usesAmmo) p.mag[wi]--;
     if (heat > 0) {
       p.heat[wi] += heat;
-      if (p.heat[wi] >= 1) {
+      if (p.heat[wi] >= 1 - 1e-9) {
         p.heat[wi] = 1;
         p.overheatUntil[wi] = tick + secs(st.overheatLock);
         state.events.push({ type: 'overheat', id: p.id });
@@ -503,6 +533,7 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
       if (held && ready) shoot(WEAPON_BOLT[id], st.heatPerShot, st.interval);
       break;
     case 'launcher':
+    case 'cannon':
     case 'hover':
       if (pressed & BTN_FIRE && ready) shoot(WEAPON_BOLT[id], st.heatPerShot, st.interval);
       break;
@@ -522,18 +553,27 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
         p.holdTicks = 0;
       }
       break;
-    case 'laser':
-      // Hold to charge; it fires itself when charged. Release to charge again.
+    case 'laconic':
+      // Hold to charge; once charged it streams for burstTime whether you hold or not.
+      if (bursting) {
+        if (tick >= p.fireReadyTick) shoot('laconic', st.heatPerShot, st.interval);
+        if (tick + 1 >= p.burstUntil) { p.heat[wi] = 1; p.overheatUntil[wi] = tick + secs(st.overheatLock); }
+        break;
+      }
       if (!held) { p.charge = 0; p.needRelease = false; break; }
       if (p.needRelease || !ready) { p.charge = 0; break; }
       p.charge = Math.min(1, p.charge + DT / Math.max(0.05, st.chargeTime));
       if (p.charge >= 1) {
-        shoot('laser', st.heatPerShot, st.interval);
         p.charge = 0;
         p.needRelease = true;
+        p.burstUntil = tick + Math.max(1, secs(st.burstTime));
+        shoot('laconic', st.heatPerShot, st.interval);
       }
       break;
   }
+
+  // Melee (any weapon): a short-range shove with a lot of knockback.
+  if (pressed & BTN_MELEE && tick >= p.meleeReadyTick && !bursting) melee(state, p);
 
   // Grenade: hold to aim (client shows preview), release to throw.
   if (released & BTN_GRENADE && p.grenades > 0 && tick >= p.grenadeReadyTick) {
@@ -550,6 +590,38 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
     state.events.push({ type: 'fire', owner: p.id, kind: 'bounceGrenade', pos: from });
   }
   void omega;
+}
+
+function melee(state: SimState, p: Player) {
+  const cfg = state.config;
+  p.meleeReadyTick = state.tick + secs(cfg.meleeCooldown);
+  const v = viewVectors(p.pos, p.yaw, p.pitch);
+  const eye = addScaled(p.pos, v.up, eyeOffset(p) * 0.5);
+  let best: Player | null = null;
+  let bestD = Infinity;
+  for (const q of state.players) {
+    if (q.id === p.id || !q.alive) continue;
+    const [a, b] = capsuleEnds(q);
+    const c = closestOnSeg(eye, a, b).point;
+    const to = sub(c, eye);
+    const d = len(to) - capsuleRadius(q);
+    if (d > cfg.meleeRange || dot(norm(to), v.aim) < 0.4) continue;
+    if (d < bestD) { bestD = d; best = q; }
+  }
+  const kick = addScaled(v.aim, v.up, cfg.liftBias);
+  if (best) {
+    best.vel = addScaled(best.vel, norm(kick), cfg.meleeKnockback);
+    best.grounded = false;
+    best.groundNormal = null;
+    damagePlayer(state, best, p.id, cfg.meleeDamage, cfg.meleeDamage, 'melee');
+  }
+  for (const pr of state.props) {
+    const to = sub(pr.pos, eye);
+    if (len(to) - pr.radius > cfg.meleeRange || dot(norm(to), v.aim) < 0.4) continue;
+    pr.vel = addScaled(pr.vel, norm(kick), Math.min(40, cfg.meleeKnockback * (PLAYER_MASS / pr.mass)));
+    pr.contactNormal = null;
+  }
+  state.events.push({ type: 'melee', id: p.id, target: best?.id ?? -1, pos: addScaled(eye, v.aim, cfg.meleeRange * 0.6) });
 }
 
 function fireBolt(state: SimState, p: Player, kind: BoltKind) {
@@ -608,6 +680,9 @@ function updateBolts(state: SimState, omega: number) {
     const hit = sweep(state, p0, b.pos, b.radius, b.owner, b.armed);
     if (hit) {
       if (hit.player) {
+        // every hit gives a small kick along the bolt's path (relative to the target)
+        const kb = cfg.weapons[BOLT_WEAPON[b.kind]].knockback * (b.kind === 'overcharge' ? 4 : 1);
+        if (kb > 0) hit.player.vel = addScaled(hit.player.vel, norm(sub(b.vel, hit.player.vel)), kb);
         damagePlayer(state, hit.player, b.owner, b.damage, b.shieldDamage, b.kind);
       } else if (hit.prop) {
         const k = (b.kind === 'overcharge' ? 4 : 0.6) / hit.prop.mass;
@@ -813,8 +888,11 @@ function dropItems(state: SimState, p: Player) {
   for (const w of p.owned) {
     if (STARTING_WEAPONS.includes(w)) continue;
     const id = WEAPON_IDS[w];
-    if (cfg.weapons[id].ammoMax > 0 && p.ammo[w] <= 0) continue;
-    drops.push({ item: id as ItemKind, amount: cfg.weapons[id].ammoMax > 0 ? p.ammo[w] : -1 });
+    const ws = cfg.weapons[id];
+    const rounds = p.infiniteAmmo ? ws.magSize + ws.ammoMax : p.mag[w] + p.ammo[w];
+    if (ws.magSize > 0 && rounds <= 0) continue;
+    if (id === 'hover') continue;
+    drops.push({ item: id as ItemKind, amount: ws.magSize > 0 ? rounds : -1 });
   }
   if (p.hasJetpack && p.jetFuel > 0.05) drops.push({ item: 'jetpack', amount: Math.round(p.jetFuel * 100) });
   if (p.grenades > 0) drops.push({ item: 'sticky', amount: p.grenades });
@@ -875,17 +953,21 @@ export function applyItem(cfg: SimConfig, p: Player, item: ItemKind, amount: num
     }
     default: {
       // a weapon: new ones are added; ammo weapons you already have are refilled
+      // Ammo weapons: `amount` is total rounds (magazine first, then spares).
       const w = WEAPON_IDS.indexOf(item as WeaponId);
       const st = cfg.weapons[item as WeaponId];
-      const ammo = full ? st.ammoMax : Math.min(st.ammoMax, amount);
+      const total = full ? st.magSize + st.ammoMax : Math.min(st.magSize + st.ammoMax, amount);
       if (!p.owned.includes(w)) {
         p.owned = [...p.owned, w].sort((a, b) => a - b);
-        p.ammo[w] = ammo;
+        p.mag[w] = Math.min(st.magSize, total);
+        p.ammo[w] = total - p.mag[w];
         p.heat[w] = 0;
         return true;
       }
-      if (st.ammoMax > 0 && p.ammo[w] < st.ammoMax) {
-        p.ammo[w] = Math.max(p.ammo[w], ammo);
+      const have = p.mag[w] + p.ammo[w];
+      if (st.magSize > 0 && have < st.magSize + st.ammoMax) {
+        const after = Math.min(st.magSize + st.ammoMax, Math.max(have, total));
+        p.ammo[w] = after - p.mag[w]; // tops up the spares; reload as usual
         return true;
       }
       return false;
@@ -941,6 +1023,9 @@ function updateVitals(state: SimState, p: Player) {
   p.heat = WEAPON_IDS.map(() => 0);
   p.overheatUntil = WEAPON_IDS.map(() => 0);
   p.ammo = WEAPON_IDS.map(() => 0);
+  p.mag = WEAPON_IDS.map(() => 0);
+  p.reloadUntil = 0;
+  p.burstUntil = 0;
   p.charge = 0;
   p.holdTicks = 0;
   p.needRelease = false;

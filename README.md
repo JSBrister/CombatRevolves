@@ -29,9 +29,13 @@ hover gun, bots) only appears while paused.
 | 1 | Plasma rifle | Automatic, overheats. Starting weapon. |
 | 2 | Plasma pistol | Tap to fire, hold to overcharge (strips shields). Starting weapon. |
 | 3 | Red plasma rifle | Faster bolts, overheats sooner. |
-| 4 | Fuel rod launcher | 10 rounds; slow bolt that explodes on impact with its own blast settings. |
-| 5 | Pulse laser | Hold to charge (you move and aim slowly meanwhile); fires a ~3 km/s bolt. |
+| 4 | Fuel rod launcher | 3-round magazine plus 9 spares; reload with R (or automatically). Slow bolt that explodes on impact with its own blast settings. |
+| 5 | Plasma bolt cannon | The "sniper": one fast (65 m/s), hard-hitting magenta bolt, then it overheats for ~1 s. |
+| 6 | Laconic Laser | Superweapon: hold to charge (1.2 s), then it streams very fast red bolts for 0.5 s. You move and aim slowly the whole time. Most of a stream kills. |
 | — | Hover gun | Debug only: fires a bolt at rest in the inertial frame. |
+
+Every hit gives a small kick along the bolt's path (tunable per weapon). **Q** is a melee shove with any weapon: short
+range, a lot of knockback. Campaign enemies never run out of ammo but still have to reload.
 
 Items float at fixed spots (respawning after 25 s): health, sticky and bouncing grenade refills (max 4 of each), the
 special weapons, and a jetpack (about 4 s of thrust). Picking up something you already have refills it; if it would do
@@ -70,14 +74,15 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 - **Jumping** works for 0.12 s after leaving a surface ("coyote time"). In the air you get a little control, but only up to walk speed.
 - **Weapons are data:** every stat lives in `config.weapons` (per weapon), so the debug panel can tune them live and the state still serializes.
 - **Impact damage:** hitting a surface faster than 22 m/s (normal component) hurts; a knock into a wall credits whoever hit you.
-- **Levels** are data (`levels.ts`): a ring size and seed fix the layout; enemies are placed by angle and z, or on a staircase lookout. `level.shape` is the seam for other kinds of world (only `'ring'` exists): the collision shape, force field and renderer switch on it.
+- **Levels** are data (`levels.ts`): a ring size and seed fix the layout; enemies are placed by angle and z, or on a ramp's lookout platform; a placement that lands inside cover is nudged clear. `level.shape` is the seam for other kinds of world (only `'ring'` exists): the collision shape, force field and renderer switch on it.
 - **Campaign rules:** teams (you vs enemies) with friendly fire off, no respawns, won when every enemy is dead, lost when you die. Enemy types differ in size (their hitbox scales too), colour, health, speed, weapon, range, accuracy and behaviour (chase, strafe, hold).
-- **Ring size** scales the map: rim walls are capped at 40% of the radius, staircases and cover shrink on small rings.
+- **Ring size** scales the map: rim walls are capped at 40% of the radius, ramps and cover shrink on small rings.
 - **Obstacle boxes** are axis-aligned in the *local frame* of their ring angle, not in world XYZ. World-aligned boxes would sit crooked on a curved floor.
 - **Inputs:** players without a command for a tick repeat their last one, as a server would. Edge-triggered actions (jump, pistol tap, grenade release) use `prevButtons` stored in state, so they replay exactly.
 - **Snapshots** use the binary encoder, not JSON, because JSON turns −0 into 0. That can flip an `atan2` branch and break bit-exact replay.
 - **Rim walls** vary in height per angular sector (full 15 m, 4 m, or a 1 m curb with orange tops). The SDF evaluates the point's own sector plus any taller neighbours, using the exact distance to the neighbour's edge. Past a curb there is only space: anything more than `fallKillDistance` (default 25 m) off the ring band is dead.
-- **Staircases:** each step is a solid local-frame box 2.2 m higher than the last (one jump per step), up to an 11 m lookout where you weigh about 0.88 g. Alternate staircases climb spinward and antispinward.
+- **Ramps:** one tilted slab each (boxes can tilt about the ring's axis), up to an 11 m lookout where you weigh about 0.88 g. The floor curves up away from a straight slab, so its ends are raised to match exactly: the low end meets the floor and the top meets the platform flush. Alternate ramps climb spinward and antispinward.
+- **Ammo:** `magSize` rounds in the magazine, `ammoMax` spares; reloading takes `reloadTime`. Heat-based weapons have `magSize` 0.
 - **Bouncing grenades** (yellow) share one sub-stepped sphere mover with the props and with their own trajectory preview. Their fuse starts at the throw. They bounce off players and props relative to the target's velocity.
 - **Owner self-hits:** a projectile is `armed` against its owner once it has left the owner's capsule. The test fires a bolt antispinward at the local rim speed, and it hits the shooter in the back ≈ 2π/ω later.
 

@@ -7,14 +7,14 @@ import { makeGun, makePickup } from './models';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
 const PICKUP_GLOW: Record<string, number> = {
-  health: 0xff6060, sticky: 0x7fb6ff, bounce: 0xffd23a, redRifle: 0xff4a3a, launcher: 0x9dff3a, laser: 0xbffcff, jetpack: 0xffa040,
+  health: 0xff6060, sticky: 0x7fb6ff, bounce: 0xffd23a, redRifle: 0xff4a3a, launcher: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a, jetpack: 0xffa040,
   rifle: 0x55c8ff, pistol: 0x8dff5a,
 };
 
 export type PosMap = Map<number, Vec3>;
 
 const BOLT_COLORS: Record<string, number> = {
-  rifle: 0x55c8ff, redRifle: 0xff4a3a, pistol: 0x8dff5a, overcharge: 0x5dff7a, fuelRod: 0x9dff3a, laser: 0xbffcff,
+  rifle: 0x55c8ff, redRifle: 0xff4a3a, pistol: 0x8dff5a, overcharge: 0x5dff7a, fuelRod: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a,
   hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a,
 };
 
@@ -83,6 +83,9 @@ interface PlayerView {
   gunHolder: THREE.Group; // floating gun beside the player, pitched with their aim
   gunWeapon: number;
   flame: THREE.Sprite; // jetpack exhaust
+  shell: THREE.Mesh; // shield bubble, a little outside the body
+  shellGlow: number; // 0..1, decays
+  prevShield: number;
 }
 
 interface PickupView {
@@ -127,16 +130,36 @@ export class EntityViews {
     this.viewModel.rotation.y = Math.PI / 2; // gun +X -> camera forward (-Z)
   }
 
-  private beams: { line: THREE.Line; t: number }[] = [];
+  private beams: { line: THREE.Mesh; t: number }[] = [];
 
-  /** A brief fading beam for the pulse laser (its bolt lands within a tick or two, too fast for a trail). */
-  addBeam(from: Vec3, to: Vec3) {
-    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...from), new THREE.Vector3(...to)]);
-    const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xbffcff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    line.frustumCulled = false;
-    this.root.add(line);
-    this.beams.push({ line, t: 1 });
+  /** If true, the local player's own shield bubble is drawn (free-fly / inertial views). */
+  showSelf = false;
+  private splashes: { s: THREE.Sprite; t: number; size: number }[] = [];
+
+  /** A quick glow where a shot lands (or a shield pops). */
+  burst(pos: Vec3, color: number, size: number) {
+    const s = this.makeGlow(color, size * 0.3);
+    s.position.set(pos[0], pos[1], pos[2]);
+    this.root.add(s);
+    this.splashes.push({ s, t: 1, size });
   }
+
+  /** A brief fading beam (Laconic Laser bolts land within a tick or two: too fast for a trail). Drawn as a glowing rod. */
+  addBeam(from: Vec3, to: Vec3, color = 0xff2a1a) {
+    const a = new THREE.Vector3(...from), b = new THREE.Vector3(...to);
+    const length = a.distanceTo(b);
+    if (length < 0.01) return;
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, length, 8, 1, true), mat);
+    rod.position.copy(a).add(b).multiplyScalar(0.5);
+    rod.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+    rod.frustumCulled = false;
+    this.root.add(rod);
+    this.beams.push({ line: rod, t: 1 });
+  }
+
+  jab = 0; // 0..1, set to 1 on a melee
+  reloadDip = 0; // 0..1 while reloading
 
   /** Show the local player's current weapon in first person. */
   setViewWeapon(weapon: number, visible: boolean) {
@@ -200,7 +223,7 @@ export class EntityViews {
 
   private createProj(id: number, kind: string, radius: number): ProjView {
     const color = BOLT_COLORS[kind] ?? 0xffffff;
-    const sprite = this.makeGlow(color, radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 7 : kind === 'laser' ? 12 : 6));
+    const sprite = this.makeGlow(color, radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 7 : kind === 'cannon' || kind === 'laconic' ? 9 : 6));
     const core = new THREE.Mesh(new THREE.SphereGeometry(radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 1 : 0.45), 12, 8), new THREE.MeshBasicMaterial({ color: kind === 'grenade' ? 0xcfe4ff : kind === 'bounceGrenade' ? 0xfff0a0 : 0xffffff, fog: false }));
     const marker = this.makeGlow(color, Math.max(1.5, this.rs.starRadius / 1500), LAYER_INERTIAL_ONLY);
     const max = Math.max(4, Math.round(this.trailTicks / 2));
@@ -226,7 +249,12 @@ export class EntityViews {
     const flame = this.makeGlow(0xff8a2a, 0.9);
     flame.position.set(-PLAYER_RADIUS - 0.1, -0.35, 0);
     flame.visible = false;
-    group.add(body, visor, pack, gunHolder, flame);
+    // shield bubble: a slightly larger capsule, additive, normally invisible
+    const shell = new THREE.Mesh(
+      new THREE.CapsuleGeometry(PLAYER_RADIUS * 1.25, PLAYER_HALF_SEG * 2 + 0.1, 6, 16),
+      new THREE.MeshBasicMaterial({ color: 0x6ad0ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    group.add(body, visor, pack, gunHolder, flame, shell);
     if (kind === 'dummy') {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.05, 6, 20), new THREE.MeshBasicMaterial({ color: 0xff3020 }));
       ring.rotation.y = Math.PI / 2;
@@ -236,7 +264,7 @@ export class EntityViews {
     if (id === this.localId) group.traverse((o) => o.layers.set(LAYER_SELF));
     const marker = this.makeGlow(kind === 'human' ? 0x66aaff : 0xff6644, Math.max(4, this.rs.starRadius / 600), LAYER_INERTIAL_ONLY);
     this.root.add(group, marker);
-    const v = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, flame };
+    const v = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, flame, shell, shellGlow: 0, prevShield: pl.shield };
     this.players.set(id, v);
     return v;
   }
@@ -290,10 +318,21 @@ export class EntityViews {
       v.gunHolder.rotation.z = p.pitch; // tip the gun up/down with the aim
       v.flame.visible = p.jetting;
       if (p.jetting) v.flame.scale.setScalar(0.7 + Math.random() * 0.5);
+      // Shields: the bubble flashes on hits, bursts when the shield breaks,
+      // and shimmers while it recharges. Hits on bare health flash the body red.
       const mat = v.body.material as THREE.MeshStandardMaterial;
       v.shieldFlash = Math.max(0, v.shieldFlash - dtReal * 4);
-      const shieldFrac = p.shield / Math.max(1, p.maxShield);
-      mat.emissive.setRGB(0.2 * v.shieldFlash, 0.5 * v.shieldFlash * (shieldFrac > 0 ? 1 : 0.2), 1.0 * v.shieldFlash * (shieldFrac > 0 ? 1 : 0.1));
+      if (p.shield <= 0 && v.prevShield > 0) { v.shellGlow = 1.6; this.burst(pos, 0x6ad0ff, 1.6); }
+      const recharging = p.shield > v.prevShield && p.shield < p.maxShield;
+      if (p.shield > 0 && v.prevShield <= 0) this.burst(pos, 0x9ae8ff, 1.0); // shield back up
+      v.prevShield = p.shield;
+      v.shellGlow = Math.max(0, v.shellGlow - dtReal * 3);
+      const hitGlow = p.shield > 0 ? v.shieldFlash : 0;
+      const shimmer = recharging ? 0.18 + 0.12 * Math.sin(performance.now() * 0.02) : 0;
+      (v.shell.material as THREE.MeshBasicMaterial).opacity = Math.min(0.85, Math.max(hitGlow * 0.7, v.shellGlow * 0.5, shimmer));
+      v.shell.visible = p.id !== this.localId || this.showSelf;
+      const bare = p.shield <= 0 ? v.shieldFlash : 0;
+      mat.emissive.setRGB(0.9 * bare, 0.1 * bare, 0.05 * bare);
     }
     for (const [id, v] of this.players) if (!seenP.has(id)) { v.group.removeFromParent(); v.marker.removeFromParent(); this.players.delete(id); }
 
@@ -398,10 +437,22 @@ export class EntityViews {
 
     for (const b of this.beams) {
       b.t -= dtReal * 2.5;
-      (b.line.material as THREE.LineBasicMaterial).opacity = Math.max(0, b.t);
+      (b.line.material as THREE.MeshBasicMaterial).opacity = Math.max(0, b.t);
       if (b.t <= 0) { b.line.removeFromParent(); b.line.geometry.dispose(); }
     }
     this.beams = this.beams.filter((b) => b.t > 0);
+    for (const sp of this.splashes) {
+      sp.t -= dtReal * 4;
+      const dCam = this.cameraPos.distanceTo(sp.s.position);
+      sp.s.scale.setScalar(Math.min(sp.size * (1.2 - sp.t), dCam * 0.15)); // never swamp the screen
+      sp.s.material.opacity = Math.max(0, sp.t);
+      if (sp.t <= 0) sp.s.removeFromParent();
+    }
+    this.splashes = this.splashes.filter((sp) => sp.t > 0);
+    // first-person gun: jab on melee, dip while reloading
+    this.jab = Math.max(0, this.jab - dtReal * 5);
+    this.viewModel.position.set(0.2, -0.17 - 0.18 * this.reloadDip, -0.42 - 0.25 * Math.sin(this.jab * Math.PI));
+    this.viewModel.rotation.x = -0.6 * this.reloadDip;
     this.flashT = Math.max(0, this.flashT - dtReal * 3);
     this.flashLight.intensity = 60 * this.flashT;
   }

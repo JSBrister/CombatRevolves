@@ -95,9 +95,10 @@ export class RingScene {
     const stairMat = new THREE.MeshStandardMaterial({ map: this.textures.wall, color: 0xd6e2f5, emissive: 0x1c2a40, roughness: 0.6, metalness: 0.15 });
     for (const b of level.boxes) {
       const geo = new THREE.BoxGeometry(2 * b.half[0], 2 * b.half[1], 2 * b.half[2]);
-      const mesh = new THREE.Mesh(geo, b.kind === 'stair' ? stairMat : boxMat);
+      const mesh = new THREE.Mesh(geo, b.kind === 'ramp' ? stairMat : boxMat);
       basisMatrix(m, b.angle, 0, 0);
       mesh.quaternion.setFromRotationMatrix(m);
+      if (b.tilt) mesh.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), b.tilt));
       mesh.position.set(b.center[0], b.center[1], b.center[2]);
       mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat));
       this.level.add(mesh);

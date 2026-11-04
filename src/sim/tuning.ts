@@ -75,13 +75,17 @@ export const defaultConfig = (): SimConfig => ({
   shieldRegenDelay: 4, // shields start recharging this long after a hit (s)
   shieldRegenRate: 35, // shield points per second
   respawnTime: 3, // (s) sandbox only; campaign has no respawns
+  meleeDamage: 40, // melee (Q): a hammer-like shove
+  meleeKnockback: 18, // m/s kick: enough to knock someone off the ring
+  meleeRange: 2.2, // m in front of you
+  meleeCooldown: 0.8, // s
   friendlyFire: true, // campaign turns this off so enemies don't shoot each other
 });
 
 /** Fills in the fields a weapon doesn't use. */
 const w = (o: Partial<WeaponStats>): WeaponStats => ({
   muzzle: 25, damage: 7, shieldDamage: 7, interval: 0.1, heatPerShot: 0, coolRate: 0.4, overheatLock: 2.5,
-  radius: 0.12, lifetime: 60, ammoMax: 0, chargeTime: 0,
+  radius: 0.12, lifetime: 60, ammoMax: 0, magSize: 0, reloadTime: 0, knockback: 0.5, chargeTime: 0, burstTime: 0,
   ocMuzzle: 0, ocDamage: 0, ocShieldDamage: 0, ocHeat: 0,
   blastRadius: 0, blastDamage: 0, blastKnockback: 0, chargeMoveScale: 1, chargeLookScale: 1, ...o,
 });
@@ -91,26 +95,36 @@ const w = (o: Partial<WeaponStats>): WeaponStats => ({
  *   muzzle        bolt speed relative to the shooter (m/s)
  *   damage        health damage per hit; shieldDamage = damage to shields
  *   interval      seconds between shots
- *   heatPerShot   0..1 of the heat bar per shot (0 = never overheats)
+ *   heatPerShot   0..1 of the heat bar per shot (0 = never overheats; 1 = overheats every shot)
  *   coolRate      heat bar per second when not firing
  *   overheatLock  seconds you're locked out after overheating
  *   radius        bolt size (m), lifetime = how long a bolt lives (s)
- *   ammoMax       0 = unlimited (heat-limited); otherwise rounds
- *   chargeTime    pistol overcharge / laser charge time (s)
+ *   magSize       rounds per magazine; ammoMax = spare rounds you can carry (0 = no ammo, heat only)
+ *   reloadTime    seconds to reload (R, or automatic when the magazine is empty)
+ *   knockback     kick a hit gives an 80 kg player (m/s), along the bolt's path
+ *   chargeTime    pistol overcharge / Laconic Laser charge time (s)
+ *   burstTime     Laconic Laser: how long the stream lasts once charged (s)
  *   oc*           the pistol's overcharged shot
  *   blast*        explosion on impact (fuel rod)
- *   chargeMoveScale / chargeLookScale  laser: movement and aim speed while charging
+ *   chargeMoveScale / chargeLookScale  Laconic Laser: movement and aim speed while charging and firing
  */
 export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
-  rifle: w({ muzzle: 25, damage: 7, shieldDamage: 7, interval: 0.075, heatPerShot: 0.045, coolRate: 0.45, overheatLock: 2.5, radius: 0.12 }),
-  pistol: w({ muzzle: 30, damage: 13, shieldDamage: 13, interval: 0.15, heatPerShot: 0.08, coolRate: 0.3, overheatLock: 2, radius: 0.15,
-    chargeTime: 0.9, ocMuzzle: 14, ocDamage: 20, ocShieldDamage: 120, ocHeat: 0.35 }),
-  redRifle: w({ muzzle: 45, damage: 6, shieldDamage: 6, interval: 0.06, heatPerShot: 0.075, coolRate: 0.5, overheatLock: 3, radius: 0.1 }),
-  launcher: w({ muzzle: 20, damage: 30, shieldDamage: 30, interval: 1.0, radius: 0.3, ammoMax: 10,
-    blastRadius: 5, blastDamage: 100, blastKnockback: 22 }),
-  laser: w({ muzzle: 3000, damage: 110, shieldDamage: 110, interval: 0.4, heatPerShot: 0.5, coolRate: 0.35, overheatLock: 2.5,
-    radius: 0.06, lifetime: 1.5, chargeTime: 0.6, chargeMoveScale: 0.25, chargeLookScale: 0.2 }),
-  hover: w({ muzzle: 0, damage: 10, shieldDamage: 10, interval: 0.125, radius: 0.25 }),
+  rifle: w({ muzzle: 25, damage: 7, shieldDamage: 7, interval: 0.075, heatPerShot: 0.045, coolRate: 0.45, overheatLock: 2.5,
+    radius: 0.12, knockback: 0.6 }),
+  pistol: w({ muzzle: 30, damage: 13, shieldDamage: 13, interval: 0.15, heatPerShot: 0.08, coolRate: 0.3, overheatLock: 2,
+    radius: 0.15, knockback: 1.5, chargeTime: 0.9, ocMuzzle: 14, ocDamage: 20, ocShieldDamage: 120, ocHeat: 0.35 }),
+  redRifle: w({ muzzle: 45, damage: 6, shieldDamage: 6, interval: 0.06, heatPerShot: 0.075, coolRate: 0.5, overheatLock: 3,
+    radius: 0.1, knockback: 0.5 }),
+  launcher: w({ muzzle: 20, damage: 30, shieldDamage: 30, interval: 0.6, radius: 0.3, knockback: 4,
+    magSize: 3, ammoMax: 9, reloadTime: 2.2, blastRadius: 5, blastDamage: 100, blastKnockback: 22 }),
+  // "sniper": one hard, fast, magenta bolt, then it overheats briefly
+  cannon: w({ muzzle: 65, damage: 75, shieldDamage: 75, interval: 0.2, heatPerShot: 1, coolRate: 1.5, overheatLock: 1.1,
+    radius: 0.28, knockback: 7 }),
+  // superweapon: charge, then a half-second stream of very fast red bolts
+  laconic: w({ muzzle: 3000, damage: 17, shieldDamage: 17, interval: 1 / 30, heatPerShot: 1 / 15, coolRate: 0.5,
+    overheatLock: 3, radius: 0.22, lifetime: 1, knockback: 0.6, chargeTime: 1.2, burstTime: 0.5,
+    chargeMoveScale: 0.25, chargeLookScale: 0.25 }),
+  hover: w({ muzzle: 0, damage: 10, shieldDamage: 10, interval: 0.125, radius: 0.25, knockback: 1 }),
 });
 
 // ---------------------------------------------------------------- enemies
@@ -127,7 +141,7 @@ export interface EnemyType {
   health: number;
   shield: number;
   speedScale: number; // multiplies run speed
-  weapon: WeaponId; // its only weapon (dropped when it dies, if not a starting one)
+  weapon: WeaponId; // its only weapon (dropped when it dies, if not a starting one); infinite spare ammo
   grenades: number; // sticky
   bounceGrenades: number;
   behaviour: Behaviour;
@@ -153,7 +167,7 @@ export const ENEMY_TYPES: Record<string, EnemyType> = {
     grenades: 0, bounceGrenades: 0, behaviour: 'chase', range: 45, aimError: 0.05,
   },
   sniper: {
-    name: 'Sniper', color: 0x3ad0d0, size: 0.95, health: 60, shield: 30, speedScale: 0, weapon: 'laser',
-    grenades: 0, bounceGrenades: 0, behaviour: 'hold', range: 120, aimError: 0.015,
+    name: 'Sniper', color: 0x3ad0d0, size: 0.95, health: 60, shield: 30, speedScale: 0, weapon: 'cannon',
+    grenades: 0, bounceGrenades: 0, behaviour: 'hold', range: 90, aimError: 0.015,
   },
 };

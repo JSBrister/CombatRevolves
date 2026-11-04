@@ -1,4 +1,4 @@
-import { generateLevel, spawnPosition } from './level';
+import { generateLevel, levelSdf, spawnPosition } from './level';
 import { localBasis } from './physics';
 import { rngRange } from './rng';
 import { defaultConfig } from './tuning';
@@ -106,7 +106,8 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
     lastDamageTick: -1e9, lastAttacker: -1,
     weapon: 0, owned: [...STARTING_WEAPONS],
     heat: WEAPON_IDS.map(() => 0), overheatUntil: WEAPON_IDS.map(() => 0), ammo: WEAPON_IDS.map(() => 0),
-    charge: 0, holdTicks: 0, needRelease: false,
+    mag: WEAPON_IDS.map(() => 0), reloadUntil: 0, infiniteAmmo: false,
+    charge: 0, holdTicks: 0, needRelease: false, burstUntil: 0, meleeReadyTick: 0,
     fireReadyTick: 0, hasJetpack: false, jetFuel: 0, jetting: false, lastGroundTick: -1e9, lastJumpTick: -1e9,
     grenades: MAX_GRENADES, bounceGrenades: MAX_GRENADES, grenadeReadyTick: 0,
     prevButtons: 0, lastInput: neutralInput(id, 0),
@@ -133,4 +134,29 @@ export function addPickup(state: SimState, item: ItemKind, pos: Vec3, amount: nu
   const id = allocId(state);
   state.pickups.push({ id, type: 'pickup', item, pos, amount, respawnTicks, activeAt: state.tick, expireTick });
   return id;
+}
+
+/**
+ * A spot near `pos` where a capsule of this size fits (fixed placements can
+ * land inside cover). Searches outward along the floor; returns `pos` if clear.
+ */
+export function freeSpotNear(state: SimState, pos: Vec3, size: number): Vec3 {
+  const b = localBasis(pos);
+  const r = PLAYER_RADIUS * size, h = PLAYER_HALF_SEG * size;
+  const fits = (q: Vec3) => [-1, 0, 1].every((k) => {
+    const c: Vec3 = [q[0] + b.up[0] * k * h, q[1] + b.up[1] * k * h, q[2]];
+    return levelSdf(state.level, state.config, c).d - r > 0.05;
+  });
+  if (fits(pos)) return pos;
+  for (let ring = 1; ring <= 16; ring++) {
+    const dist = ring * 0.5;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const q: Vec3 = [
+        pos[0] + (b.spin[0] * Math.cos(a)) * dist, pos[1] + (b.spin[1] * Math.cos(a)) * dist, pos[2] + Math.sin(a) * dist,
+      ];
+      if (fits(q)) return q;
+    }
+  }
+  return pos;
 }

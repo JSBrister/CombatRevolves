@@ -4,7 +4,7 @@ import {
   addPlayer, addProp, botInput, createState, decode, detonate, encode, falloff, hash01, integrate,
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
-  WEAPON_HOVER, WEAPON_LASER, WEAPON_LAUNCHER, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
+  isLaconicBusy, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
   LEVELS, levelById, startLevel, add, scale, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
@@ -13,6 +13,9 @@ const run = (s: SimState, n: number, inputs: (s: SimState) => InputCmd[] = () =>
   for (let i = 0; i < n; i++) step(s, inputs(s), s.tick);
 };
 const bytesEqual = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
+const cmdFor = (s: SimState, id: number, o: Partial<InputCmd> = {}): InputCmd => ({
+  playerId: id, tick: s.tick, moveX: 0, moveY: 0, yaw: 0, pitch: 0, buttons: 0, weapon: 0, ...o,
+});
 const angleOf = (p: Vec3) => Math.atan2(p[1], p[0]);
 
 describe('1. rest', () => {
@@ -492,46 +495,31 @@ describe('13. tunable movement', () => {
   });
 });
 
-describe('14. staircases', () => {
-  const setup = () => {
-    const s = createState({ seed: 3, props: false });
+describe('14. ramps', () => {
+  it('a ramp can be walked (no jumping) up to its 11 m lookout', () => {
+    const s = createState({ seed: 3, props: false, pickups: false });
     const id = addPlayer(s, 'human', 'P');
     const p = s.players[0];
-    // first staircase climbs spinward from its start; stand 2 m before the first step
     const R = s.config.R;
-    const steps = s.level.boxes.filter((b) => b.kind === 'stair');
-    expect(steps.length).toBeGreaterThanOrEqual(12);
-    const first = steps[0];
+    const pieces = s.level.boxes.filter((b) => b.kind === 'ramp' && b.tilt !== 0);
+    expect(pieces.length).toBeGreaterThanOrEqual(2);
+    // the first ramp climbs spinward: start 2 m before its lowest piece
+    const first = pieces[0];
+    expect(first.tilt).toBeGreaterThan(0);
     const a = first.angle - (first.half[0] + 2) / R;
     p.pos = [(R - 0.9) * Math.cos(a), (R - 0.9) * Math.sin(a), first.center[2]];
     run(s, 10);
     const height = () => R - Math.hypot(p.pos[0], p.pos[1]) - 0.9;
-    const cmd = (b: number): InputCmd => ({ playerId: id, tick: s.tick, moveX: 0, moveY: 1, yaw: 0, pitch: 0, buttons: b, weapon: 0 });
-    return { s, p, height, cmd };
-  };
-  it('cannot be walked up', () => {
-    const { s, height, cmd } = setup();
-    let maxH = 0;
-    for (let i = 0; i < 120 * 5; i++) { step(s, [cmd(0)], s.tick); maxH = Math.max(maxH, height()); }
-    expect(maxH).toBeLessThan(0.5);
-  });
-  it('can be climbed to the top platform with one jump per step', () => {
-    const { s, p, height, cmd } = setup();
-    let maxH = 0;
-    for (let i = 0; i < 120 * 12; i++) {
-      // walk forward; jump whenever on the ground (tap)
-      const jump = p.grounded && i % 2 === 0 ? BTN_JUMP : 0;
-      step(s, [cmd(jump)], s.tick);
+    let maxH = 0, airborne = 0;
+    for (let i = 0; i < 120 * 6; i++) {
+      step(s, [cmdFor(s, id, { moveY: 1, yaw: 0 })], s.tick);
       maxH = Math.max(maxH, height());
+      if (!p.grounded) airborne++;
+      if (height() > 10.9) break;
     }
-    expect(maxH).toBeGreaterThan(10.5);
+    expect(maxH).toBeGreaterThan(10.9);
+    expect(airborne).toBeLessThan(20); // walked, didn't bounce up
   });
-});
-
-// ------------------------------------------------------------ quick wins (round 3)
-
-const cmdFor = (s: SimState, id: number, o: Partial<InputCmd> = {}): InputCmd => ({
-  playerId: id, tick: s.tick, moveX: 0, moveY: 0, yaw: 0, pitch: 0, buttons: 0, weapon: 0, ...o,
 });
 
 describe('15. running and jumping (regression)', () => {
@@ -612,43 +600,127 @@ describe('17. weapons', () => {
     expect(applyItem(s.config, p, item as never, -1)).toBe(true);
     return p;
   };
-  it('fuel rod launcher: 10 rounds, explodes on impact, refilled by picking one up', () => {
+  it('fuel rod launcher: 3-round magazine, 9 spares, reloads, explodes on impact', () => {
     const s = empty();
     const id = addPlayer(s, 'human', 'P');
     run(s, 20);
     const p = give(s, 'launcher');
-    expect(p.ammo[WEAPON_LAUNCHER]).toBe(10);
-    let shots = 0, booms = 0;
-    for (let i = 0; i < 120 * 20; i++) {
-      const fire = i % 130 === 10 ? BTN_FIRE : 0; // one tap per ~1.1 s
+    expect([p.mag[WEAPON_LAUNCHER], p.ammo[WEAPON_LAUNCHER]]).toEqual([3, 9]);
+    let shots = 0, booms = 0, reloads = 0, firstReloadAt = -1;
+    for (let i = 0; i < 120 * 30; i++) {
+      const fire = i % 20 === 10 ? BTN_FIRE : 0; // mash the trigger
       step(s, [cmdFor(s, id, { weapon: WEAPON_LAUNCHER, pitch: -0.6, buttons: fire })], s.tick);
       shots += s.events.filter((e) => e.type === 'fire' && e.kind === 'fuelRod').length;
       booms += s.events.filter((e) => e.type === 'explode').length;
+      if (s.events.some((e) => e.type === 'reload')) { reloads++; if (firstReloadAt < 0) firstReloadAt = shots; }
     }
-    expect(shots).toBe(10);
-    expect(booms).toBe(10);
-    expect(p.ammo[WEAPON_LAUNCHER]).toBe(0);
-    expect(applyItem(s.config, p, 'launcher', -1)).toBe(true);
-    expect(p.ammo[WEAPON_LAUNCHER]).toBe(10);
+    expect(firstReloadAt).toBe(3); // a magazine is 3 shots
+    expect(reloads).toBe(3);
+    expect(shots).toBe(12);
+    expect(booms).toBe(12);
+    expect([p.mag[WEAPON_LAUNCHER], p.ammo[WEAPON_LAUNCHER]]).toEqual([0, 0]);
+    expect(applyItem(s.config, p, 'launcher', -1)).toBe(true); // refill
+    expect(p.mag[WEAPON_LAUNCHER] + p.ammo[WEAPON_LAUNCHER]).toBe(12);
     expect(applyItem(s.config, p, 'launcher', -1)).toBe(false); // already full: leave it
   });
-  it('pulse laser: charges first, slows you down, then fires a ~3 km/s bolt', () => {
+  it('R reloads a part-empty magazine; spares top it up', () => {
     const s = empty();
     const id = addPlayer(s, 'human', 'P');
     run(s, 20);
-    const p = give(s, 'laser');
-    run(s, 60, () => [cmdFor(s, id, { weapon: WEAPON_LASER })]);
-    const chargeTicks = Math.round(s.config.weapons.laser.chargeTime / DT);
-    let firedAt = -1, maxSpeed = 0;
-    for (let i = 0; i < chargeTicks + 10 && firedAt < 0; i++) {
-      step(s, [cmdFor(s, id, { weapon: WEAPON_LASER, moveY: 1, buttons: BTN_FIRE })], s.tick);
-      if (i > 20) maxSpeed = Math.max(maxSpeed, Math.hypot(...p.vel));
-      if (s.bolts.some((b) => b.kind === 'laser')) firedAt = i;
+    const p = give(s, 'launcher');
+    run(s, 60, () => [cmdFor(s, id, { weapon: WEAPON_LAUNCHER })]);
+    step(s, [cmdFor(s, id, { weapon: WEAPON_LAUNCHER, pitch: -0.6, buttons: BTN_FIRE })], s.tick);
+    expect(p.mag[WEAPON_LAUNCHER]).toBe(2);
+    step(s, [cmdFor(s, id, { weapon: WEAPON_LAUNCHER, buttons: BTN_RELOAD })], s.tick);
+    expect(s.events.some((e) => e.type === 'reload')).toBe(true);
+    run(s, Math.round(s.config.weapons.launcher.reloadTime / DT) + 2, () => [cmdFor(s, id, { weapon: WEAPON_LAUNCHER })]);
+    expect([p.mag[WEAPON_LAUNCHER], p.ammo[WEAPON_LAUNCHER]]).toEqual([3, 8]);
+  });
+  it('campaign enemies never run dry but still reload', () => {
+    const { state, botIds } = startLevel(levelById('c4')!);
+    const heavy = state.players.find((p) => p.enemyType === 'heavy')!;
+    expect(heavy.infiniteAmmo).toBe(true);
+    let reloads = 0, shots = 0;
+    for (let i = 0; i < 120 * 40; i++) {
+      // fire the heavy's launcher as fast as it allows
+      const cmds = botIds.map((b) => (b === heavy.id ? cmdFor(state, b, { weapon: WEAPON_LAUNCHER, pitch: -0.5, buttons: i % 2 ? BTN_FIRE : 0 }) : cmdFor(state, b)));
+      step(state, cmds, state.tick);
+      reloads += state.events.filter((e) => e.type === 'reload' && e.id === heavy.id).length;
+      shots += state.events.filter((e) => e.type === 'fire' && e.owner === heavy.id).length;
     }
-    expect(firedAt).toBeGreaterThanOrEqual(chargeTicks - 2);
-    expect(maxSpeed).toBeLessThan(s.config.walkSpeed * s.config.weapons.laser.chargeMoveScale + 0.5);
-    const b = s.bolts.find((q) => q.kind === 'laser')!;
-    expect(Math.hypot(...b.vel)).toBeGreaterThan(2900);
+    expect(shots).toBeGreaterThan(20); // far more than 3 + 9
+    expect(reloads).toBeGreaterThanOrEqual(Math.floor(shots / 3) - 1);
+  });
+  it('plasma bolt cannon: one fast, hard shot, then a short overheat', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    run(s, 20);
+    const p = give(s, 'cannon');
+    run(s, 40, () => [cmdFor(s, id, { weapon: WEAPON_CANNON })]);
+    step(s, [cmdFor(s, id, { weapon: WEAPON_CANNON, buttons: BTN_FIRE })], s.tick);
+    const b = s.bolts.find((q) => q.kind === 'cannon')!;
+    expect(Math.hypot(...b.vel)).toBeGreaterThan(2 * s.config.weapons.rifle.muzzle);
+    expect(b.damage).toBeGreaterThan(5 * s.config.weapons.rifle.damage);
+    expect(s.events.some((e) => e.type === 'overheat')).toBe(true);
+    let next = -1;
+    for (let i = 0; i < 600 && next < 0; i++) {
+      step(s, [cmdFor(s, id, { weapon: WEAPON_CANNON, buttons: i % 2 ? BTN_FIRE : 0 })], s.tick);
+      if (s.events.some((e) => e.type === 'fire')) next = i;
+    }
+    expect(Math.abs(next * DT - s.config.weapons.cannon.overheatLock)).toBeLessThan(0.1);
+    void p;
+  });
+  it('Laconic Laser: charges, then streams for half a second, slowed; a full stream kills', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const vid = addPlayer(s, 'human', 'Victim');
+    run(s, 20);
+    const p = give(s, 'laconic');
+    const victim = s.players.find((q) => q.id === vid)!;
+    run(s, 40, () => [cmdFor(s, id, { weapon: WEAPON_LACONIC })]);
+    const st = s.config.weapons.laconic;
+    let firstShot = -1, shots = 0, maxSpeed = 0, hitsOnVictim = 0;
+    // aim at the victim (stand-in for "taking the whole stream")
+    for (let i = 0; i < Math.round((st.chargeTime + st.burstTime + 0.5) / DT); i++) {
+      const aim = aimAt(addScaled(p.pos, localBasis(p.pos).up, 0.7), victim.pos);
+      step(s, [cmdFor(s, id, { weapon: WEAPON_LACONIC, moveY: 1, yaw: aim.yaw, pitch: aim.pitch, buttons: BTN_FIRE }), cmdFor(s, vid)], s.tick);
+      const n = s.events.filter((e) => e.type === 'fire' && e.owner === id).length;
+      if (n && firstShot < 0) firstShot = i;
+      shots += n;
+      hitsOnVictim += s.events.filter((e) => e.type === 'hit' && e.target === vid).length;
+      if (i > 20 && isLaconicBusy(p, s.tick)) maxSpeed = Math.max(maxSpeed, Math.hypot(...p.vel));
+    }
+    expect(firstShot * DT).toBeGreaterThan(st.chargeTime - 0.05);
+    expect(shots).toBeGreaterThanOrEqual(Math.floor(st.burstTime / st.interval) - 1);
+    expect(maxSpeed).toBeLessThan(s.config.sprintSpeed * st.chargeMoveScale + 0.5);
+    expect(victim.alive).toBe(false);
+    expect(hitsOnVictim).toBeGreaterThan(5);
+  });
+  it('every hit gives a small, tunable kick along the bolt', () => {
+    const s = empty();
+    addPlayer(s, 'human', 'P');
+    run(s, 20);
+    const p = s.players[0];
+    p.vel = [0, 0, 0];
+    const b = localBasis(p.pos);
+    s.config.weapons.cannon.knockback = 10;
+    spawnBolt(s, -1, 'cannon', add(p.pos, scale(b.axial, -3)), scale(b.axial, 60));
+    for (let i = 0; i < 20 && !s.events.some((e) => e.type === 'hit'); i++) step(s, [], s.tick);
+    expect(p.vel[2]).toBeGreaterThan(8); // checked on the tick of the hit
+  });
+  it('melee shoves whoever is in front of you, hard', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const vid = addPlayer(s, 'human', 'V');
+    run(s, 20);
+    const p = s.players[0];
+    const v = s.players.find((q) => q.id === vid)!;
+    const b = localBasis(p.pos);
+    v.pos = add(p.pos, scale(b.spin, 1.5)); // right in front (yaw 0 = spinward)
+    step(s, [cmdFor(s, id, { buttons: BTN_MELEE }), cmdFor(s, vid)], s.tick);
+    expect(s.events.some((e) => e.type === 'melee' && e.target === vid)).toBe(true);
+    expect(dot(v.vel, b.spin)).toBeGreaterThan(s.config.meleeKnockback * 0.8);
+    expect(v.health + v.shield).toBeLessThan(170);
   });
   it('red rifle overheats in fewer shots than the blue one', () => {
     const shotsToOverheat = (weaponItem: string | null, weapon: number) => {
@@ -674,7 +746,7 @@ describe('17. weapons', () => {
     const s = empty();
     const id = addPlayer(s, 'human', 'P');
     const p = s.players[0];
-    step(s, [cmdFor(s, id, { weapon: WEAPON_LASER })], s.tick);
+    step(s, [cmdFor(s, id, { weapon: WEAPON_LACONIC })], s.tick);
     expect(p.weapon).toBe(0);
     step(s, [cmdFor(s, id, { weapon: WEAPON_HOVER })], s.tick);
     expect(p.weapon).toBe(0);
@@ -716,7 +788,8 @@ describe('18. pickups, drops and the jetpack', () => {
     run(s, 20);
     const p = s.players[0];
     applyItem(s.config, p, 'launcher', -1);
-    p.ammo[WEAPON_LAUNCHER] = 3;
+    p.mag[WEAPON_LAUNCHER] = 1;
+    p.ammo[WEAPON_LAUNCHER] = 2; // 3 rounds in total go into the drop
     p.grenades = 2;
     p.bounceGrenades = 0;
     p.pos = addScaled(p.pos, localBasis(p.pos).up, 5); // die in mid-air: drops land on the floor below
@@ -756,7 +829,11 @@ describe('19. ring size range', () => {
       const s = createState({ seed: 4, config: { R } });
       const id = addPlayer(s, 'human', 'P');
       const bot = addPlayer(s, 'bot', 'B');
-      for (const b of s.level.boxes) expect(2 * b.half[1]).toBeLessThan(0.45 * R + 0.5);
+      for (const b of s.level.boxes) {
+        // how far the box's top reaches above the floor (ramps are buried deep, so measure the top)
+        const top = s.config.R - Math.hypot(b.center[0], b.center[1]) + b.half[1] * Math.cos(b.tilt);
+        expect(top).toBeLessThan(0.45 * R + 0.5);
+      }
       for (const h of [...s.level.wallPos, ...s.level.wallNeg]) expect(h).toBeLessThanOrEqual(0.4 * R);
       run(s, 1200, (st) => [cmdFor(st, id), botInput(st, bot)]);
       const p = s.players.find((q) => q.id === id)!;
@@ -834,9 +911,13 @@ describe('20. levels and campaign', () => {
   it('a campaign level plays out deterministically with enemies attacking you', { timeout: 30000 }, () => {
     const play = () => {
       const { state, localId, botIds } = startLevel(levelById('c1')!);
+      // stand within the first grunts' range and let them come
+      const me = state.players.find((p) => p.id === localId)!;
+      const a = (14 * Math.PI) / 180, R = state.config.R;
+      me.pos = [(R - 0.9) * Math.cos(a), (R - 0.9) * Math.sin(a), 0];
       let hitsOnMe = 0;
       for (let i = 0; i < 120 * 40 && state.outcome === 'playing'; i++) {
-        step(state, [cmdFor(state, localId, { moveY: 1, yaw: 0, buttons: BTN_SPRINT }), ...botIds.map((b) => botInput(state, b))], state.tick);
+        step(state, [cmdFor(state, localId), ...botIds.map((b) => botInput(state, b))], state.tick);
         hitsOnMe += state.events.filter((e) => e.type === 'hit' && e.target === localId).length;
       }
       return { bytes: encode(state), hitsOnMe };

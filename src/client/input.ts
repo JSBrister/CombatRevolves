@@ -2,7 +2,7 @@
 // exclusively through these commands, exactly like bots and (later) remote
 // clients.
 
-import { BTN_AIM, BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, type InputCmd } from '../sim';
+import { BTN_AIM, BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_RELOAD, BTN_SPRINT, PLAYER_WEAPON_SLOTS, type InputCmd } from '../sim';
 
 export class InputSampler {
   keys = new Set<string>();
@@ -29,10 +29,12 @@ export class InputSampler {
       if (e.code === 'Space') this.latched |= BTN_JUMP;
       if (e.code === 'KeyG') this.latched |= BTN_GRENADE;
       if (e.code === 'KeyF') this.latched |= BTN_GRENADE2;
+      if (e.code === 'KeyR') this.latched |= BTN_RELOAD;
+      if (e.code === 'KeyQ') this.latched |= BTN_MELEE;
       if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && this.enabled) this.sprintOn = !this.sprintOn;
       if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5)) - 1;
-        if (n >= 0 && n <= 4) this.weapon = n; // the hover gun (slot 6) is debug-panel only
+        if (n >= 0 && n < PLAYER_WEAPON_SLOTS) this.weapon = n; // the hover gun is debug-panel only
       }
       this.onKey(e.code);
       if (['Space', 'Tab'].includes(e.code)) e.preventDefault();
@@ -57,7 +59,7 @@ export class InputSampler {
 
   /** Step through the weapons we own. */
   cycleWeapon(dir: number) {
-    const list = this.owned.filter((w) => w <= 4);
+    const list = this.owned.filter((w) => w < PLAYER_WEAPON_SLOTS);
     if (!list.length) return;
     const i = list.indexOf(this.weapon);
     this.weapon = list[(i < 0 ? 0 : i + dir + list.length) % list.length];
@@ -78,6 +80,8 @@ export class InputSampler {
     if (this.sprintOn) buttons |= BTN_SPRINT;
     if (k.has('KeyG')) buttons |= BTN_GRENADE;
     if (k.has('KeyF')) buttons |= BTN_GRENADE2;
+    if (k.has('KeyR')) buttons |= BTN_RELOAD;
+    if (k.has('KeyQ')) buttons |= BTN_MELEE;
     const moveY = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
     const moveX = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
     return { playerId, tick, moveX, moveY, yaw: this.yaw, pitch: this.pitch, buttons, weapon: this.weapon };

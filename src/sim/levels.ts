@@ -16,7 +16,7 @@ import { spawnPosition } from './level';
 import { ENEMY_TYPES } from './tuning';
 import { WEAPON_IDS, type GameMode, type SimConfig, type SimState } from './types';
 import { type Vec3, addScaled } from './vec';
-import { addPlayer, createState, standHeight } from './world';
+import { addPlayer, createState, freeSpotNear, standHeight } from './world';
 
 export interface EnemySpawn {
   type: keyof typeof ENEMY_TYPES;
@@ -138,7 +138,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
 
   const localId = addPlayer(state, 'human', 'You');
   const me = state.players.find((p) => p.id === localId)!;
-  me.pos = floorAt(cfg, 0, start.angle, start.z, standHeight(1));
+  me.pos = freeSpotNear(state, floorAt(cfg, 0, start.angle, start.z, standHeight(1)), 1);
   if (campaign) {
     me.team = 0;
     me.canRespawn = false;
@@ -164,12 +164,14 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
       p.owned = [w];
       p.weapon = w;
       p.ammo[w] = cfg.weapons[t.weapon].ammoMax;
+      p.mag[w] = cfg.weapons[t.weapon].magSize;
+      p.infiniteAmmo = true; // never runs dry, but still has to reload
       p.grenades = t.grenades;
       p.bounceGrenades = t.bounceGrenades;
       const top = e.stair !== undefined ? state.level.stairTops[e.stair % Math.max(1, state.level.stairTops.length)] : undefined;
-      p.pos = top
+      p.pos = freeSpotNear(state, top
         ? addScaled(top, localBasis(top).up, standHeight(t.size))
-        : floorAt(cfg, startAngle, e.angle ?? 0, e.z ?? 0, standHeight(t.size));
+        : floorAt(cfg, startAngle, e.angle ?? 0, e.z ?? 0, standHeight(t.size)), t.size);
       // face the player
       p.yaw = (e.angle ?? 0) > 0 ? Math.PI : 0;
       botIds.push(id);

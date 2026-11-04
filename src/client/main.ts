@@ -2,7 +2,7 @@ import GUI from 'lil-gui';
 import * as sim from '../sim';
 import * as THREE from 'three';
 import {
-  DT, LEVELS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LASER, WEAPON_NAMES, addPlayer, applyItem, botInput, createState, damagePlayer,
+  DT, LEVELS, WEAPON_HOVER, WEAPON_IDS, WEAPON_NAMES, isLaconicBusy, addPlayer, applyItem, botInput, createState, damagePlayer,
   eyeOffset, levelById, localBasis, omegaOf, startLevel,
   predictTrajectory, removePlayer, step, viewVectors,
   type BoltKind, type GameMode, type InputCmd, type ItemKind, type LevelDef, type ThrownKind, type SimConfig, type SimEvent, type SimState, type Vec3,
@@ -120,6 +120,10 @@ fP.add(cfg, 'impactDamagePerMs', 0, 30, 0.5).name('impact damage per m/s');
 fP.add(cfg, 'jetThrust', 0, 60, 0.5).name('jetpack thrust (m/s²)');
 fP.add(cfg, 'jetLateral', 0, 30, 0.5).name('jetpack steering (m/s²)');
 fP.add(cfg, 'jetBurn', 0.02, 2, 0.01).name('jetpack burn (tank/s)');
+fP.add(cfg, 'meleeDamage', 0, 300, 1).name('melee damage');
+fP.add(cfg, 'meleeKnockback', 0, 80, 0.5).name('melee knockback (m/s)');
+fP.add(cfg, 'meleeRange', 0.5, 6, 0.1).name('melee range (m)');
+fP.add(cfg, 'meleeCooldown', 0.1, 3, 0.05).name('melee cooldown (s)');
 
 // One folder per weapon, showing only the stats that weapon uses.
 const fW = gui.addFolder('Weapons');
@@ -128,19 +132,22 @@ const STAT_UI: Partial<Record<StatKey, [string, number, number, number]>> = {
   muzzle: ['muzzle speed (m/s)', 1, 5000, 1], damage: ['damage', 0, 300, 1], shieldDamage: ['shield damage', 0, 300, 1],
   interval: ['time between shots (s)', 0.02, 3, 0.01], heatPerShot: ['heat per shot', 0, 1, 0.005],
   coolRate: ['cooling (heat/s)', 0, 3, 0.01], overheatLock: ['overheat lockout (s)', 0, 10, 0.1], radius: ['bolt radius (m)', 0.02, 1, 0.01],
-  ammoMax: ['ammo capacity', 1, 100, 1], chargeTime: ['charge time (s)', 0.05, 5, 0.05],
+  ammoMax: ['spare rounds carried', 0, 100, 1], magSize: ['magazine size', 1, 50, 1], reloadTime: ['reload time (s)', 0.1, 10, 0.1],
+  knockback: ['knockback per hit (m/s)', 0, 40, 0.1], burstTime: ['stream length (s)', 0.05, 3, 0.05],
+  chargeTime: ['charge time (s)', 0.05, 5, 0.05],
   ocMuzzle: ['overcharge muzzle (m/s)', 1, 200, 1], ocDamage: ['overcharge damage', 0, 300, 1],
   ocShieldDamage: ['overcharge shield damage', 0, 500, 1], ocHeat: ['overcharge heat', 0, 1, 0.01],
   blastRadius: ['blast radius (m)', 0.5, 20, 0.5], blastDamage: ['blast damage', 0, 300, 1], blastKnockback: ['blast knockback (m/s)', 0, 80, 0.5],
-  chargeMoveScale: ['move speed while charging', 0, 1, 0.05], chargeLookScale: ['look speed while charging', 0.02, 1, 0.02],
+  chargeMoveScale: ['move speed while charging/firing', 0, 1, 0.05], chargeLookScale: ['look speed while charging/firing', 0.02, 1, 0.02],
   lifetime: ['bolt lifetime (s)', 0.1, 120, 0.1],
 };
 const WEAPON_UI: Record<string, StatKey[]> = {
-  rifle: ['muzzle', 'damage', 'interval', 'heatPerShot', 'coolRate', 'overheatLock'],
-  redRifle: ['muzzle', 'damage', 'interval', 'heatPerShot', 'coolRate', 'overheatLock'],
-  pistol: ['muzzle', 'damage', 'interval', 'heatPerShot', 'coolRate', 'chargeTime', 'ocMuzzle', 'ocDamage', 'ocShieldDamage', 'ocHeat'],
-  launcher: ['muzzle', 'damage', 'interval', 'ammoMax', 'blastRadius', 'blastDamage', 'blastKnockback'],
-  laser: ['muzzle', 'damage', 'chargeTime', 'interval', 'heatPerShot', 'coolRate', 'chargeMoveScale', 'chargeLookScale', 'lifetime'],
+  rifle: ['muzzle', 'damage', 'knockback', 'interval', 'heatPerShot', 'coolRate', 'overheatLock'],
+  redRifle: ['muzzle', 'damage', 'knockback', 'interval', 'heatPerShot', 'coolRate', 'overheatLock'],
+  pistol: ['muzzle', 'damage', 'knockback', 'interval', 'heatPerShot', 'coolRate', 'chargeTime', 'ocMuzzle', 'ocDamage', 'ocShieldDamage', 'ocHeat'],
+  launcher: ['muzzle', 'damage', 'knockback', 'interval', 'magSize', 'ammoMax', 'reloadTime', 'blastRadius', 'blastDamage', 'blastKnockback'],
+  cannon: ['muzzle', 'damage', 'knockback', 'radius', 'overheatLock'],
+  laconic: ['muzzle', 'damage', 'knockback', 'chargeTime', 'burstTime', 'interval', 'overheatLock', 'chargeMoveScale', 'chargeLookScale'],
   hover: ['damage', 'interval'],
 };
 WEAPON_IDS.forEach((id, i) => {
@@ -181,7 +188,7 @@ fV.add({ reset: () => newWorld() }, 'reset').name('restart level');
 const fGive = gui.addFolder('Give');
 const me_ = () => state.players.find((p) => p.id === localId);
 const give = (item: ItemKind) => () => { const p = me_(); if (p && p.alive) applyItem(cfg, p, item, -1); };
-for (const item of ['redRifle', 'launcher', 'laser', 'rifle', 'pistol'] as ItemKind[]) fGive.add({ f: give(item) }, 'f').name(WEAPON_NAMES[WEAPON_IDS.indexOf(item as never)]);
+for (const item of ['redRifle', 'launcher', 'cannon', 'laconic', 'rifle', 'pistol'] as ItemKind[]) fGive.add({ f: give(item) }, 'f').name(WEAPON_NAMES[WEAPON_IDS.indexOf(item as never)]);
 fGive.add({ f: () => { cfg.allowHoverGun = true; input.weapon = WEAPON_HOVER; } }, 'f').name('Hover Gun (debug)');
 fGive.add({ f: give('jetpack') }, 'f').name('Jetpack (full)');
 fGive.add({ f: () => { give('sticky')(); give('bounce')(); } }, 'f').name('Grenades (refill)');
@@ -222,14 +229,24 @@ function handleEvent(e: SimEvent) {
   switch (e.type) {
     case 'fire':
       sfx.shot(e.kind, d(e.pos));
-      if (e.kind === 'laser') laserFrom.set(e.owner, e.pos);
+      if (e.kind === 'laconic') laserFrom.set(e.owner, e.pos);
       break;
-    case 'impact':
+    case 'impact': {
       sfx.impact(d(e.pos));
-      if (e.kind === 'laser') {
+      // a splash wherever a shot lands, sized by how hard it hits
+      const big = e.kind === 'cannon' || e.kind === 'overcharge' || e.kind === 'laconic';
+      views.burst(e.pos, BOLT_COLORS[e.kind] ?? 0xffffff, big ? 2.2 : 1.1);
+      if (e.kind === 'laconic') {
         const from = laserFrom.get(e.owner);
         if (from) views.addBeam(from, e.pos);
       }
+      break;
+    }
+    case 'reload': if (e.id === localId) sfx.reload(); break;
+    case 'melee':
+      sfx.melee(d(e.pos), e.target >= 0);
+      if (e.id === localId) views.jab = 1;
+      if (e.target >= 0) views.burst(e.pos, 0xffffff, 1.5);
       break;
     case 'stick': sfx.stick(d(e.pos)); break;
     case 'explode': sfx.explode(d(e.pos)); views.explosionFlash(e.pos); break;
@@ -307,20 +324,27 @@ function frame(now: number) {
     const v = viewVectors(pos, input.yaw, input.pitch);
     const eo = eyeOffset(me);
     const eye = new THREE.Vector3(pos[0] + v.up[0] * eo, pos[1] + v.up[1] * eo, pos[2] + v.up[2] * eo);
-    camera.position.copy(eye);
     camera.up.set(...v.up);
-    camera.lookAt(eye.x + v.aim[0], eye.y + v.aim[1], eye.z + v.aim[2]);
+    if (me.alive) {
+      camera.position.copy(eye);
+      camera.lookAt(eye.x + v.aim[0], eye.y + v.aim[1], eye.z + v.aim[2]);
+    } else {
+      // death cam: up and back from where you fell, looking down at the spot
+      camera.position.set(pos[0] + v.up[0] * 4 - v.forward[0] * 4, pos[1] + v.up[1] * 4 - v.forward[1] * 4, pos[2] + v.up[2] * 4 - v.forward[2] * 4);
+      camera.lookAt(pos[0], pos[1], pos[2]);
+    }
   }
 
   views.cameraPos.copy(camera.position);
   views.render(state, prev, alpha, dtReal);
   // trajectory preview (real physics, includes the shooter's own velocity)
   const pk = previewKind();
-  const maxT = pk === 'laser' ? cfg.weapons.laser.lifetime : 22;
+  const maxT = pk === 'laconic' ? cfg.weapons.laconic.lifetime : 22;
   views.setPreview(pk ? predictTrajectory(state, localId, pk, input.yaw, input.pitch, maxT) : null, BOLT_COLORS[pk ?? 'rifle']);
   // first-person gun, mouse slowdown while charging the laser, owned list for the wheel
   views.setViewWeapon(me?.weapon ?? 0, !!me && me.alive && !view.freefly);
-  input.lookScale = me && me.weapon === WEAPON_LASER && me.charge > 0 ? cfg.weapons.laser.chargeLookScale : 1;
+  input.lookScale = me && isLaconicBusy(me, state.tick) ? cfg.weapons.laconic.chargeLookScale : 1;
+  views.reloadDip = me && me.reloadUntil > state.tick ? Math.min(1, views.reloadDip + dtReal * 6) : Math.max(0, views.reloadDip - dtReal * 6);
   if (me) input.owned = me.owned;
 
   // main view
@@ -379,6 +403,7 @@ function show(next: Screen) {
   screen = next;
   for (const [k, el] of Object.entries(overlays)) el.classList.toggle('hidden', k !== next);
   $('hud').classList.toggle('hidden', next === 'title' || next === 'levels');
+  $('build').classList.toggle('hidden', next === 'playing');
   view.paused = next !== 'playing';
   if (next === 'paused') gui.show();
   else gui.hide();
@@ -453,6 +478,8 @@ function checkOutcome(now: number) {
 }
 
 // ---------------------------------------------------------------- boot
+declare const __BUILD_ID__: string;
+$('build').textContent = `build ${__BUILD_ID__}`;
 startGame(currentLevel); // backdrop behind the title screen
 resize();
 show('title');

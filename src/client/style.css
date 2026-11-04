@@ -73,4 +73,6 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 .overlay .note { margin-top: 18px; font-size: 12px; opacity: 0.6; }
 @keyframes pulse { 50% { opacity: 0.4; } }
 .lil-gui.root { z-index: 5; }
+#build { position: fixed; left: 10px; bottom: 8px; z-index: 6; font: 11px ui-monospace, monospace; color: rgba(159, 230, 255, 0.45); pointer-events: none; }
+#build.hidden { display: none; }
 .lil-gui.root.hidden-gui { display: none; }

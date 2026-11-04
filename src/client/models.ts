@@ -45,10 +45,17 @@ export function makeGun(weapon: number): THREE.Group {
       g.add(tube(0.12, 0.95, body, 0.1), tube(0.09, 0.08, mat(0xb8ff7a, 0x6aff2a), 0.6), box(0.2, 0.18, 0.08, dark, -0.05, -0.17));
       break;
     }
-    case 4: { // pulse laser: long and silver
-      const body = mat(0xd8dde6, 0x111111, 0.9);
-      g.add(box(0.7, 0.09, 0.08, body, 0.12), tube(0.025, 0.4, mat(0xe8fbff, 0x6ad8ff), 0.6),
-        box(0.12, 0.08, 0.08, mat(0x6ad8ff, 0x2a88ff), 0.05, 0.09), box(0.14, 0.16, 0.06, dark, -0.12, -0.1));
+    case 4: { // plasma bolt cannon: heavy magenta barrel
+      const body = mat(0x6a2a6a, 0x200a20);
+      g.add(box(0.65, 0.14, 0.12, body, 0.1), tube(0.07, 0.35, mat(0xff9af0, 0xff3df0), 0.55),
+        box(0.16, 0.1, 0.1, mat(0xff3df0, 0x801a70), 0.0, 0.11), box(0.16, 0.16, 0.07, dark, -0.12, -0.11));
+      break;
+    }
+    case 5: { // Laconic Laser: absurdly big, red
+      const body = mat(0x3a3a44, 0x0a0a0a, 0.8);
+      const glow = mat(0xff5a4a, 0xff1a0a);
+      g.add(box(1.0, 0.22, 0.2, body, 0.15), tube(0.12, 0.5, glow, 0.8), tube(0.05, 0.9, glow, 0.2, 0.16),
+        box(0.2, 0.2, 0.08, dark, -0.15, -0.18));
       break;
     }
     default: { // hover gun (debug)
@@ -58,7 +65,7 @@ export function makeGun(weapon: number): THREE.Group {
   return g;
 }
 
-const ITEM_WEAPON: Partial<Record<ItemKind, number>> = { rifle: 0, pistol: 1, redRifle: 2, launcher: 3, laser: 4 };
+const ITEM_WEAPON: Partial<Record<ItemKind, number>> = { rifle: 0, pistol: 1, redRifle: 2, launcher: 3, cannon: 4, laconic: 5 };
 
 /** Floating pickup model (about 0.6 m across). */
 export function makePickup(item: ItemKind): THREE.Group {
@@ -109,5 +116,5 @@ export function makePickup(item: ItemKind): THREE.Group {
 
 export const ITEM_NAMES: Record<ItemKind, string> = {
   health: 'Health', sticky: 'Sticky grenades', bounce: 'Bouncing grenades', redRifle: 'Red Plasma Rifle',
-  launcher: 'Fuel Rod Launcher', laser: 'Pulse Laser', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack',
+  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack',
 };

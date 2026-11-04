@@ -67,6 +67,10 @@ export interface SimConfig {
   shieldRegenDelay: number; // s
   shieldRegenRate: number; // per s
   respawnTime: number; // s
+  meleeDamage: number;
+  meleeKnockback: number; // m/s kick
+  meleeRange: number; // m in front of you
+  meleeCooldown: number; // s
   friendlyFire: boolean; // false: teammates can't hurt each other (campaign enemies)
 }
 
@@ -80,17 +84,24 @@ export const BTN_JUMP = 4;
 export const BTN_SPRINT = 8;
 export const BTN_GRENADE = 16; // sticky grenade: hold to aim, release to throw
 export const BTN_GRENADE2 = 32; // bouncing grenade: hold to aim, release to throw
+export const BTN_RELOAD = 64;
+export const BTN_MELEE = 128;
 
 // Weapons are addressed by a fixed slot index (also the 1-5 number keys).
-export const WEAPON_IDS = ['rifle', 'pistol', 'redRifle', 'launcher', 'laser', 'hover'] as const;
+export const WEAPON_IDS = ['rifle', 'pistol', 'redRifle', 'launcher', 'cannon', 'laconic', 'hover'] as const;
 export type WeaponId = (typeof WEAPON_IDS)[number];
 export const WEAPON_RIFLE = 0;
 export const WEAPON_PISTOL = 1;
 export const WEAPON_RED = 2;
 export const WEAPON_LAUNCHER = 3;
-export const WEAPON_LASER = 4;
-export const WEAPON_HOVER = 5;
-export const WEAPON_NAMES = ['Plasma Rifle', 'Plasma Pistol', 'Red Plasma Rifle', 'Fuel Rod Launcher', 'Pulse Laser', 'Hover Gun (debug)'];
+export const WEAPON_CANNON = 4;
+export const WEAPON_LACONIC = 5;
+export const WEAPON_HOVER = 6;
+export const WEAPON_NAMES = [
+  'Plasma Rifle', 'Plasma Pistol', 'Red Plasma Rifle', 'Fuel Rod Launcher', 'Plasma Bolt Cannon', 'Laconic Laser', 'Hover Gun (debug)',
+];
+/** Number keys 1..N select the first N weapons; the hover gun is debug-panel only. */
+export const PLAYER_WEAPON_SLOTS = 6;
 export const STARTING_WEAPONS = [WEAPON_RIFLE, WEAPON_PISTOL];
 
 /** Tunable stats for one weapon. Fields a weapon doesn't use stay 0. */
@@ -104,8 +115,12 @@ export interface WeaponStats {
   overheatLock: number; // s locked out after overheating
   radius: number; // bolt radius (m)
   lifetime: number; // s
-  ammoMax: number; // 0 = unlimited (heat-limited)
-  chargeTime: number; // s (pistol overcharge, laser)
+  ammoMax: number; // spare rounds you can carry; 0 = unlimited (heat-limited weapon)
+  magSize: number; // rounds per magazine (ammo weapons)
+  reloadTime: number; // s
+  knockback: number; // m/s kick a hit gives an 80 kg player, along the bolt's path
+  chargeTime: number; // s (pistol overcharge, Laconic Laser)
+  burstTime: number; // s the Laconic Laser keeps firing once charged
   // pistol overcharge shot
   ocMuzzle: number;
   ocDamage: number;
@@ -115,7 +130,7 @@ export interface WeaponStats {
   blastRadius: number;
   blastDamage: number;
   blastKnockback: number;
-  // laser: penalties while charging
+  // Laconic Laser: movement and aim penalties while charging and firing
   chargeMoveScale: number;
   chargeLookScale: number;
 }
@@ -171,10 +186,15 @@ export interface Player {
   owned: number[]; // weapon indices, sorted
   heat: number[]; // per weapon index, 0..1
   overheatUntil: number[]; // per weapon index (tick)
-  ammo: number[]; // per weapon index (only for ammoMax > 0)
-  charge: number; // 0..1: pistol overcharge or laser charge
+  ammo: number[]; // spare rounds per weapon index (only for ammo weapons)
+  mag: number[]; // rounds in the magazine per weapon index
+  reloadUntil: number; // tick the current reload finishes (0 = not reloading)
+  infiniteAmmo: boolean; // campaign enemies: spare rounds never run out (they still reload)
+  charge: number; // 0..1: pistol overcharge or Laconic Laser charge
   holdTicks: number;
-  needRelease: boolean; // laser: release the trigger before charging again
+  needRelease: boolean; // release the trigger before charging again
+  burstUntil: number; // Laconic Laser: firing until this tick
+  meleeReadyTick: number;
   fireReadyTick: number;
   hasJetpack: boolean;
   jetFuel: number; // 0..1
@@ -190,9 +210,9 @@ export interface Player {
   deaths: number;
 }
 
-export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'laser' | 'hover';
+export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'hover';
 
-export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'laser' | 'rifle' | 'pistol' | 'jetpack';
+export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'rifle' | 'pistol' | 'jetpack';
 
 /** Floating item pickup (not a physics object). */
 export interface Pickup {
@@ -271,8 +291,9 @@ export interface Explosion {
 export interface Box {
   id: number;
   type: 'box';
-  kind: 'cover' | 'stair';
+  kind: 'cover' | 'ramp';
   angle: number; // ring angle of the box centre
+  tilt: number; // rotation about the axial direction (ramps): + tips the spinward end up
   center: Vec3;
   half: Vec3; // half extents along (spinward, up, axial) at `angle`
 }
@@ -310,6 +331,8 @@ export type SimEvent =
   | { type: 'kill'; killer: number; victim: number; cause: string }
   | { type: 'respawn'; id: number }
   | { type: 'outcome'; outcome: Outcome }
+  | { type: 'reload'; id: number }
+  | { type: 'melee'; id: number; target: number; pos: Vec3 }
   | { type: 'pickup'; id: number; item: ItemKind; player: number; pos: Vec3 }
   | { type: 'overheat'; id: number }
   | { type: 'jump'; id: number }

@@ -1,4 +1,4 @@
-import { DT, WEAPON_IDS, WEAPON_NAMES, omegaOf, type Player, type SimEvent, type SimState } from '../sim';
+import { DT, PLAYER_WEAPON_SLOTS, WEAPON_IDS, WEAPON_NAMES, omegaOf, type Player, type SimEvent, type SimState } from '../sim';
 import { ITEM_NAMES } from './models';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -32,13 +32,14 @@ export class Hud {
     const wi = me.weapon;
     const st = cfg.weapons[WEAPON_IDS[wi]];
     const overheated = state.tick < me.overheatUntil[wi];
-    $('weapon-name').textContent = WEAPON_NAMES[wi] + (overheated ? ' — OVERHEATED' : '');
+    const reloading = me.reloadUntil > state.tick;
+    $('weapon-name').textContent = WEAPON_NAMES[wi] + (overheated ? ' — OVERHEATED' : reloading ? ' — RELOADING' : '');
     // ammo weapons show rounds; heat weapons show the heat bar
     const heatBar = $('heat-fill').parentElement as HTMLElement;
-    heatBar.style.display = st.ammoMax > 0 ? 'none' : '';
+    heatBar.style.display = st.magSize > 0 ? 'none' : '';
     $('heat-fill').style.width = `${me.heat[wi] * 100}%`;
-    $('ammo').textContent = st.ammoMax > 0 ? `${me.ammo[wi]} / ${st.ammoMax}` : '';
-    $('weapons').innerHTML = WEAPON_IDS.slice(0, 5)
+    $('ammo').textContent = st.magSize > 0 ? `${me.mag[wi]} | ${me.infiniteAmmo ? '∞' : me.ammo[wi]}` : '';
+    $('weapons').innerHTML = WEAPON_IDS.slice(0, PLAYER_WEAPON_SLOTS)
       .map((_, i) => (me.owned.includes(i) ? `<span class="${i === wi ? 'cur' : ''}">${i + 1}</span>` : `<span class="no">${i + 1}</span>`))
       .join('');
     const jet = $('jet');

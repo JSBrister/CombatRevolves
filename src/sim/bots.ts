@@ -5,7 +5,7 @@
 
 import { localBasis } from './physics';
 import { hash01 } from './rng';
-import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, WEAPON_HOVER, WEAPON_IDS, type InputCmd, type SimState } from './types';
+import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_SPRINT, WEAPON_HOVER, WEAPON_IDS, type InputCmd, type SimState } from './types';
 import { type Vec3, dot, len, sub } from './vec';
 import { ENEMY_TYPES } from './tuning';
 import { eyeOffset } from './world';
@@ -75,7 +75,7 @@ export function botInput(state: SimState, playerId: number): InputCmd {
     } else {
       // Pick one of the weapons we own for a few seconds at a time; prefer the new toys.
       const options = me.owned.filter((w) => w !== WEAPON_HOVER);
-      const special = options.filter((w) => w > 1 && (state.config.weapons[WEAPON_IDS[w]].ammoMax === 0 || me.ammo[w] > 0));
+      const special = options.filter((w) => w > 1 && (state.config.weapons[WEAPON_IDS[w]].magSize === 0 || me.mag[w] + me.ammo[w] > 0));
       const pool = special.length && hash01(playerId, tick >> 10, 10) < 0.6 ? special : options;
       cmd.weapon = pool[Math.floor(hash01(playerId, tick >> 10, 7) * pool.length)] ?? 0;
     }
@@ -83,11 +83,14 @@ export function botInput(state: SimState, playerId: number): InputCmd {
     const burst = (tick >> 5) % 4 !== 0;
     if (id === 'rifle' || id === 'redRifle') {
       if (burst && me.heat[cmd.weapon] < 0.85) cmd.buttons |= BTN_FIRE;
-    } else if (id === 'laser') {
-      if (type || (tick >> 7) % 2 === 0) cmd.buttons |= BTN_FIRE; // hold to charge, it fires itself
+    } else if (id === 'laconic') {
+      if ((tick >> 8) % 2 === 0) cmd.buttons |= BTN_FIRE; // hold to charge; it streams by itself
+    } else if (id === 'cannon') {
+      if ((tick >> 4) % 4 === 0) cmd.buttons |= BTN_FIRE; // one careful shot at a time
     } else if (id === 'launcher') {
       if ((tick >> 4) % 8 === 0) cmd.buttons |= BTN_FIRE;
     } else if ((tick >> 3) % 3 === 0) cmd.buttons |= BTN_FIRE; // pistol: tap tap
+    if (best < 2.5) cmd.buttons |= (tick >> 3) % 2 ? BTN_MELEE : 0; // too close: shove
     // Grenade: hold for 0.25 s then release, every ~8 s, if close.
     const gPhase = (tick + playerId * 97) % 960;
     if (best < 28 && gPhase < 30) {
