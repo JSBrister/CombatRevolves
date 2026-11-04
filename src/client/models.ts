@@ -58,6 +58,18 @@ export function makeGun(weapon: number): THREE.Group {
         box(0.2, 0.2, 0.08, dark, -0.15, -0.18));
       break;
     }
+    case 6: { // Grav Mallet: a long handle and a heavy glowing head
+      const head = mat(0x5a5f6e, 0x0a0a14, 0.8);
+      const glow = mat(0x9ad0ff, 0x3a8aff);
+      g.add(tube(0.035, 0.9, mat(0x3a2a1a, 0x000000, 0.2), 0.1));
+      const h = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.36, 0.3), head);
+      h.position.set(0.6, 0, 0);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.03, 8, 20), glow);
+      ring.position.set(0.72, 0, 0);
+      ring.rotation.y = Math.PI / 2;
+      g.add(h, ring);
+      break;
+    }
     default: { // hover gun (debug)
       g.add(box(0.3, 0.12, 0.1, mat(0xb03aa0, 0x400a3a)), tube(0.05, 0.1, mat(0xffa8f0, 0xff5ee8), 0.2));
     }
@@ -65,7 +77,7 @@ export function makeGun(weapon: number): THREE.Group {
   return g;
 }
 
-const ITEM_WEAPON: Partial<Record<ItemKind, number>> = { rifle: 0, pistol: 1, redRifle: 2, launcher: 3, cannon: 4, laconic: 5 };
+const ITEM_WEAPON: Partial<Record<ItemKind, number>> = { rifle: 0, pistol: 1, redRifle: 2, launcher: 3, cannon: 4, laconic: 5, hammer: 6 };
 
 /** Floating pickup model (about 0.6 m across). */
 export function makePickup(item: ItemKind): THREE.Group {
@@ -116,5 +128,5 @@ export function makePickup(item: ItemKind): THREE.Group {
 
 export const ITEM_NAMES: Record<ItemKind, string> = {
   health: 'Health', sticky: 'Sticky grenades', bounce: 'Bouncing grenades', redRifle: 'Red Plasma Rifle',
-  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack',
+  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', hammer: 'Grav Mallet', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack',
 };

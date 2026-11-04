@@ -88,7 +88,7 @@ export const BTN_RELOAD = 64;
 export const BTN_MELEE = 128;
 
 // Weapons are addressed by a fixed slot index (also the 1-5 number keys).
-export const WEAPON_IDS = ['rifle', 'pistol', 'redRifle', 'launcher', 'cannon', 'laconic', 'hover'] as const;
+export const WEAPON_IDS = ['rifle', 'pistol', 'redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'hover'] as const;
 export type WeaponId = (typeof WEAPON_IDS)[number];
 export const WEAPON_RIFLE = 0;
 export const WEAPON_PISTOL = 1;
@@ -96,12 +96,14 @@ export const WEAPON_RED = 2;
 export const WEAPON_LAUNCHER = 3;
 export const WEAPON_CANNON = 4;
 export const WEAPON_LACONIC = 5;
-export const WEAPON_HOVER = 6;
+export const WEAPON_HAMMER = 6;
+export const WEAPON_HOVER = 7;
 export const WEAPON_NAMES = [
-  'Plasma Rifle', 'Plasma Pistol', 'Red Plasma Rifle', 'Fuel Rod Launcher', 'Plasma Bolt Cannon', 'Laconic Laser', 'Hover Gun (debug)',
+  'Plasma Rifle', 'Plasma Pistol', 'Red Plasma Rifle', 'Fuel Rod Launcher', 'Plasma Bolt Cannon', 'Laconic Laser', 'Grav Mallet',
+  'Hover Gun (debug)',
 ];
 /** Number keys 1..N select the first N weapons; the hover gun is debug-panel only. */
-export const PLAYER_WEAPON_SLOTS = 6;
+export const PLAYER_WEAPON_SLOTS = 7;
 export const STARTING_WEAPONS = [WEAPON_RIFLE, WEAPON_PISTOL];
 
 /** Tunable stats for one weapon. Fields a weapon doesn't use stay 0. */
@@ -212,7 +214,7 @@ export interface Player {
 
 export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'hover';
 
-export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'rifle' | 'pistol' | 'jetpack';
+export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rifle' | 'pistol' | 'jetpack';
 
 /** Floating item pickup (not a physics object). */
 export interface Pickup {

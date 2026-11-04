@@ -91,6 +91,11 @@ const w = (o: Partial<WeaponStats>): WeaponStats => ({
 });
 
 /**
+ * Shot speeds are high enough that bolts barely curve at close range: over a
+ * distance D a bolt at speed v sags about g D^2 / (2 v^2) and Coriolis bends
+ * it up to omega D^2 / v. At 80 m/s that is ~0.1 m + 0.4 m over 10 m on the
+ * standard ring; across the ring it still curves a lot.
+ *
  * Weapon stats. Field meanings (see WeaponStats in types.ts):
  *   muzzle        bolt speed relative to the shooter (m/s)
  *   damage        health damage per hit; shieldDamage = damage to shields
@@ -109,21 +114,23 @@ const w = (o: Partial<WeaponStats>): WeaponStats => ({
  *   chargeMoveScale / chargeLookScale  Laconic Laser: movement and aim speed while charging and firing
  */
 export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
-  rifle: w({ muzzle: 25, damage: 7, shieldDamage: 7, interval: 0.075, heatPerShot: 0.045, coolRate: 0.45, overheatLock: 2.5,
+  rifle: w({ muzzle: 80, damage: 7, shieldDamage: 7, interval: 0.075, heatPerShot: 0.045, coolRate: 0.45, overheatLock: 2.5,
     radius: 0.12, knockback: 0.6 }),
-  pistol: w({ muzzle: 30, damage: 13, shieldDamage: 13, interval: 0.15, heatPerShot: 0.08, coolRate: 0.3, overheatLock: 2,
-    radius: 0.15, knockback: 1.5, chargeTime: 0.9, ocMuzzle: 14, ocDamage: 20, ocShieldDamage: 120, ocHeat: 0.35 }),
-  redRifle: w({ muzzle: 45, damage: 6, shieldDamage: 6, interval: 0.06, heatPerShot: 0.075, coolRate: 0.5, overheatLock: 3,
+  pistol: w({ muzzle: 90, damage: 13, shieldDamage: 13, interval: 0.15, heatPerShot: 0.08, coolRate: 0.3, overheatLock: 2,
+    radius: 0.15, knockback: 1.5, chargeTime: 0.9, ocMuzzle: 40, ocDamage: 20, ocShieldDamage: 120, ocHeat: 0.35 }),
+  redRifle: w({ muzzle: 110, damage: 6, shieldDamage: 6, interval: 0.06, heatPerShot: 0.075, coolRate: 0.5, overheatLock: 3,
     radius: 0.1, knockback: 0.5 }),
-  launcher: w({ muzzle: 20, damage: 30, shieldDamage: 30, interval: 0.6, radius: 0.3, knockback: 4,
+  launcher: w({ muzzle: 45, damage: 30, shieldDamage: 30, interval: 0.6, radius: 0.3, knockback: 4,
     magSize: 3, ammoMax: 9, reloadTime: 2.2, blastRadius: 5, blastDamage: 100, blastKnockback: 22 }),
   // "sniper": one hard, fast, magenta bolt, then it overheats briefly
-  cannon: w({ muzzle: 65, damage: 75, shieldDamage: 75, interval: 0.2, heatPerShot: 1, coolRate: 1.5, overheatLock: 1.1,
+  cannon: w({ muzzle: 200, damage: 75, shieldDamage: 75, interval: 0.2, heatPerShot: 1, coolRate: 1.5, overheatLock: 1.1,
     radius: 0.28, knockback: 7 }),
   // superweapon: charge, then a half-second stream of very fast red bolts
   laconic: w({ muzzle: 3000, damage: 17, shieldDamage: 17, interval: 1 / 30, heatPerShot: 1 / 15, coolRate: 0.5,
     overheatLock: 3, radius: 0.22, lifetime: 1, knockback: 0.6, chargeTime: 1.2, burstTime: 0.5,
     chargeMoveScale: 0.25, chargeLookScale: 0.25 }),
+  // melee weapon: a big swing that hits everyone in front of you (reach = blastRadius)
+  hammer: w({ muzzle: 0, damage: 90, shieldDamage: 90, interval: 0.9, knockback: 28, blastRadius: 3.2, radius: 0 }),
   hover: w({ muzzle: 0, damage: 10, shieldDamage: 10, interval: 0.125, radius: 0.25, knockback: 1 }),
 });
 
@@ -147,27 +154,28 @@ export interface EnemyType {
   behaviour: Behaviour;
   range: number; // engages you within this distance (m)
   aimError: number; // random aim wobble (radians)
+  aimSkill: number; // 0 = aims straight at you; 1 = leads you and corrects for the spin (simulates its own shot)
 }
 
 export const ENEMY_TYPES: Record<string, EnemyType> = {
   grunt: {
     name: 'Grunt', color: 0xe08a2a, size: 0.75, health: 45, shield: 0, speedScale: 0.6, weapon: 'pistol',
-    grenades: 1, bounceGrenades: 0, behaviour: 'chase', range: 30, aimError: 0.12,
+    grenades: 1, bounceGrenades: 0, behaviour: 'chase', range: 30, aimError: 0.12, aimSkill: 0,
   },
   soldier: {
     name: 'Soldier', color: 0x8a3ad0, size: 1, health: 100, shield: 70, speedScale: 0.8, weapon: 'rifle',
-    grenades: 1, bounceGrenades: 1, behaviour: 'strafe', range: 40, aimError: 0.06,
+    grenades: 1, bounceGrenades: 1, behaviour: 'strafe', range: 40, aimError: 0.06, aimSkill: 0.6,
   },
   skirmisher: {
     name: 'Skirmisher', color: 0xd03a3a, size: 0.9, health: 70, shield: 40, speedScale: 1.2, weapon: 'redRifle',
-    grenades: 0, bounceGrenades: 2, behaviour: 'chase', range: 35, aimError: 0.08,
+    grenades: 0, bounceGrenades: 2, behaviour: 'chase', range: 35, aimError: 0.08, aimSkill: 0.5,
   },
   heavy: {
     name: 'Heavy', color: 0x3a8a4a, size: 1.5, health: 250, shield: 100, speedScale: 0.45, weapon: 'launcher',
-    grenades: 0, bounceGrenades: 0, behaviour: 'chase', range: 45, aimError: 0.05,
+    grenades: 0, bounceGrenades: 0, behaviour: 'chase', range: 45, aimError: 0.05, aimSkill: 0.85,
   },
   sniper: {
     name: 'Sniper', color: 0x3ad0d0, size: 0.95, health: 60, shield: 30, speedScale: 0, weapon: 'cannon',
-    grenades: 0, bounceGrenades: 0, behaviour: 'hold', range: 90, aimError: 0.015,
+    grenades: 0, bounceGrenades: 0, behaviour: 'hold', range: 90, aimError: 0.015, aimSkill: 1,
   },
 };

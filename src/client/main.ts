@@ -148,13 +148,14 @@ const WEAPON_UI: Record<string, StatKey[]> = {
   launcher: ['muzzle', 'damage', 'knockback', 'interval', 'magSize', 'ammoMax', 'reloadTime', 'blastRadius', 'blastDamage', 'blastKnockback'],
   cannon: ['muzzle', 'damage', 'knockback', 'radius', 'overheatLock'],
   laconic: ['muzzle', 'damage', 'knockback', 'chargeTime', 'burstTime', 'interval', 'overheatLock', 'chargeMoveScale', 'chargeLookScale'],
+  hammer: ['damage', 'knockback', 'blastRadius', 'interval'],
   hover: ['damage', 'interval'],
 };
 WEAPON_IDS.forEach((id, i) => {
   const f = fW.addFolder(WEAPON_NAMES[i]);
   for (const k of WEAPON_UI[id]) {
     const [label, lo, hi, stepv] = STAT_UI[k]!;
-    f.add(cfg.weapons[id], k, lo, hi, stepv).name(label);
+    f.add(cfg.weapons[id], k, lo, hi, stepv).name(id === 'hammer' && k === 'blastRadius' ? 'reach (m)' : label);
   }
   f.close();
 });
@@ -188,7 +189,7 @@ fV.add({ reset: () => newWorld() }, 'reset').name('restart level');
 const fGive = gui.addFolder('Give');
 const me_ = () => state.players.find((p) => p.id === localId);
 const give = (item: ItemKind) => () => { const p = me_(); if (p && p.alive) applyItem(cfg, p, item, -1); };
-for (const item of ['redRifle', 'launcher', 'cannon', 'laconic', 'rifle', 'pistol'] as ItemKind[]) fGive.add({ f: give(item) }, 'f').name(WEAPON_NAMES[WEAPON_IDS.indexOf(item as never)]);
+for (const item of ['redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'rifle', 'pistol'] as ItemKind[]) fGive.add({ f: give(item) }, 'f').name(WEAPON_NAMES[WEAPON_IDS.indexOf(item as never)]);
 fGive.add({ f: () => { cfg.allowHoverGun = true; input.weapon = WEAPON_HOVER; } }, 'f').name('Hover Gun (debug)');
 fGive.add({ f: give('jetpack') }, 'f').name('Jetpack (full)');
 fGive.add({ f: () => { give('sticky')(); give('bounce')(); } }, 'f').name('Grenades (refill)');
@@ -286,6 +287,7 @@ function previewKind(): BoltKind | ThrownKind | null {
   if (input.bounceHeld && me.bounceGrenades > 0) return 'bounceGrenade';
   if (!input.aiming) return null;
   const id = WEAPON_IDS[me.weapon];
+  if (id === 'hammer') return null;
   if (id === 'pistol') return me.charge >= 1 ? 'overcharge' : 'pistol';
   if (id === 'launcher') return 'fuelRod';
   return id;

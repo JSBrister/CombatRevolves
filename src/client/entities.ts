@@ -7,7 +7,7 @@ import { makeGun, makePickup } from './models';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
 const PICKUP_GLOW: Record<string, number> = {
-  health: 0xff6060, sticky: 0x7fb6ff, bounce: 0xffd23a, redRifle: 0xff4a3a, launcher: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a, jetpack: 0xffa040,
+  health: 0xff6060, sticky: 0x7fb6ff, bounce: 0xffd23a, redRifle: 0xff4a3a, launcher: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a, hammer: 0x9ad0ff, jetpack: 0xffa040,
   rifle: 0x55c8ff, pistol: 0x8dff5a,
 };
 
@@ -349,6 +349,7 @@ export class EntityViews {
         // keep glows from swamping the screen right at the muzzle
         const dCam = this.cameraPos.distanceTo(v.sprite.position);
         v.sprite.scale.setScalar(Math.min(v.baseSize, Math.max(0.05, dCam * 0.08)));
+        v.core.scale.setScalar(Math.min(1, dCam * 0.25)); // the hot core too, right at the muzzle
         v.core.position.copy(v.sprite.position);
         v.marker.position.copy(v.sprite.position);
         if (l.stuck) v.sprite.material.opacity = 0.5 + 0.5 * Math.sin(performance.now() * 0.04);

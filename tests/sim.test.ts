@@ -4,7 +4,7 @@ import {
   addPlayer, addProp, botInput, createState, decode, detonate, encode, falloff, hash01, integrate,
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
-  isLaconicBusy, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
+  isLaconicBusy, solveAim, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
   LEVELS, levelById, startLevel, add, scale, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
@@ -925,5 +925,82 @@ describe('20. levels and campaign', () => {
     const a = play(), b = play();
     expect(a.hitsOnMe).toBeGreaterThan(0);
     expect(bytesEqual(a.bytes, b.bytes)).toBe(true);
+  });
+});
+
+describe('21. aim, shot speed and the Grav Mallet', () => {
+  /** Closest a bolt fired with this aim gets to a target moving at its current velocity. */
+  const closest = (s: SimState, shooter: number, target: number, kind: 'fuelRod' | 'rifle', yaw: number, pitch: number) => {
+    const me = s.players.find((p) => p.id === shooter)!;
+    const tg = s.players.find((p) => p.id === target)!;
+    me.yaw = yaw; me.pitch = pitch;
+    const from = muzzlePoint(me, yaw, pitch);
+    const r: Vec3 = [...from] as Vec3;
+    const v = launchVelocity(s.config, me, kind, from, yaw, pitch);
+    let best = Infinity;
+    for (let i = 1; i < 600; i++) {
+      advanceFree(r, v, DT, omegaOf(s.config), s.config);
+      const t = addScaled(tg.pos, tg.vel, i * DT);
+      best = Math.min(best, Math.hypot(r[0] - t[0], r[1] - t[1], r[2] - t[2]));
+    }
+    return best;
+  };
+  it('a solved aim allows for the spin and leads a moving target; straight aim misses', () => {
+    const s = empty();
+    const a = addPlayer(s, 'human', 'A');
+    const b = addPlayer(s, 'human', 'B');
+    run(s, 20);
+    const A = s.players.find((p) => p.id === a)!, B = s.players.find((p) => p.id === b)!;
+    // B is 50 m spinward-ish and running across the ring
+    const R = s.config.R, ang = Math.atan2(A.pos[1], A.pos[0]) + 50 / R;
+    B.pos = [(R - 0.9) * Math.cos(ang), (R - 0.9) * Math.sin(ang), 5];
+    B.vel = [0, 0, 6];
+    const eye = addScaled(A.pos, localBasis(A.pos).up, 0.7);
+    const straight = aimAt(eye, B.pos);
+    const solved = solveAim(s, A, B, 'fuelRod');
+    const missStraight = closest(s, a, b, 'fuelRod', straight.yaw, straight.pitch);
+    const missSolved = closest(s, a, b, 'fuelRod', solved.yaw, solved.pitch);
+    expect(missStraight).toBeGreaterThan(3);
+    expect(missSolved).toBeLessThan(0.5);
+  });
+  it('at close range shots barely curve (default speeds)', () => {
+    const s = empty();
+    const a = addPlayer(s, 'human', 'A');
+    const b = addPlayer(s, 'human', 'B');
+    run(s, 20);
+    const A = s.players.find((p) => p.id === a)!, B = s.players.find((p) => p.id === b)!;
+    const R = s.config.R;
+    for (const [dAng, dz] of [[10 / R, 0], [-10 / R, 0], [0, 10]]) {
+      const ang = Math.atan2(A.pos[1], A.pos[0]) + dAng;
+      B.pos = [(R - 0.9) * Math.cos(ang), (R - 0.9) * Math.sin(ang), A.pos[2] + dz];
+      B.vel = [0, 0, 0];
+      const straight = aimAt(addScaled(A.pos, localBasis(A.pos).up, 0.7), B.pos);
+      expect(closest(s, a, b, 'rifle', straight.yaw, straight.pitch)).toBeLessThan(0.6); // incl. the muzzle's 0.2 m offset from the eye
+    }
+  });
+  it('the Grav Mallet hits everyone in front of you, hard, and nobody behind', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const f1 = addPlayer(s, 'human', 'F1'), f2 = addPlayer(s, 'human', 'F2'), bk = addPlayer(s, 'human', 'Back');
+    run(s, 20);
+    const p = s.players.find((q) => q.id === id)!;
+    applyItem(s.config, p, 'hammer', -1);
+    const b = localBasis(p.pos);
+    const place = (pid: number, along: number, side: number) => {
+      const q = s.players.find((x) => x.id === pid)!;
+      q.pos = add(add(p.pos, scale(b.spin, along)), scale(b.axial, side));
+      q.vel = [0, 0, 0];
+      return q;
+    };
+    const F1 = place(f1, 1.8, -0.9), F2 = place(f2, 1.8, 0.9), BK = place(bk, -1.8, 0);
+    run(s, 40, () => [cmdFor(s, id, { weapon: WEAPON_HAMMER })]);
+    for (const q of [F1, F2, BK]) { q.pos = place(q.id, q === BK ? -1.8 : 1.8, q === F1 ? -0.9 : q === F2 ? 0.9 : 0).pos; q.vel = [0, 0, 0]; }
+    step(s, [cmdFor(s, id, { weapon: WEAPON_HAMMER, buttons: BTN_FIRE })], s.tick);
+    for (const q of [F1, F2]) {
+      expect(dot(q.vel, b.spin)).toBeGreaterThan(s.config.weapons.hammer.knockback * 0.7);
+      expect(q.health + q.shield).toBeLessThan(170 - 80);
+    }
+    expect(Math.hypot(...BK.vel)).toBeLessThan(1);
+    expect(BK.health + BK.shield).toBe(170);
   });
 });

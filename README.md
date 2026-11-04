@@ -32,6 +32,7 @@ hover gun, bots) only appears while paused.
 | 4 | Fuel rod launcher | 3-round magazine plus 9 spares; reload with R (or automatically). Slow bolt that explodes on impact with its own blast settings. |
 | 5 | Plasma bolt cannon | The "sniper": one fast (65 m/s), hard-hitting magenta bolt, then it overheats for ~1 s. |
 | 6 | Laconic Laser | Superweapon: hold to charge (1.2 s), then it streams very fast red bolts for 0.5 s. You move and aim slowly the whole time. Most of a stream kills. |
+| 7 | Grav Mallet | Melee weapon: a wide swing (3.2 m reach) that hits everyone in front of you for 90 and a 28 m/s shove. |
 | — | Hover gun | Debug only: fires a bolt at rest in the inertial frame. |
 
 Every hit gives a small kick along the bolt's path (tunable per weapon). **Q** is a melee shove with any weapon: short
@@ -82,6 +83,9 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 - **Snapshots** use the binary encoder, not JSON, because JSON turns −0 into 0. That can flip an `atan2` branch and break bit-exact replay.
 - **Rim walls** vary in height per angular sector (full 15 m, 4 m, or a 1 m curb with orange tops). The SDF evaluates the point's own sector plus any taller neighbours, using the exact distance to the neighbour's edge. Past a curb there is only space: anything more than `fallKillDistance` (default 25 m) off the ring band is dead.
 - **Ramps:** one tilted slab each (boxes can tilt about the ring's axis), up to an 11 m lookout where you weigh about 0.88 g. The floor curves up away from a straight slab, so its ends are raised to match exactly: the low end meets the floor and the top meets the platform flush. Alternate ramps climb spinward and antispinward.
+- **Shot speeds** are high enough (80–200 m/s) that bolts barely curve at close range: over distance D a bolt sags about g·D²/2v² and Coriolis bends it up to ω·D²/v, so ~0.5 m over 10 m for the rifle. Across the ring they still curve plenty.
+- **Enemy aim:** each enemy type has an `aimSkill` (0–1). 0 aims straight at you; 1 runs the real physics on its own shot (launch rule, spin, your current velocity) and Newton-iterates yaw/pitch on the miss. The aim is blended between the two by skill, plus random wobble (`aimError`).
+- **Mesas:** low (3.5 m) platforms with ramps, about one per 80 m of ring, plus denser cover, so big rings aren't empty.
 - **Ammo:** `magSize` rounds in the magazine, `ammoMax` spares; reloading takes `reloadTime`. Heat-based weapons have `magSize` 0.
 - **Bouncing grenades** (yellow) share one sub-stepped sphere mover with the props and with their own trajectory preview. Their fuse starts at the throw. They bounce off players and props relative to the target's velocity.
 - **Owner self-hits:** a projectile is `armed` against its owner once it has left the owner's capsule. The test fires a bolt antispinward at the local rim speed, and it hits the shooter in the back ≈ 2π/ω later.

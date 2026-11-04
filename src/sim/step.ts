@@ -27,7 +27,7 @@ export const BOLT_WEAPON: Record<BoltKind, WeaponId> = {
   rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', overcharge: 'pistol', fuelRod: 'launcher', cannon: 'cannon', laconic: 'laconic',
   hover: 'hover',
 };
-const WEAPON_BOLT: Record<WeaponId, BoltKind> = {
+const WEAPON_BOLT: Record<Exclude<WeaponId, 'hammer'>, BoltKind> = {
   rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', cannon: 'cannon', laconic: 'laconic', hover: 'hover',
 };
 
@@ -553,6 +553,13 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
         p.holdTicks = 0;
       }
       break;
+    case 'hammer':
+      // Swing: hits everyone in a wide arc in front of you.
+      if (pressed & BTN_FIRE && ready) {
+        p.fireReadyTick = tick + Math.max(1, secs(st.interval));
+        swing(state, p, st.damage, st.knockback, st.blastRadius, 0.25, 'mallet', true);
+      }
+      break;
     case 'laconic':
       // Hold to charge; once charged it streams for burstTime whether you hold or not.
       if (bursting) {
@@ -595,33 +602,43 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
 function melee(state: SimState, p: Player) {
   const cfg = state.config;
   p.meleeReadyTick = state.tick + secs(cfg.meleeCooldown);
+  swing(state, p, cfg.meleeDamage, cfg.meleeKnockback, cfg.meleeRange, 0.4, 'melee', false);
+}
+
+/**
+ * A close-range blow in front of `p`: damage plus a big kick along the aim
+ * (with some lift). `all` hits everyone in the arc, otherwise just the nearest.
+ */
+function swing(state: SimState, p: Player, damage: number, knockback: number, reach: number, minDot: number, cause: string, all: boolean) {
+  const cfg = state.config;
   const v = viewVectors(p.pos, p.yaw, p.pitch);
   const eye = addScaled(p.pos, v.up, eyeOffset(p) * 0.5);
-  let best: Player | null = null;
+  const kick = norm(addScaled(v.aim, v.up, cfg.liftBias));
+  const hits: Player[] = [];
+  let nearest: Player | null = null;
   let bestD = Infinity;
   for (const q of state.players) {
     if (q.id === p.id || !q.alive) continue;
     const [a, b] = capsuleEnds(q);
-    const c = closestOnSeg(eye, a, b).point;
-    const to = sub(c, eye);
+    const to = sub(closestOnSeg(eye, a, b).point, eye);
     const d = len(to) - capsuleRadius(q);
-    if (d > cfg.meleeRange || dot(norm(to), v.aim) < 0.4) continue;
-    if (d < bestD) { bestD = d; best = q; }
+    if (d > reach || dot(norm(to), v.aim) < minDot) continue;
+    hits.push(q);
+    if (d < bestD) { bestD = d; nearest = q; }
   }
-  const kick = addScaled(v.aim, v.up, cfg.liftBias);
-  if (best) {
-    best.vel = addScaled(best.vel, norm(kick), cfg.meleeKnockback);
-    best.grounded = false;
-    best.groundNormal = null;
-    damagePlayer(state, best, p.id, cfg.meleeDamage, cfg.meleeDamage, 'melee');
+  for (const q of all ? hits : nearest ? [nearest] : []) {
+    q.vel = addScaled(q.vel, kick, knockback);
+    q.grounded = false;
+    q.groundNormal = null;
+    damagePlayer(state, q, p.id, damage, damage, cause);
   }
   for (const pr of state.props) {
     const to = sub(pr.pos, eye);
-    if (len(to) - pr.radius > cfg.meleeRange || dot(norm(to), v.aim) < 0.4) continue;
-    pr.vel = addScaled(pr.vel, norm(kick), Math.min(40, cfg.meleeKnockback * (PLAYER_MASS / pr.mass)));
+    if (len(to) - pr.radius > reach || dot(norm(to), v.aim) < minDot) continue;
+    pr.vel = addScaled(pr.vel, kick, Math.min(60, knockback * (PLAYER_MASS / pr.mass)));
     pr.contactNormal = null;
   }
-  state.events.push({ type: 'melee', id: p.id, target: best?.id ?? -1, pos: addScaled(eye, v.aim, cfg.meleeRange * 0.6) });
+  state.events.push({ type: 'melee', id: p.id, target: nearest?.id ?? -1, pos: addScaled(eye, v.aim, reach * 0.6) });
 }
 
 function fireBolt(state: SimState, p: Player, kind: BoltKind) {
