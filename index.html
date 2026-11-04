@@ -32,11 +32,16 @@
     </div>
     <div id="feed"></div>
     <div id="dead" class="hidden"></div>
+    <div id="objective"></div>
     <div id="pip-label" class="hidden">INERTIAL VIEW · the ring spins, plasma flies straight</div>
   </div>
 
-  <div id="loading" class="overlay">
+  <div id="loading" class="overlay menu">
     <h1>COMBAT <span>REVOLVES</span></h1>
+    <div class="buttons">
+      <button data-mode="campaign">Campaign</button>
+      <button data-mode="sandbox">Debug sandbox</button>
+    </div>
     <div class="controls">
       <div><b>WASD</b> move</div><div><b>Shift</b> toggle sprint (on)</div>
       <div><b>Mouse</b> look</div><div><b>Space</b> jump · hold for jetpack</div>
@@ -46,22 +51,33 @@
       <div class="wide">Pistol: hold to overcharge · Laser: hold to charge, slows you · Grenades: hold to aim, release to throw</div>
       <div class="wide">Walk over items to pick them up · <b>Esc</b> pause</div>
     </div>
-    <div class="start">Click to spawn</div>
+  </div>
+
+  <div id="levels" class="overlay menu hidden">
+    <h2 id="levels-title"></h2>
+    <div id="level-list"></div>
+    <div class="buttons"><button id="btn-back">Back</button></div>
   </div>
 
   <div id="pause" class="overlay hidden">
     <h2>PAUSED</h2>
-    <div class="controls">
-      <div><b>WASD</b> move</div><div><b>Shift</b> toggle sprint (on)</div>
-      <div><b>Mouse</b> look</div><div><b>Space</b> jump · hold for jetpack</div>
-      <div><b>Left click</b> fire</div><div><b>Right click</b> show trajectory</div>
-      <div><b>1–5</b> weapons you own</div><div><b>Wheel</b> next weapon</div>
-      <div><b>G</b> sticky grenade</div><div><b>F</b> bouncing grenade</div>
-      <div class="wide">Pistol: hold to overcharge · Laser: hold to charge, slows you · Grenades: hold to aim, release to throw</div>
-      <div class="wide">Walk over items to pick them up · <b>Esc</b> pause</div>
+    <div class="buttons">
+      <button id="btn-resume">Resume</button>
+      <button id="btn-restart">Restart level</button>
+      <button id="btn-menu">Quit to menu</button>
     </div>
-    <div class="start">Click to resume</div>
+    <div class="controls"></div>
     <div class="note">Debug settings: panel at top right</div>
+  </div>
+
+  <div id="outcome" class="overlay hidden">
+    <h2 id="outcome-title"></h2>
+    <div id="outcome-sub"></div>
+    <div class="buttons">
+      <button id="btn-next">Next level</button>
+      <button id="btn-retry">Retry</button>
+      <button id="btn-menu2">Menu</button>
+    </div>
   </div>
 
   <script type="module" src="./src/client/main.ts"></script>

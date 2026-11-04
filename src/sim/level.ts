@@ -114,6 +114,13 @@ function boxSdf(p: Vec3, b: Box, out: SdfHit) {
 
 /** Signed distance from p to the level. Positive in free space. */
 export function levelSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
+  switch (level.shape) {
+    case 'ring':
+      return ringSdf(level, cfg, p);
+  }
+}
+
+function ringSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   const out: SdfHit = { d: Infinity, n: [0, 0, 1] };
   const rho = rhoOf(p);
   const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
@@ -208,6 +215,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   };
   const stairs: { angle: number; halfArc: number }[] = [];
   const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
+  const stairTops: Vec3[] = [];
   const at = (angle: number, height: number, z: number): Vec3 => [(R - height) * Math.cos(angle), (R - height) * Math.sin(angle), z];
   // Features scale down on small rings so nothing towers over the axis.
   const k = Math.min(1, R / 60);
@@ -233,6 +241,8 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       const topAngle = start + (dir * along) / R;
       addBox(topAngle, z, STAIR_TOP / 2, (steps * STAIR_RISE) / 2, STAIR_WIDTH / 2, 'stair');
       stairs.push({ angle: mid, halfArc: total / 2 });
+      // a standing spot on the lookout, a little back from the pickup
+      stairTops.push(at(topAngle + (dir * (STAIR_TOP / 2 - 1.2)) / R, steps * STAIR_RISE, z));
       // the lookout's prize: a pulse laser or a jetpack
       pickupSpots.push({ pos: at(topAngle, steps * STAIR_RISE + 1, z), item: topItems[s % 2] });
     }
@@ -262,7 +272,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       else addBox(angle, z, rngRange(rng, 3, 5) * Math.max(k, 0.5), rngRange(rng, 0.4, 0.6) * k, rngRange(rng, 3, 5)); // low platform
     }
   }
-  return { boxes, spawns, pickupSpots, ...walls };
+  return { shape: 'ring', boxes, stairTops, spawns, pickupSpots, ...walls };
 }
 
 export const STAIR_STEPS = 5;

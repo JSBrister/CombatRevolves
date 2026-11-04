@@ -13,6 +13,9 @@ npx tsc -p src/sim # proves the sim compiles without DOM types
 
 **Play online:** this repo builds and deploys itself to GitHub Pages on every push to `main` (enable it under Settings → Pages → Source: GitHub Actions).
 
+**Modes:** *Campaign* (fixed levels: kill every enemy to clear it, no respawns, enemies don't hurt each other) and
+*Debug sandbox* (free-for-all with bots and respawns). Levels are rings of different sizes for now.
+
 **Controls:** WASD move · Shift toggle sprint (on by default) · Space jump (hold in the air with a jetpack) · mouse look ·
 left click fire · right click show trajectory · 1–5 weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
 (hold to aim, release to throw) · walk over items to pick them up · Esc pause.
@@ -34,6 +37,14 @@ Items float at fixed spots (respawning after 25 s): health, sticky and bouncing 
 special weapons, and a jetpack (about 4 s of thrust). Picking up something you already have refills it; if it would do
 nothing, it stays put. When a player dies they drop their special weapons, jetpack and grenades, which last 30 s.
 
+## Where to tweak things
+
+| File | What's in it |
+|---|---|
+| `src/sim/tuning.ts` | **All default numbers**: ring, physics, movement, grenades, explosions, items (`defaultConfig`), every weapon's stats (`defaultWeapons`), and the campaign enemy types (`ENEMY_TYPES`). Commented. |
+| `src/sim/levels.ts` | **Every level**: campaign layouts (ring size, seed, where each enemy stands) and sandbox rings. Add a level by adding an entry. |
+| In game | Pause (Esc): the debug panel changes any of the above live (not saved), and *Give* hands you weapons and items. |
+
 ## Layout
 
 | Path | What |
@@ -43,7 +54,8 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 | `src/sim/level.ts` | Level SDF (hull, rim walls, local-frame boxes) and swept sphere tracing |
 | `src/sim/step.ts` | Players, weapons, projectiles, sticky grenades, explosions, damage and respawn |
 | `src/sim/serialize.ts` | `snapshot`/`restore` and a compact lossless binary encoder |
-| `src/sim/bots.ts` | Scripted bots: pure `state → InputCmd` |
+| `src/sim/bots.ts` | Scripted bots and campaign enemy AI: pure `state → InputCmd` |
+| `src/sim/levels.ts`, `src/sim/tuning.ts` | Level definitions and all tunable defaults (see above) |
 | `src/sim/predict.ts` | Trajectory preview using the real physics |
 | `src/client/` | three.js renderer, interpolation, HUD, lil-gui, WebAudio placeholder sounds |
 | `tests/sim.test.ts` | The correctness spec |
@@ -58,6 +70,8 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 - **Jumping** works for 0.12 s after leaving a surface ("coyote time"). In the air you get a little control, but only up to walk speed.
 - **Weapons are data:** every stat lives in `config.weapons` (per weapon), so the debug panel can tune them live and the state still serializes.
 - **Impact damage:** hitting a surface faster than 22 m/s (normal component) hurts; a knock into a wall credits whoever hit you.
+- **Levels** are data (`levels.ts`): a ring size and seed fix the layout; enemies are placed by angle and z, or on a staircase lookout. `level.shape` is the seam for other kinds of world (only `'ring'` exists): the collision shape, force field and renderer switch on it.
+- **Campaign rules:** teams (you vs enemies) with friendly fire off, no respawns, won when every enemy is dead, lost when you die. Enemy types differ in size (their hitbox scales too), colour, health, speed, weapon, range, accuracy and behaviour (chase, strafe, hold).
 - **Ring size** scales the map: rim walls are capped at 40% of the radius, staircases and cover shrink on small rings.
 - **Obstacle boxes** are axis-aligned in the *local frame* of their ring angle, not in world XYZ. World-aligned boxes would sit crooked on a curved floor.
 - **Inputs:** players without a command for a tick repeat their last one, as a server would. Edge-triggered actions (jump, pistol tap, grenade release) use `prevButtons` stored in state, so they replay exactly.

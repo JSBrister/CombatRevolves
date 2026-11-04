@@ -20,8 +20,11 @@ export class Hud {
     // Spinward is yaw = 0 in the local frame; show it relative to where we face.
     $('spin-arrow').style.transform = `rotate(${-opts.yaw}rad)`;
     if (!me) return;
-    $('shield-fill').style.width = `${(100 * me.shield) / cfg.maxShield}%`;
-    $('health-fill').style.width = `${(100 * Math.max(0, me.health)) / cfg.maxHealth}%`;
+    $('shield-fill').style.width = `${(100 * me.shield) / Math.max(1, me.maxShield)}%`;
+    $('health-fill').style.width = `${(100 * Math.max(0, me.health)) / me.maxHealth}%`;
+    const enemies = state.players.filter((p) => p.enemyType !== '');
+    $('objective').textContent = state.mode === 'campaign' && state.outcome === 'playing'
+      ? `Enemies left: ${enemies.filter((p) => p.alive).length} / ${enemies.length}` : '';
     ($('shield-fill').parentElement as HTMLElement).style.borderColor = me.shield <= 0 ? '#ff6a3d' : '';
     $('weight').textContent = me.apparentG.toFixed(2);
     $('speed').textContent = Math.hypot(...me.vel).toFixed(1);
@@ -50,7 +53,8 @@ export class Hud {
     if (!me.alive) {
       const killer = state.players.find((p) => p.id === me.lastAttacker);
       dead.classList.remove('hidden');
-      dead.textContent = `${killer && killer.id !== me.id ? `Killed by ${killer.name}` : 'You played yourself'} — respawning in ${Math.max(0, (me.respawnTick - state.tick) * DT).toFixed(1)} s`;
+      const by = killer && killer.id !== me.id ? `Killed by ${killer.name}` : 'You played yourself';
+      dead.textContent = me.canRespawn ? `${by} — respawning in ${Math.max(0, (me.respawnTick - state.tick) * DT).toFixed(1)} s` : by;
     } else dead.classList.add('hidden');
     const now = performance.now();
     $('hitmark').style.opacity = now < this.hitUntil ? '1' : '0';

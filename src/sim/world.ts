@@ -1,7 +1,8 @@
 import { generateLevel, spawnPosition } from './level';
 import { localBasis } from './physics';
 import { rngRange } from './rng';
-import { STARTING_WEAPONS, WEAPON_IDS, defaultConfig, neutralInput, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
+import { defaultConfig } from './tuning';
+import { DT, STARTING_WEAPONS, WEAPON_IDS, neutralInput, type GameMode, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
 import type { Vec3 } from './vec';
 
 export const PLAYER_RADIUS = 0.4;
@@ -9,6 +10,13 @@ export const PLAYER_HALF_SEG = 0.5; // capsule segment half-length; total height
 export const PLAYER_STAND = PLAYER_HALF_SEG + PLAYER_RADIUS; // centre height above floor
 export const EYE_OFFSET = 0.7;
 export const PLAYER_MASS = 80;
+
+/** A player's collision capsule, scaled by their size. */
+export const capsuleRadius = (p: Player) => PLAYER_RADIUS * p.size;
+export const capsuleHalfSeg = (p: Player) => PLAYER_HALF_SEG * p.size;
+export const eyeOffset = (p: Player) => EYE_OFFSET * p.size;
+/** Height of the capsule centre above the floor when standing. */
+export const standHeight = (size: number) => PLAYER_STAND * size;
 export const MAX_GRENADES = 4; // of each type
 
 export interface WorldOptions {
@@ -22,17 +30,22 @@ export interface WorldOptions {
   variedWalls?: boolean;
   /** Item pickups at the level's fixed spots (default: same as `obstacles`). */
   pickups?: boolean;
+  mode?: GameMode;
+  levelId?: string;
 }
 
 export function createState(opts: WorldOptions = {}): SimState {
   const config = { ...defaultConfig(), ...(opts.config ?? {}) };
   const state: SimState = {
     tick: 0,
+    mode: opts.mode ?? 'sandbox',
+    levelId: opts.levelId ?? 'custom',
+    outcome: 'playing',
     frameAngle: 0,
     rng: (opts.seed ?? 1234) >>> 0,
     nextId: 1,
     config,
-    level: { boxes: [], spawns: [], pickupSpots: [], wallPos: [], wallNeg: [] },
+    level: { shape: 'ring', boxes: [], stairTops: [], spawns: [], pickupSpots: [], wallPos: [], wallNeg: [] },
     players: [],
     bolts: [],
     grenades: [],
@@ -43,7 +56,7 @@ export function createState(opts: WorldOptions = {}): SimState {
   };
   state.level = generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true);
   if (opts.pickups ?? opts.obstacles ?? true) {
-    for (const spot of state.level.pickupSpots) addPickup(state, spot.item, spot.pos, -1, Math.round(config.pickupRespawn * 120), -1);
+    for (const spot of state.level.pickupSpots) addPickup(state, spot.item, spot.pos, -1, Math.round(config.pickupRespawn / DT), -1);
   }
   if (opts.props ?? true) {
     for (let i = 0; i < 12; i++) {
@@ -82,6 +95,8 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
   const pos = spawnPosition(state.config, spawns[si], PLAYER_STAND);
   const p: Player = {
     id, type: 'player', kind, name,
+    team: id, size: 1, color: -1, enemyType: '',
+    maxHealth: state.config.maxHealth, maxShield: state.config.maxShield, speedScale: 1, canRespawn: true,
     pos, vel: [0, 0, 0],
     yaw: 0, pitch: 0,
     grounded: false, groundNormal: localBasis(pos).up,

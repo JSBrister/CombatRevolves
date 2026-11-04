@@ -2,7 +2,7 @@
 // the previous and current tick.
 
 import * as THREE from 'three';
-import { type Prediction, type SimState, type Vec3, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS } from '../sim';
+import { type Player, type Prediction, type SimState, type Vec3, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS } from '../sim';
 import { makeGun, makePickup } from './models';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
@@ -212,9 +212,10 @@ export class EntityViews {
     return v;
   }
 
-  private createPlayer(id: number, kind: string): PlayerView {
+  private createPlayer(pl: Player): PlayerView {
+    const id = pl.id, kind = pl.kind;
     const group = new THREE.Group();
-    const color = kind === 'human' ? 0x3d7bd9 : kind === 'bot' ? 0xd2553a : 0xd8c040;
+    const color = pl.color >= 0 ? pl.color : kind === 'human' ? 0x3d7bd9 : kind === 'bot' ? 0xd2553a : 0xd8c040;
     const body = new THREE.Mesh(new THREE.CapsuleGeometry(PLAYER_RADIUS, PLAYER_HALF_SEG * 2, 6, 14), new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.5, emissive: 0x000000 }));
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.18, 0.5), new THREE.MeshStandardMaterial({ color: 0xffb030, emissive: 0x6a3a00, metalness: 0.9, roughness: 0.2 }));
     visor.position.set(PLAYER_RADIUS - 0.04, 0.62, 0);
@@ -266,7 +267,7 @@ export class EntityViews {
     const seenP = new Set<number>();
     for (const p of state.players) {
       seenP.add(p.id);
-      const v = this.players.get(p.id) ?? this.createPlayer(p.id, p.kind);
+      const v = this.players.get(p.id) ?? this.createPlayer(p);
       v.group.visible = p.alive;
       v.marker.visible = p.alive;
       if (!p.alive) continue;
@@ -277,6 +278,7 @@ export class EntityViews {
       qy.setFromAxisAngle(Y, -p.yaw);
       v.group.quaternion.copy(q).multiply(qy);
       v.group.position.set(pos[0], pos[1], pos[2]);
+      v.group.scale.setScalar(p.size);
       v.marker.position.copy(v.group.position);
       if (v.gunWeapon !== p.weapon) {
         v.gunHolder.clear();
@@ -290,7 +292,7 @@ export class EntityViews {
       if (p.jetting) v.flame.scale.setScalar(0.7 + Math.random() * 0.5);
       const mat = v.body.material as THREE.MeshStandardMaterial;
       v.shieldFlash = Math.max(0, v.shieldFlash - dtReal * 4);
-      const shieldFrac = p.shield / state.config.maxShield;
+      const shieldFrac = p.shield / Math.max(1, p.maxShield);
       mat.emissive.setRGB(0.2 * v.shieldFlash, 0.5 * v.shieldFlash * (shieldFrac > 0 ? 1 : 0.2), 1.0 * v.shieldFlash * (shieldFrac > 0 ? 1 : 0.1));
     }
     for (const [id, v] of this.players) if (!seenP.has(id)) { v.group.removeFromParent(); v.marker.removeFromParent(); this.players.delete(id); }

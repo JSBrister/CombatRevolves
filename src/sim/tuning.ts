@@ -1,0 +1,159 @@
+// ============================================================================
+//  TUNING: every default number in the game lives here.
+//
+//  - defaultConfig(): world, physics, movement, grenades, explosions, items.
+//  - defaultWeapons(): per-weapon stats (damage, speed, heat, ammo, ...).
+//  - ENEMY_TYPES: campaign enemies (size, colour, health, weapon, behaviour).
+//  Level layouts (ring sizes, enemy placements) are in levels.ts.
+//
+//  Everything here can also be changed live from the in-game debug panel
+//  (pause with Esc). Values set there are not saved: edit this file to keep them.
+//  Units: metres, seconds, m/s, m/s^2. Damage is in hit points (health 100,
+//  shields 70 by default).
+// ============================================================================
+
+import type { SimConfig, WeaponId, WeaponStats } from './types';
+
+export const defaultConfig = (): SimConfig => ({
+  // --- the ring ---------------------------------------------------------------
+  R: 100, // floor radius (m). Each level sets its own.
+  g: 9.81, // apparent gravity at the floor (m/s^2); spin rate omega = sqrt(g / R)
+  halfWidth: 20, // half the ring's width along its axis (m)
+  wallHeight: 15, // tallest rim wall (m); capped at 40% of R
+  wallThickness: 1.5,
+  hullThickness: 3,
+
+  // --- physics ----------------------------------------------------------------
+  centrifugal: true, // debug: switch the fictitious forces off to compare
+  coriolis: true,
+  dragType: 'none', // 'none' | 'linear' | 'quadratic' (air at rest relative to the floor)
+  dragCoeff: 0,
+  restitution: 0.35, // bounciness of balls (0 = dead, 1 = perfectly elastic)
+  friction: 0.5,
+
+  // --- weapons & grenades -------------------------------------------------------
+  weapons: defaultWeapons(), // see below
+  allowHoverGun: false, // debug weapon; the debug panel turns this on
+  muzzleGrenade: 16, // grenade throw speed relative to the thrower (m/s)
+  projectileLifetime: 60, // max life of any bolt or grenade (s)
+  grenadeFuse: 1.2, // sticky: seconds after it sticks
+  bounceFuse: 2.5, // bouncing: seconds after the throw
+  bounceRestitution: 0.6, // bouncing grenade bounciness
+  grenadeMaxFlight: 12, // a sticky that never sticks goes off after this (s)
+
+  // --- grenade explosions (the fuel rod has its own, in its weapon stats) --------
+  explosionRadius: 6,
+  explosionDamage: 110, // at point blank; falls off with distance
+  knockbackSpeed: 20, // point-blank kick for an 80 kg player (m/s)
+  knockbackScale: 1, // multiplies ALL explosion knockback
+  knockbackFalloff: 'linear', // 'none' | 'linear' | 'quadratic'
+  liftBias: 0.35, // extra push toward the axis ("up")
+  selfDamageScale: 0.3, // your own explosions hurt you this much (grenade jumps!)
+
+  // --- world edge -------------------------------------------------------------------
+  fallKillDistance: 25, // fall this far off the ring and you're dead (m)
+
+  // --- items --------------------------------------------------------------------------
+  pickupRespawn: 25, // level pickups come back after (s)
+  dropLifetime: 30, // items dropped on death last (s)
+  jetThrust: 16, // jetpack thrust toward the axis (m/s^2); the floor pulls ~9.8
+  jetLateral: 6, // jetpack steering from WASD (m/s^2)
+  jetBurn: 0.25, // fraction of a full tank used per second (0.25 = 4 s of thrust)
+
+  // --- players --------------------------------------------------------------------------
+  walkSpeed: 9, // (m/s) with sprint toggled off
+  sprintSpeed: 15, // (m/s) sprint is on by default
+  jumpSpeed: 8, // jump kick (m/s); ~3 m high on the default ring
+  groundAccel: 90, // how quickly you reach running speed (m/s^2)
+  airAccel: 6, // air control (m/s^2), only up to walk speed
+  coyoteTime: 0.12, // a jump still works this long after leaving a surface (s)
+  impactDamageSpeed: 22, // hitting a surface faster than this hurts (m/s)
+  impactDamagePerMs: 6, // damage per m/s above that
+  slideDecel: 12, // braking when you land faster than you can run (m/s^2)
+  maxHealth: 100,
+  maxShield: 70,
+  shieldRegenDelay: 4, // shields start recharging this long after a hit (s)
+  shieldRegenRate: 35, // shield points per second
+  respawnTime: 3, // (s) sandbox only; campaign has no respawns
+  friendlyFire: true, // campaign turns this off so enemies don't shoot each other
+});
+
+/** Fills in the fields a weapon doesn't use. */
+const w = (o: Partial<WeaponStats>): WeaponStats => ({
+  muzzle: 25, damage: 7, shieldDamage: 7, interval: 0.1, heatPerShot: 0, coolRate: 0.4, overheatLock: 2.5,
+  radius: 0.12, lifetime: 60, ammoMax: 0, chargeTime: 0,
+  ocMuzzle: 0, ocDamage: 0, ocShieldDamage: 0, ocHeat: 0,
+  blastRadius: 0, blastDamage: 0, blastKnockback: 0, chargeMoveScale: 1, chargeLookScale: 1, ...o,
+});
+
+/**
+ * Weapon stats. Field meanings (see WeaponStats in types.ts):
+ *   muzzle        bolt speed relative to the shooter (m/s)
+ *   damage        health damage per hit; shieldDamage = damage to shields
+ *   interval      seconds between shots
+ *   heatPerShot   0..1 of the heat bar per shot (0 = never overheats)
+ *   coolRate      heat bar per second when not firing
+ *   overheatLock  seconds you're locked out after overheating
+ *   radius        bolt size (m), lifetime = how long a bolt lives (s)
+ *   ammoMax       0 = unlimited (heat-limited); otherwise rounds
+ *   chargeTime    pistol overcharge / laser charge time (s)
+ *   oc*           the pistol's overcharged shot
+ *   blast*        explosion on impact (fuel rod)
+ *   chargeMoveScale / chargeLookScale  laser: movement and aim speed while charging
+ */
+export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
+  rifle: w({ muzzle: 25, damage: 7, shieldDamage: 7, interval: 0.075, heatPerShot: 0.045, coolRate: 0.45, overheatLock: 2.5, radius: 0.12 }),
+  pistol: w({ muzzle: 30, damage: 13, shieldDamage: 13, interval: 0.15, heatPerShot: 0.08, coolRate: 0.3, overheatLock: 2, radius: 0.15,
+    chargeTime: 0.9, ocMuzzle: 14, ocDamage: 20, ocShieldDamage: 120, ocHeat: 0.35 }),
+  redRifle: w({ muzzle: 45, damage: 6, shieldDamage: 6, interval: 0.06, heatPerShot: 0.075, coolRate: 0.5, overheatLock: 3, radius: 0.1 }),
+  launcher: w({ muzzle: 20, damage: 30, shieldDamage: 30, interval: 1.0, radius: 0.3, ammoMax: 10,
+    blastRadius: 5, blastDamage: 100, blastKnockback: 22 }),
+  laser: w({ muzzle: 3000, damage: 110, shieldDamage: 110, interval: 0.4, heatPerShot: 0.5, coolRate: 0.35, overheatLock: 2.5,
+    radius: 0.06, lifetime: 1.5, chargeTime: 0.6, chargeMoveScale: 0.25, chargeLookScale: 0.2 }),
+  hover: w({ muzzle: 0, damage: 10, shieldDamage: 10, interval: 0.125, radius: 0.25 }),
+});
+
+// ---------------------------------------------------------------- enemies
+
+export type Behaviour =
+  | 'chase' // runs at you until in range, then strafes
+  | 'strafe' // keeps its distance, side-steps a lot
+  | 'hold'; // stays where it was placed (snipers on stairs)
+
+export interface EnemyType {
+  name: string;
+  color: number; // body colour (hex)
+  size: number; // 1 = player-sized; scales the collision capsule too
+  health: number;
+  shield: number;
+  speedScale: number; // multiplies run speed
+  weapon: WeaponId; // its only weapon (dropped when it dies, if not a starting one)
+  grenades: number; // sticky
+  bounceGrenades: number;
+  behaviour: Behaviour;
+  range: number; // engages you within this distance (m)
+  aimError: number; // random aim wobble (radians)
+}
+
+export const ENEMY_TYPES: Record<string, EnemyType> = {
+  grunt: {
+    name: 'Grunt', color: 0xe08a2a, size: 0.75, health: 45, shield: 0, speedScale: 0.6, weapon: 'pistol',
+    grenades: 1, bounceGrenades: 0, behaviour: 'chase', range: 30, aimError: 0.12,
+  },
+  soldier: {
+    name: 'Soldier', color: 0x8a3ad0, size: 1, health: 100, shield: 70, speedScale: 0.8, weapon: 'rifle',
+    grenades: 1, bounceGrenades: 1, behaviour: 'strafe', range: 40, aimError: 0.06,
+  },
+  skirmisher: {
+    name: 'Skirmisher', color: 0xd03a3a, size: 0.9, health: 70, shield: 40, speedScale: 1.2, weapon: 'redRifle',
+    grenades: 0, bounceGrenades: 2, behaviour: 'chase', range: 35, aimError: 0.08,
+  },
+  heavy: {
+    name: 'Heavy', color: 0x3a8a4a, size: 1.5, health: 250, shield: 100, speedScale: 0.45, weapon: 'launcher',
+    grenades: 0, bounceGrenades: 0, behaviour: 'chase', range: 45, aimError: 0.05,
+  },
+  sniper: {
+    name: 'Sniper', color: 0x3ad0d0, size: 0.95, health: 60, shield: 30, speedScale: 0, weapon: 'laser',
+    grenades: 0, bounceGrenades: 0, behaviour: 'hold', range: 120, aimError: 0.015,
+  },
+};

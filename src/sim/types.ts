@@ -67,64 +67,8 @@ export interface SimConfig {
   shieldRegenDelay: number; // s
   shieldRegenRate: number; // per s
   respawnTime: number; // s
+  friendlyFire: boolean; // false: teammates can't hurt each other (campaign enemies)
 }
-
-export const defaultConfig = (): SimConfig => ({
-  R: 100,
-  g: 9.81,
-  halfWidth: 20,
-  wallHeight: 15,
-  wallThickness: 1.5,
-  hullThickness: 3,
-
-  centrifugal: true,
-  coriolis: true,
-  dragType: 'none',
-  dragCoeff: 0,
-
-  restitution: 0.35,
-  friction: 0.5,
-
-  weapons: defaultWeapons(),
-  allowHoverGun: false,
-  muzzleGrenade: 16,
-  projectileLifetime: 60,
-  grenadeFuse: 1.2,
-  bounceFuse: 2.5,
-  bounceRestitution: 0.6,
-  grenadeMaxFlight: 12,
-
-  explosionRadius: 6,
-  explosionDamage: 110,
-  knockbackSpeed: 20,
-  knockbackScale: 1,
-  knockbackFalloff: 'linear',
-  liftBias: 0.35,
-  selfDamageScale: 0.3,
-
-  fallKillDistance: 25,
-
-  pickupRespawn: 25,
-  dropLifetime: 30,
-  jetThrust: 16,
-  jetLateral: 6,
-  jetBurn: 0.25,
-
-  walkSpeed: 9,
-  sprintSpeed: 15,
-  jumpSpeed: 8,
-  groundAccel: 90,
-  airAccel: 6,
-  coyoteTime: 0.12,
-  impactDamageSpeed: 22,
-  impactDamagePerMs: 6,
-  slideDecel: 12,
-  maxHealth: 100,
-  maxShield: 70,
-  shieldRegenDelay: 4,
-  shieldRegenRate: 35,
-  respawnTime: 3,
-});
 
 export const omegaOf = (c: SimConfig) => Math.sqrt(c.g / c.R);
 
@@ -176,25 +120,6 @@ export interface WeaponStats {
   chargeLookScale: number;
 }
 
-const w = (o: Partial<WeaponStats>): WeaponStats => ({
-  muzzle: 25, damage: 7, shieldDamage: 7, interval: 0.1, heatPerShot: 0, coolRate: 0.4, overheatLock: 2.5,
-  radius: 0.12, lifetime: 60, ammoMax: 0, chargeTime: 0,
-  ocMuzzle: 0, ocDamage: 0, ocShieldDamage: 0, ocHeat: 0,
-  blastRadius: 0, blastDamage: 0, blastKnockback: 0, chargeMoveScale: 1, chargeLookScale: 1, ...o,
-});
-
-export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
-  rifle: w({ muzzle: 25, damage: 7, shieldDamage: 7, interval: 0.075, heatPerShot: 0.045, coolRate: 0.45, overheatLock: 2.5, radius: 0.12 }),
-  pistol: w({ muzzle: 30, damage: 13, shieldDamage: 13, interval: 0.15, heatPerShot: 0.08, coolRate: 0.3, overheatLock: 2, radius: 0.15,
-    chargeTime: 0.9, ocMuzzle: 14, ocDamage: 20, ocShieldDamage: 120, ocHeat: 0.35 }),
-  redRifle: w({ muzzle: 45, damage: 6, shieldDamage: 6, interval: 0.06, heatPerShot: 0.075, coolRate: 0.5, overheatLock: 3, radius: 0.1 }),
-  launcher: w({ muzzle: 20, damage: 30, shieldDamage: 30, interval: 1.0, radius: 0.3, ammoMax: 10,
-    blastRadius: 5, blastDamage: 100, blastKnockback: 22 }),
-  laser: w({ muzzle: 3000, damage: 110, shieldDamage: 110, interval: 0.4, heatPerShot: 0.5, coolRate: 0.35, overheatLock: 2.5,
-    radius: 0.06, lifetime: 1.5, chargeTime: 0.6, chargeMoveScale: 0.25, chargeLookScale: 0.2 }),
-  hover: w({ muzzle: 0, damage: 10, shieldDamage: 10, interval: 0.125, radius: 0.25 }),
-});
-
 /** One tick of player intent. The ONLY way gameplay is driven. */
 export interface InputCmd {
   playerId: number;
@@ -220,6 +145,14 @@ export interface Player {
   type: 'player';
   kind: PlayerKind;
   name: string;
+  team: number; // players on the same team can't hurt each other unless friendlyFire
+  size: number; // 1 = standard; scales the collision capsule and model
+  color: number; // body colour, -1 = default for the kind
+  enemyType: string; // key into ENEMY_TYPES ('' for humans and sandbox bots)
+  maxHealth: number;
+  maxShield: number;
+  speedScale: number; // multiplies run speed
+  canRespawn: boolean;
   pos: Vec3; // capsule centre
   vel: Vec3; // rotating-frame velocity
   yaw: number;
@@ -349,8 +282,17 @@ export interface SpawnPoint {
   z: number;
 }
 
+/**
+ * Level geometry. `shape` names the kind of world; the collision shape
+ * (level.ts: levelSdf), the force field (physics.ts) and the renderer
+ * (client/scene.ts) switch on it. Only the spinning 'ring' exists so far.
+ */
+export type LevelShape = 'ring';
+
 export interface Level {
+  shape: LevelShape;
   boxes: Box[];
+  stairTops: Vec3[]; // a floor point on each staircase's lookout (add stand height to place a player)
   spawns: SpawnPoint[];
   pickupSpots: { pos: Vec3; item: ItemKind }[];
   /** Rim wall height per equal angular sector, for the +Z and -Z walls. */
@@ -367,13 +309,20 @@ export type SimEvent =
   | { type: 'explode'; id: number; owner: number; pos: Vec3 }
   | { type: 'kill'; killer: number; victim: number; cause: string }
   | { type: 'respawn'; id: number }
+  | { type: 'outcome'; outcome: Outcome }
   | { type: 'pickup'; id: number; item: ItemKind; player: number; pos: Vec3 }
   | { type: 'overheat'; id: number }
   | { type: 'jump'; id: number }
   | { type: 'bodyImpact'; id: number; pos: Vec3; speed: number };
 
+export type GameMode = 'sandbox' | 'campaign';
+export type Outcome = 'playing' | 'won' | 'lost';
+
 export interface SimState {
   tick: number;
+  mode: GameMode;
+  levelId: string;
+  outcome: Outcome; // campaign: won when every enemy is dead, lost when you die
   /** Accumulated spin angle (= omega * t for constant omega). Inertial-frame things render at -frameAngle. */
   frameAngle: number;
   rng: number;

@@ -2,9 +2,10 @@ import GUI from 'lil-gui';
 import * as sim from '../sim';
 import * as THREE from 'three';
 import {
-  DT, EYE_OFFSET, WEAPON_HOVER, WEAPON_IDS, WEAPON_LASER, WEAPON_NAMES, addPlayer, botInput, createState, localBasis, omegaOf,
+  DT, LEVELS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LASER, WEAPON_NAMES, addPlayer, applyItem, botInput, createState, damagePlayer,
+  eyeOffset, levelById, localBasis, omegaOf, startLevel,
   predictTrajectory, removePlayer, step, viewVectors,
-  type BoltKind, type InputCmd, type ThrownKind, type SimConfig, type SimEvent, type SimState, type Vec3,
+  type BoltKind, type GameMode, type InputCmd, type ItemKind, type LevelDef, type ThrownKind, type SimConfig, type SimEvent, type SimState, type Vec3,
 } from '../sim';
 import { Sfx } from './audio';
 import { BOLT_COLORS, EntityViews, type PosMap } from './entities';
@@ -46,25 +47,41 @@ const view = {
   inertial: false,
   freefly: false,
   bots: 3,
-  seed: 1234,
 };
 
-function newWorld() {
-  state = createState({ seed: view.seed, config: cfg });
+let currentLevel: LevelDef = levelById('s-standard')!;
+/** Set when the debug panel's R slider is moved; cleared when a level is picked from the menu. */
+let rOverride: number | null = null;
+
+/** Build `def` using the live (debug-tweakable) config as the base, then the level's own settings. */
+function startGame(def: LevelDef) {
+  currentLevel = def;
+  const ldef = rOverride !== null ? { ...def, config: { ...def.config, R: rOverride } } : def;
+  const started = startLevel(ldef, { ...cfg });
+  state = started.state;
+  Object.assign(cfg, state.config); // the GUI stays bound to the same object
   state.config = cfg;
-  localId = addPlayer(state, 'human', 'You');
-  botIds = [];
-  for (let i = 0; i < view.bots; i++) botIds.push(addPlayer(state, 'bot', `Bot ${String.fromCharCode(65 + i)}`));
+  localId = started.localId;
+  botIds = started.botIds;
+  view.bots = state.mode === 'sandbox' ? botIds.length : 0;
+  outcomeAt = 0;
+  gui.controllersRecursive().forEach((c) => c.updateDisplay());
   rs.build(cfg, state.level);
   views.reset();
   views.localId = localId;
-  input.yaw = 0;
+  input.yaw = state.players.find((p) => p.id === localId)!.yaw;
   input.pitch = 0;
+  input.weapon = 0;
   prev = capture(state);
   prevFrameAngle = state.frameAngle;
 }
 
+function newWorld() {
+  startGame(currentLevel);
+}
+
 function setBotCount(n: number) {
+  if (state.mode !== 'sandbox') return;
   while (botIds.length < n) botIds.push(addPlayer(state, 'bot', `Bot ${String.fromCharCode(65 + botIds.length)}`));
   while (botIds.length > n) removePlayer(state, botIds.pop()!);
 }
@@ -83,7 +100,7 @@ function capture(s: SimState): PosMap {
 const gui = new GUI({ title: 'Debug settings' });
 gui.hide();
 const fRing = gui.addFolder('Ring');
-fRing.add(cfg, 'R', 10, 5000, 5).name('R (m) — rebuilds').onFinishChange(() => newWorld());
+fRing.add(cfg, 'R', 10, 5000, 5).name('R (m) — restarts level').onFinishChange((v: number) => { rOverride = v; newWorld(); });
 fRing.add(cfg, 'g', 1, 30, 0.01).name('g at floor (m/s²)');
 fRing.add(cfg, 'centrifugal').name('centrifugal force');
 fRing.add(cfg, 'coriolis').name('Coriolis force');
@@ -158,8 +175,18 @@ fV.add(view, 'preview').name('trajectory preview');
 fV.add(view, 'inertial').name('inertial-frame overlay').listen();
 fV.add(view, 'freefly').name('free-fly camera').listen().onChange(() => setFreefly(view.freefly));
 fV.add(view, 'bots', 0, 8, 1).name('bots').onFinishChange((n: number) => setBotCount(n));
-fV.add({ hover: () => { cfg.allowHoverGun = true; input.weapon = WEAPON_HOVER; } }, 'hover').name('equip hover gun (debug weapon)');
-fV.add({ reset: () => newWorld() }, 'reset').name('reset world');
+fV.add({ reset: () => newWorld() }, 'reset').name('restart level');
+
+// Give yourself things (debug only: in multiplayer this would be a server command).
+const fGive = gui.addFolder('Give');
+const me_ = () => state.players.find((p) => p.id === localId);
+const give = (item: ItemKind) => () => { const p = me_(); if (p && p.alive) applyItem(cfg, p, item, -1); };
+for (const item of ['redRifle', 'launcher', 'laser', 'rifle', 'pistol'] as ItemKind[]) fGive.add({ f: give(item) }, 'f').name(WEAPON_NAMES[WEAPON_IDS.indexOf(item as never)]);
+fGive.add({ f: () => { cfg.allowHoverGun = true; input.weapon = WEAPON_HOVER; } }, 'f').name('Hover Gun (debug)');
+fGive.add({ f: give('jetpack') }, 'f').name('Jetpack (full)');
+fGive.add({ f: () => { give('sticky')(); give('bounce')(); } }, 'f').name('Grenades (refill)');
+fGive.add({ f: () => { const p = me_(); if (p) { p.health = p.maxHealth; p.shield = p.maxShield; } } }, 'f').name('Health + shields');
+fGive.add({ f: () => { for (const p of state.players) if (p.id !== localId && p.alive) damagePlayer(state, p, localId, 1e6, 1e6, 'debug'); } }, 'f').name('Kill everyone else');
 for (const f of [fRing, fW, fP, fG, fK]) f.close();
 
 // ---------------------------------------------------------------- free-fly
@@ -278,7 +305,8 @@ function frame(now: number) {
     const p0 = prev.get(me.id) ?? me.pos;
     const pos: Vec3 = [p0[0] + (me.pos[0] - p0[0]) * alpha, p0[1] + (me.pos[1] - p0[1]) * alpha, p0[2] + (me.pos[2] - p0[2]) * alpha];
     const v = viewVectors(pos, input.yaw, input.pitch);
-    const eye = new THREE.Vector3(pos[0] + v.up[0] * EYE_OFFSET, pos[1] + v.up[1] * EYE_OFFSET, pos[2] + v.up[2] * EYE_OFFSET);
+    const eo = eyeOffset(me);
+    const eye = new THREE.Vector3(pos[0] + v.up[0] * eo, pos[1] + v.up[1] * eo, pos[2] + v.up[2] * eo);
     camera.position.copy(eye);
     camera.up.set(...v.up);
     camera.lookAt(eye.x + v.aim[0], eye.y + v.aim[1], eye.z + v.aim[2]);
@@ -324,6 +352,7 @@ function frame(now: number) {
     document.getElementById('pip-label')!.style.bottom = `${y + ph + 6}px`;
   }
 
+  checkOutcome(now);
   hud.update(state, me, { yaw: input.yaw, timeScale: view.timeScale, paused: view.paused, freefly: view.freefly, sprintOn: input.sprintOn });
   requestAnimationFrame(frame);
 }
@@ -335,22 +364,23 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
-// ---------------------------------------------------------------- boot
-newWorld();
-resize();
-// ---------------------------------------------------------------- intro / pause
-// Playing == pointer locked. Losing the lock (Esc) pauses and reveals the
-// debug panel; clicking the pause screen re-locks and resumes.
-const loading = document.getElementById('loading')!;
-// one copy of the controls in the HTML: mirror it onto the pause screen
+// ---------------------------------------------------------------- menus
+// Screens: title -> level list -> playing <-> paused, and the campaign's
+// win/lose screen. Playing == pointer locked: losing the lock (Esc) pauses and
+// shows the debug panel.
+type Screen = 'title' | 'levels' | 'playing' | 'paused' | 'outcome';
+let screen: Screen = 'title';
+let outcomeAt = 0; // when the campaign outcome was first seen (performance.now)
+const $ = (id: string) => document.getElementById(id)!;
+const overlays: Record<string, HTMLElement> = { title: $('loading'), levels: $('levels'), paused: $('pause'), outcome: $('outcome') };
 document.querySelector('#pause .controls')!.innerHTML = document.querySelector('#loading .controls')!.innerHTML;
-const pauseEl = document.getElementById('pause')!;
-let started = false;
 
-function setPaused(p: boolean) {
-  view.paused = p;
-  pauseEl.classList.toggle('hidden', !p || !started);
-  if (p && started) gui.show();
+function show(next: Screen) {
+  screen = next;
+  for (const [k, el] of Object.entries(overlays)) el.classList.toggle('hidden', k !== next);
+  $('hud').classList.toggle('hidden', next === 'title' || next === 'levels');
+  view.paused = next !== 'playing';
+  if (next === 'paused') gui.show();
   else gui.hide();
   input.keys.clear();
   input.mouseButtons = 0;
@@ -365,15 +395,67 @@ function requestPlay() {
 
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
-  if (locked && !started) {
-    started = true;
-    loading.classList.add('hidden');
-    document.getElementById('hud')!.classList.remove('hidden');
-  }
-  setPaused(!locked);
+  if (locked) show('playing');
+  else if (screen === 'playing') show(state.outcome !== 'playing' && outcomeAt ? 'outcome' : 'paused');
 });
-loading.addEventListener('click', requestPlay);
-pauseEl.addEventListener('click', requestPlay);
+
+const fmtSpin = (R: number) => `${((2 * Math.PI) / Math.sqrt(cfg.g / R)).toFixed(1)} s spin`;
+function showLevels(mode: GameMode) {
+  $('levels-title').textContent = mode === 'campaign' ? 'CAMPAIGN' : 'DEBUG SANDBOX';
+  const list = $('level-list');
+  list.innerHTML = '';
+  for (const def of LEVELS.filter((l) => l.mode === mode)) {
+    const card = document.createElement('div');
+    card.className = 'level-card';
+    const who = mode === 'campaign' ? `${def.enemies?.length ?? 0} enemies` : `${def.bots ?? 0} bots`;
+    card.innerHTML = `<h3>${def.name}</h3><div class="stats">R ${def.config.R} m · ${fmtSpin(def.config.R ?? 100)} · ${who}</div><p>${def.blurb}</p>`;
+    card.addEventListener('click', () => {
+      rOverride = null;
+      startGame(def);
+      requestPlay();
+    });
+    list.appendChild(card);
+  }
+  show('levels');
+}
+
+for (const b of document.querySelectorAll<HTMLButtonElement>('#loading button[data-mode]')) {
+  b.addEventListener('click', () => showLevels(b.dataset.mode as GameMode));
+}
+$('btn-back').addEventListener('click', () => show('title'));
+$('btn-resume').addEventListener('click', requestPlay);
+$('btn-restart').addEventListener('click', () => { newWorld(); requestPlay(); });
+$('btn-menu').addEventListener('click', () => show('title'));
+$('btn-menu2').addEventListener('click', () => show('title'));
+$('btn-retry').addEventListener('click', () => { newWorld(); requestPlay(); });
+$('btn-next').addEventListener('click', () => {
+  const next = nextCampaignLevel();
+  if (next) { rOverride = null; startGame(next); requestPlay(); }
+});
+
+function nextCampaignLevel(): LevelDef | undefined {
+  const camp = LEVELS.filter((l) => l.mode === 'campaign');
+  return camp[camp.indexOf(currentLevel) + 1];
+}
+
+/** Campaign over: give it a moment, then release the mouse and show the result. */
+function checkOutcome(now: number) {
+  if (state.mode !== 'campaign' || state.outcome === 'playing') return;
+  if (!outcomeAt) outcomeAt = now;
+  if (now - outcomeAt < 1500 || screen === 'outcome') return;
+  const won = state.outcome === 'won';
+  $('outcome-title').textContent = won ? 'LEVEL CLEAR' : 'YOU DIED';
+  const next = nextCampaignLevel();
+  $('outcome-sub').textContent = won ? (next ? `Next: ${next.name}` : 'That was the last level. For now.') : currentLevel.name;
+  $('btn-next').classList.toggle('hidden', !won || !next);
+  if (document.pointerLockElement === canvas) document.exitPointerLock(); // -> pointerlockchange -> outcome
+  else show('outcome');
+}
+
+// ---------------------------------------------------------------- boot
+startGame(currentLevel); // backdrop behind the title screen
+resize();
+show('title');
 requestAnimationFrame((t) => {
   last = t;
   frame(t);
@@ -381,5 +463,6 @@ requestAnimationFrame((t) => {
 
 // Debug handle (console / automated checks).
 (window as unknown as { __game: unknown }).__game = {
-  get state() { return state; }, get localId() { return localId; }, sim, input, view, cfg, gui, views, newWorld, setFreefly, setPaused, localBasis, omegaOf,
+  get state() { return state; }, get localId() { return localId; }, get screen() { return screen; }, sim, input, view, cfg, gui, views,
+  newWorld, startGame, levelById, show, setFreefly, localBasis, omegaOf,
 };

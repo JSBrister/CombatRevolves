@@ -4,7 +4,8 @@ import {
   addPlayer, addProp, botInput, createState, decode, detonate, encode, falloff, hash01, integrate,
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
-  WEAPON_HOVER, WEAPON_LASER, WEAPON_LAUNCHER, WEAPON_RED, applyItem, damagePlayer, addScaled, dot, type InputCmd, type SimState, type Vec3,
+  WEAPON_HOVER, WEAPON_LASER, WEAPON_LAUNCHER, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
+  LEVELS, levelById, startLevel, add, scale, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -763,4 +764,85 @@ describe('19. ring size range', () => {
       expect(p.grounded).toBe(true);
     });
   }
+});
+
+describe('20. levels and campaign', () => {
+  it('every level builds; enemies stand on the floor or their lookout', () => {
+    for (const def of LEVELS) {
+      const { state, localId, botIds } = startLevel(def);
+      expect(state.mode).toBe(def.mode);
+      expect(state.config.R).toBe(def.config.R);
+      if (def.mode === 'campaign') expect(botIds.length).toBe(def.enemies!.length);
+      else expect(botIds.length).toBe(def.bots ?? 0);
+      run(state, 60, (s) => [cmdFor(s, localId)]);
+      for (const p of state.players) {
+        expect(p.pos.every(Number.isFinite)).toBe(true);
+        expect(p.grounded).toBe(true);
+      }
+      const snipers = state.players.filter((p) => p.enemyType === 'sniper');
+      for (const sn of snipers) expect(state.config.R - Math.hypot(sn.pos[0], sn.pos[1])).toBeGreaterThan(5);
+    }
+  });
+  it('campaign: enemies cannot hurt each other, only you', () => {
+    const { state, localId } = startLevel(levelById('c1')!);
+    const [a, b] = state.players.filter((p) => p.enemyType);
+    const me = state.players.find((p) => p.id === localId)!;
+    const hb = b.health + b.shield;
+    damagePlayer(state, b, a.id, 50, 50, 'test');
+    expect(b.health + b.shield).toBe(hb);
+    const hm = me.health + me.shield;
+    damagePlayer(state, me, a.id, 50, 50, 'test');
+    expect(me.health + me.shield).toBe(hm - 50);
+  });
+  it('campaign: won when every enemy is dead, no respawns; dropped weapons are loot', () => {
+    const { state, localId } = startLevel(levelById('c4')!);
+    const heavy = state.players.find((p) => p.enemyType === 'heavy')!;
+    for (const e of state.players.filter((p) => p.enemyType)) damagePlayer(state, e, localId, 1e6, 1e6, 'test');
+    step(state, [], state.tick);
+    expect(state.outcome).toBe('won');
+    expect(state.events.some((e) => e.type === 'outcome' && e.outcome === 'won')).toBe(true);
+    expect(state.pickups.some((k) => k.item === 'launcher' && k.expireTick > 0)).toBe(true);
+    run(state, 600);
+    expect(heavy.alive).toBe(false); // stays dead
+  });
+  it('campaign: lost when you die', () => {
+    const { state, localId } = startLevel(levelById('c1')!);
+    const me = state.players.find((p) => p.id === localId)!;
+    damagePlayer(state, me, -1, 1e6, 1e6, 'test');
+    step(state, [], state.tick);
+    expect(state.outcome).toBe('lost');
+    run(state, 600);
+    expect(me.alive).toBe(false);
+  });
+  it('enemy size scales the hitbox: a bolt that misses you hits a heavy', () => {
+    const hitsAt = (size: number) => {
+      const s = empty();
+      addPlayer(s, 'human', 'P');
+      run(s, 20);
+      const p = s.players[0];
+      p.size = size;
+      const b = localBasis(p.pos);
+      // a bolt passing 0.7 m from the capsule axis: misses 0.4 + 0.12, hits 0.6 + 0.12
+      const from = add(add(p.pos, scale(b.axial, -3)), scale(b.spin, 0.7));
+      spawnBolt(s, -1, 'rifle', from, scale(b.axial, 30));
+      run(s, 30);
+      return p.health + p.shield < s.config.maxHealth + s.config.maxShield;
+    };
+    expect(hitsAt(1)).toBe(false);
+    expect(hitsAt(1.5)).toBe(true);
+  });
+  it('a campaign level plays out deterministically with enemies attacking you', { timeout: 30000 }, () => {
+    const play = () => {
+      const { state, localId, botIds } = startLevel(levelById('c1')!);
+      let hitsOnMe = 0;
+      for (let i = 0; i < 120 * 40 && state.outcome === 'playing'; i++) {
+        step(state, [cmdFor(state, localId, { moveY: 1, yaw: 0, buttons: BTN_SPRINT }), ...botIds.map((b) => botInput(state, b))], state.tick);
+        hitsOnMe += state.events.filter((e) => e.type === 'hit' && e.target === localId).length;
+      }
+      return { bytes: encode(state), hitsOnMe };
+    };
+    const a = play(), b = play();
+    expect(a.hitsOnMe).toBeGreaterThan(0);
+    expect(bytesEqual(a.bytes, b.bytes)).toBe(true);
+  });
 });

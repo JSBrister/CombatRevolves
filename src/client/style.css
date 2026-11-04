@@ -47,10 +47,22 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 #dead { position: absolute; top: 38%; width: 100%; text-align: center; font-size: 24px; color: var(--warn); }
 #pip-label { position: absolute; right: 16px; bottom: calc(38vh + 26px); font-size: 11px; letter-spacing: 1px; color: #ffd27a; }
 
-.overlay { position: fixed; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; padding: 16px; text-align: center; overflow-y: auto; }
-#loading { background: radial-gradient(ellipse at center, #0b1530 0%, #02030a 70%); }
+.overlay { position: fixed; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; text-align: center; overflow-y: auto; }
+#levels, #outcome { background: rgba(2, 3, 10, 0.85); }
+.buttons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin: 8px 0 28px; }
+.overlay button { font: inherit; font-size: 16px; letter-spacing: 2px; color: #dff6ff; background: rgba(20, 40, 70, 0.6); border: 1px solid var(--hud-dim); padding: 10px 22px; cursor: pointer; }
+.overlay button:hover { border-color: #f2c94c; color: #f2c94c; }
+#level-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; width: min(900px, 100%); margin-bottom: 16px; }
+.level-card { text-align: left; padding: 14px 16px; background: rgba(15, 30, 55, 0.7); border: 1px solid var(--hud-dim); cursor: pointer; color: #cfe9ff; }
+.level-card:hover { border-color: #f2c94c; }
+.level-card h3 { margin: 0 0 4px; font-size: 17px; font-weight: 600; color: #dff6ff; }
+.level-card .stats { font-family: ui-monospace, monospace; font-size: 12px; color: #f2c94c; margin-bottom: 6px; }
+.level-card p { margin: 0; font-size: 13px; line-height: 1.5; opacity: 0.85; }
+#outcome-sub { margin: -16px 0 24px; opacity: 0.8; }
+#objective { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); font-size: 14px; letter-spacing: 1px; color: #ffb37a; }
+#loading { background: radial-gradient(ellipse at center, rgba(11, 21, 48, 0.92) 0%, rgba(2, 3, 10, 0.97) 70%); }
 #pause { background: rgba(2, 3, 10, 0.72); }
-.overlay h1 { margin: 0 0 36px; font-size: clamp(32px, 7vw, 72px); letter-spacing: 6px; font-weight: 300; color: #dff6ff; }
+.overlay h1 { margin: 0 0 28px; font-size: clamp(32px, 7vw, 72px); letter-spacing: 6px; font-weight: 300; color: #dff6ff; }
 .overlay h1 span { color: #f2c94c; font-weight: 700; }
 .overlay h2 { margin: 0 0 28px; font-size: 32px; letter-spacing: 8px; font-weight: 300; color: #dff6ff; }
 .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 240px)); gap: 6px 28px; font-size: 15px; color: #cfe9ff; text-align: left; max-width: 100%; }

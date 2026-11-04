@@ -10,11 +10,11 @@ import {
   BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LASER,
   omegaOf,
   type Bolt, type BoltKind, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
-  type Player, type Prop, type SimConfig, type SimState, type WeaponId,
+  type Outcome, type Player, type Prop, type SimConfig, type SimState, type WeaponId,
 } from './types';
 import { type Vec3, add, addScaled, clone, dist, dot, len, norm, rhoOf, scale, sub } from './vec';
 import {
-  EYE_OFFSET, MAX_GRENADES, PLAYER_HALF_SEG, PLAYER_MASS, PLAYER_RADIUS, PLAYER_STAND, addPickup, allocId, dummyHome,
+  MAX_GRENADES, PLAYER_MASS, addPickup, allocId, capsuleHalfSeg, capsuleRadius, dummyHome, eyeOffset, standHeight,
 } from './world';
 
 const secs = (s: number) => Math.round(s / DT);
@@ -45,7 +45,7 @@ export function muzzleSpeed(cfg: SimConfig, kind: BoltKind | ThrownKind): number
 /** Where a player's shots originate. */
 export function muzzlePoint(p: Player, yaw = p.yaw, pitch = p.pitch, grenade = false): Vec3 {
   const v = viewVectors(p.pos, yaw, pitch);
-  const eye = addScaled(p.pos, v.up, EYE_OFFSET);
+  const eye = addScaled(p.pos, v.up, eyeOffset(p));
   if (grenade) return addScaled(eye, v.aim, 0.5);
   return add(add(addScaled(eye, v.aim, 0.6), scale(v.right, 0.18)), scale(v.up, -0.12));
 }
@@ -90,7 +90,8 @@ export function spawnGrenade(state: SimState, owner: number, pos: Vec3, vel: Vec
 
 const capsuleEnds = (p: Player): [Vec3, Vec3] => {
   const up = localBasis(p.pos).up;
-  return [addScaled(p.pos, up, -PLAYER_HALF_SEG), addScaled(p.pos, up, PLAYER_HALF_SEG)];
+  const h = capsuleHalfSeg(p);
+  return [addScaled(p.pos, up, -h), addScaled(p.pos, up, h)];
 };
 
 // =========================================================================== step
@@ -135,6 +136,7 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   // 6. vitals / respawn, then item pickups
   for (const p of state.players) updateVitals(state, p);
   updatePickups(state);
+  if (state.mode === 'campaign') updateOutcome(state);
   for (const p of state.players) p.prevButtons = p.lastInput.buttons;
 
   state.tick++;
@@ -163,7 +165,7 @@ function movePlayer(state: SimState, p: Player, omega: number) {
     // rotating-frame velocity, since the floor is static in this frame).
     const n = p.groundNormal;
     const sprint = (inp.buttons & BTN_SPRINT) !== 0 && my > 0.3;
-    const speed = (sprint ? cfg.sprintSpeed : cfg.walkSpeed) * chargeSlow;
+    const speed = (sprint ? cfg.sprintSpeed : cfg.walkSpeed) * chargeSlow * p.speedScale;
     let wish = add(scale(vv.forward, my * speed), scale(vv.right, mx * speed));
     wish = sub(wish, scale(n, dot(wish, n)));
     const vn = dot(p.vel, n);
@@ -253,9 +255,9 @@ function resolvePlayerLevel(state: SimState, p: Player): { ground: Vec3 | null; 
     const up = localBasis(p.pos).up;
     let any = false;
     for (let k = -1; k <= 1; k++) {
-      const c = addScaled(p.pos, up, k * PLAYER_HALF_SEG);
+      const c = addScaled(p.pos, up, k * capsuleHalfSeg(p));
       const hit = levelSdf(state.level, cfg, c);
-      const gap = hit.d - PLAYER_RADIUS;
+      const gap = hit.d - capsuleRadius(p);
       if (gap < 0.004) {
         if (gap < 0) {
           p.pos = addScaled(p.pos, hit.n, -gap);
@@ -286,7 +288,7 @@ function collidePlayers(state: SimState) {
       if (dist(a.pos, b.pos) > 3) continue;
       const [a0, a1] = capsuleEnds(a), [b0, b1] = capsuleEnds(b);
       const c = segSegClosest(a0, a1, b0, b1);
-      const minD = 2 * PLAYER_RADIUS;
+      const minD = capsuleRadius(a) + capsuleRadius(b);
       if (c.d2 >= minD * minD) continue;
       const pa = addScaled(a0, sub(a1, a0), c.s), pb = addScaled(b0, sub(b1, b0), c.t);
       let n = sub(pa, pb);
@@ -413,7 +415,7 @@ function collideProps(state: SimState) {
       const [p0, p1] = capsuleEnds(p);
       const c = closestOnSeg(a.pos, p0, p1);
       const dv = sub(a.pos, c.point);
-      const d = len(dv), minD = a.radius + PLAYER_RADIUS;
+      const d = len(dv), minD = a.radius + capsuleRadius(p);
       if (d >= minD || d < 1e-9) continue;
       const n = scale(dv, 1 / d);
       const wa = PLAYER_MASS / (a.mass + PLAYER_MASS), wp = a.mass / (a.mass + PLAYER_MASS);
@@ -576,7 +578,7 @@ function sweep(state: SimState, p0: Vec3, p1: Vec3, radius: number, owner: numbe
     if (dist(pl.pos, p0) > segLen + 3) continue;
     const [a, b] = capsuleEnds(pl);
     const c = segSegClosest(p0, p1, a, b);
-    const rr = radius + PLAYER_RADIUS;
+    const rr = radius + capsuleRadius(pl);
     if (c.d2 < rr * rr && (!best || c.s < best.s)) {
       best = { s: c.s, pos: addScaled(p0, sub(p1, p0), c.s), player: pl, prop: null };
     }
@@ -592,7 +594,7 @@ function stillInsideOwner(state: SimState, pos: Vec3, radius: number, owner: num
   const pl = state.players.find((q) => q.id === owner);
   if (!pl || !pl.alive) return false;
   const [a, b] = capsuleEnds(pl);
-  return dist(closestOnSeg(pos, a, b).point, pos) < radius + PLAYER_RADIUS + 0.05;
+  return dist(closestOnSeg(pos, a, b).point, pos) < radius + capsuleRadius(pl) + 0.05;
 }
 
 function updateBolts(state: SimState, omega: number) {
@@ -742,7 +744,7 @@ export function detonate(state: SimState, c: Vec3, owner: number, sourceId: numb
     if (!p.alive) continue;
     const [e0, e1] = capsuleEnds(p);
     const q = closestOnSeg(c, e0, e1).point;
-    const d = Math.max(0, dist(c, q) - PLAYER_RADIUS);
+    const d = Math.max(0, dist(c, q) - capsuleRadius(p));
     if (d >= rad) continue;
     const f = falloff(cfg, d / rad);
     const up = localBasis(p.pos).up;
@@ -772,6 +774,10 @@ export function knockDir(away: Vec3, up: Vec3, liftBias: number): Vec3 {
 
 export function damagePlayer(state: SimState, p: Player, attacker: number, damage: number, shieldDamage: number, cause: string) {
   if (!p.alive) return;
+  if (!state.config.friendlyFire && attacker !== p.id) {
+    const a = state.players.find((q) => q.id === attacker);
+    if (a && a.team === p.team) return;
+  }
   let healthDmg = damage;
   let shieldBroken = false;
   if (p.shield > 0 && shieldDamage > 0) {
@@ -827,6 +833,19 @@ function dropItems(state: SimState, p: Player) {
   });
 }
 
+/** Campaign: won when every enemy is dead, lost when the human dies. Decided once. */
+function updateOutcome(state: SimState) {
+  if (state.outcome !== 'playing') return;
+  const humans = state.players.filter((p) => p.kind === 'human');
+  const enemies = state.players.filter((p) => p.enemyType !== '');
+  let outcome: Outcome = 'playing';
+  if (humans.length && humans.every((p) => !p.alive)) outcome = 'lost';
+  else if (enemies.length && enemies.every((p) => !p.alive)) outcome = 'won';
+  if (outcome === 'playing') return;
+  state.outcome = outcome;
+  state.events.push({ type: 'outcome', outcome });
+}
+
 // =========================================================================== pickups
 
 const PICKUP_RANGE = 1.3;
@@ -836,8 +855,8 @@ export function applyItem(cfg: SimConfig, p: Player, item: ItemKind, amount: num
   const full = amount < 0;
   switch (item) {
     case 'health':
-      if (p.health >= cfg.maxHealth) return false;
-      p.health = cfg.maxHealth;
+      if (p.health >= p.maxHealth) return false;
+      p.health = p.maxHealth;
       return true;
     case 'sticky':
       if (p.grenades >= MAX_GRENADES) return false;
@@ -882,7 +901,7 @@ function updatePickups(state: SimState) {
     if (it.expireTick >= 0 && tick >= it.expireTick) continue;
     if (tick >= it.activeAt) {
       for (const p of state.players) {
-        if (!p.alive || p.kind === 'dummy' || dist(p.pos, it.pos) > PICKUP_RANGE) continue;
+        if (!p.alive || p.kind === 'dummy' || p.enemyType !== '' || dist(p.pos, it.pos) > PICKUP_RANGE) continue;
         if (!applyItem(cfg, p, it.item, it.amount)) continue;
         state.events.push({ type: 'pickup', id: it.id, item: it.item, player: p.id, pos: clone(it.pos) });
         it.activeAt = it.respawnTicks > 0 ? tick + it.respawnTicks : Infinity;
@@ -898,23 +917,23 @@ function updatePickups(state: SimState) {
 function updateVitals(state: SimState, p: Player) {
   const cfg = state.config;
   if (p.alive) {
-    if (state.tick - p.lastDamageTick > secs(cfg.shieldRegenDelay) && p.shield < cfg.maxShield)
-      p.shield = Math.min(cfg.maxShield, p.shield + cfg.shieldRegenRate * DT);
+    if (state.tick - p.lastDamageTick > secs(cfg.shieldRegenDelay) && p.shield < p.maxShield)
+      p.shield = Math.min(p.maxShield, p.shield + cfg.shieldRegenRate * DT);
     // Fell (or was blasted) off the ring: dead once far enough from it.
     const spaced = distanceOffRing(cfg, p.pos) > cfg.fallKillDistance;
     if (spaced) kill(state, p, p.lastAttacker >= 0 && state.tick - p.lastDamageTick < secs(15) ? p.lastAttacker : p.id, 'spaced');
     return;
   }
-  if (state.tick < p.respawnTick) return;
+  if (state.tick < p.respawnTick || !p.canRespawn) return;
   // respawn
   const spawns = state.level.spawns;
   let si = p.homeSpawn;
   if (p.kind !== 'dummy') si = rngInt(state, spawns.length);
-  p.pos = p.homeSpawn < 0 ? dummyHome(cfg, p.homeSpawn) : spawnPosition(cfg, spawns[si], PLAYER_STAND);
+  p.pos = p.homeSpawn < 0 ? dummyHome(cfg, p.homeSpawn) : spawnPosition(cfg, spawns[si], standHeight(p.size));
   p.vel = [0, 0, 0];
   p.alive = true;
-  p.health = cfg.maxHealth;
-  p.shield = cfg.maxShield;
+  p.health = p.maxHealth;
+  p.shield = p.maxShield;
   p.grounded = false;
   p.groundNormal = localBasis(p.pos).up;
   p.owned = [...STARTING_WEAPONS];
