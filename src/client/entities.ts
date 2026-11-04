@@ -3,11 +3,20 @@
 
 import * as THREE from 'three';
 import { type Prediction, type SimState, type Vec3, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS } from '../sim';
+import { makeGun, makePickup } from './models';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
+
+const PICKUP_GLOW: Record<string, number> = {
+  health: 0xff6060, sticky: 0x7fb6ff, bounce: 0xffd23a, redRifle: 0xff4a3a, launcher: 0x9dff3a, laser: 0xbffcff, jetpack: 0xffa040,
+  rifle: 0x55c8ff, pistol: 0x8dff5a,
+};
 
 export type PosMap = Map<number, Vec3>;
 
-const BOLT_COLORS: Record<string, number> = { rifle: 0x55c8ff, pistol: 0x8dff5a, overcharge: 0x5dff7a, hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a };
+const BOLT_COLORS: Record<string, number> = {
+  rifle: 0x55c8ff, redRifle: 0xff4a3a, pistol: 0x8dff5a, overcharge: 0x5dff7a, fuelRod: 0x9dff3a, laser: 0xbffcff,
+  hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a,
+};
 
 /** Fading polyline trail stored as a ring buffer. */
 class Trail {
@@ -71,6 +80,15 @@ interface PlayerView {
   body: THREE.Mesh;
   shieldFlash: number;
   marker: THREE.Sprite;
+  gunHolder: THREE.Group; // floating gun beside the player, pitched with their aim
+  gunWeapon: number;
+  flame: THREE.Sprite; // jetpack exhaust
+}
+
+interface PickupView {
+  group: THREE.Group;
+  model: THREE.Group;
+  glow: THREE.Sprite;
 }
 
 export class EntityViews {
@@ -79,6 +97,10 @@ export class EntityViews {
   projs = new Map<number, ProjView>();
   props = new Map<number, THREE.Mesh>();
   explosions = new Map<number, THREE.Mesh>();
+  pickups = new Map<number, PickupView>();
+  /** First-person gun, attached to the camera (main view only). */
+  viewModel = new THREE.Group();
+  private viewWeapon = -1;
   trailTicks = 180;
   localId = -1;
   cameraPos = new THREE.Vector3();
@@ -100,6 +122,31 @@ export class EntityViews {
     this.previewMarker.renderOrder = 10;
     this.previewMarker.visible = false;
     this.root.add(this.preview, this.previewMarker, this.flashLight);
+    this.viewModel.position.set(0.2, -0.17, -0.42);
+    this.viewModel.scale.setScalar(0.38);
+    this.viewModel.rotation.y = Math.PI / 2; // gun +X -> camera forward (-Z)
+  }
+
+  private beams: { line: THREE.Line; t: number }[] = [];
+
+  /** A brief fading beam for the pulse laser (its bolt lands within a tick or two, too fast for a trail). */
+  addBeam(from: Vec3, to: Vec3) {
+    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...from), new THREE.Vector3(...to)]);
+    const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xbffcff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    line.frustumCulled = false;
+    this.root.add(line);
+    this.beams.push({ line, t: 1 });
+  }
+
+  /** Show the local player's current weapon in first person. */
+  setViewWeapon(weapon: number, visible: boolean) {
+    this.viewModel.visible = visible;
+    if (weapon === this.viewWeapon) return;
+    this.viewModel.clear();
+    const gun = makeGun(weapon);
+    gun.traverse((o) => o.layers.set(LAYER_ROT_TRAILS)); // main camera only
+    this.viewModel.add(gun);
+    this.viewWeapon = weapon;
   }
 
   reset() {
@@ -107,7 +154,8 @@ export class EntityViews {
     for (const v of this.projs.values()) this.disposeProj(v);
     for (const v of this.props.values()) v.removeFromParent();
     for (const v of this.explosions.values()) v.removeFromParent();
-    this.players.clear(); this.projs.clear(); this.props.clear(); this.explosions.clear();
+    for (const v of this.pickups.values()) v.group.removeFromParent();
+    this.players.clear(); this.projs.clear(); this.props.clear(); this.explosions.clear(); this.pickups.clear();
   }
 
   private makeGlow(color: number, size: number, layer = 0) {
@@ -152,7 +200,7 @@ export class EntityViews {
 
   private createProj(id: number, kind: string, radius: number): ProjView {
     const color = BOLT_COLORS[kind] ?? 0xffffff;
-    const sprite = this.makeGlow(color, radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 7 : 6));
+    const sprite = this.makeGlow(color, radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 7 : kind === 'laser' ? 12 : 6));
     const core = new THREE.Mesh(new THREE.SphereGeometry(radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 1 : 0.45), 12, 8), new THREE.MeshBasicMaterial({ color: kind === 'grenade' ? 0xcfe4ff : kind === 'bounceGrenade' ? 0xfff0a0 : 0xffffff, fog: false }));
     const marker = this.makeGlow(color, Math.max(1.5, this.rs.starRadius / 1500), LAYER_INERTIAL_ONLY);
     const max = Math.max(4, Math.round(this.trailTicks / 2));
@@ -172,7 +220,12 @@ export class EntityViews {
     visor.position.set(PLAYER_RADIUS - 0.04, 0.62, 0);
     const pack = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.6, 0.5), new THREE.MeshStandardMaterial({ color: 0x333a44 }));
     pack.position.set(-PLAYER_RADIUS, 0.2, 0);
-    group.add(body, visor, pack);
+    const gunHolder = new THREE.Group();
+    gunHolder.position.set(0.15, 0.45, 0.42); // floating at the right hand (local +Z = right)
+    const flame = this.makeGlow(0xff8a2a, 0.9);
+    flame.position.set(-PLAYER_RADIUS - 0.1, -0.35, 0);
+    flame.visible = false;
+    group.add(body, visor, pack, gunHolder, flame);
     if (kind === 'dummy') {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.05, 6, 20), new THREE.MeshBasicMaterial({ color: 0xff3020 }));
       ring.rotation.y = Math.PI / 2;
@@ -182,7 +235,7 @@ export class EntityViews {
     if (id === this.localId) group.traverse((o) => o.layers.set(LAYER_SELF));
     const marker = this.makeGlow(kind === 'human' ? 0x66aaff : 0xff6644, Math.max(4, this.rs.starRadius / 600), LAYER_INERTIAL_ONLY);
     this.root.add(group, marker);
-    const v = { group, body, shieldFlash: 0, marker };
+    const v = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, flame };
     this.players.set(id, v);
     return v;
   }
@@ -225,6 +278,16 @@ export class EntityViews {
       v.group.quaternion.copy(q).multiply(qy);
       v.group.position.set(pos[0], pos[1], pos[2]);
       v.marker.position.copy(v.group.position);
+      if (v.gunWeapon !== p.weapon) {
+        v.gunHolder.clear();
+        const gun = makeGun(p.weapon);
+        if (p.id === this.localId) gun.traverse((o) => o.layers.set(LAYER_SELF));
+        v.gunHolder.add(gun);
+        v.gunWeapon = p.weapon;
+      }
+      v.gunHolder.rotation.z = p.pitch; // tip the gun up/down with the aim
+      v.flame.visible = p.jetting;
+      if (p.jetting) v.flame.scale.setScalar(0.7 + Math.random() * 0.5);
       const mat = v.body.material as THREE.MeshStandardMaterial;
       v.shieldFlash = Math.max(0, v.shieldFlash - dtReal * 4);
       const shieldFrac = p.shield / state.config.maxShield;
@@ -284,6 +347,36 @@ export class EntityViews {
     }
     for (const [id, mesh] of this.props) if (!seenR.has(id)) { mesh.removeFromParent(); this.props.delete(id); }
 
+    // pickups: floating, spinning, glowing; hidden while waiting to respawn
+    const seenK = new Set<number>();
+    const tNow = performance.now() / 1000;
+    for (const it of state.pickups) {
+      seenK.add(it.id);
+      let v = this.pickups.get(it.id);
+      if (!v) {
+        const group = new THREE.Group();
+        const model = makePickup(it.item);
+        const glow = this.makeGlow(PICKUP_GLOW[it.item] ?? 0xffffff, 1.6);
+        glow.material.opacity = 0.45;
+        group.add(model, glow);
+        this.root.add(group);
+        v = { group, model, glow };
+        this.pickups.set(it.id, v);
+      }
+      const active = state.tick >= it.activeAt;
+      // dropped items blink for their last 5 seconds
+      const ending = it.expireTick >= 0 && it.expireTick - state.tick < 600;
+      v.group.visible = active && (!ending || Math.sin(tNow * 12) > 0);
+      if (!v.group.visible) continue;
+      const b = localBasis(it.pos);
+      m.makeBasis(new THREE.Vector3(...b.spin), new THREE.Vector3(...b.up), new THREE.Vector3(...b.axial));
+      v.group.quaternion.setFromRotationMatrix(m);
+      const bob = 0.12 * Math.sin(tNow * 2 + it.id);
+      v.group.position.set(it.pos[0] + b.up[0] * bob, it.pos[1] + b.up[1] * bob, it.pos[2] + b.up[2] * bob);
+      v.model.rotation.y = tNow * 1.5 + it.id;
+    }
+    for (const [id, v] of this.pickups) if (!seenK.has(id)) { v.group.removeFromParent(); this.pickups.delete(id); }
+
     // explosions
     const seenE = new Set<number>();
     for (const e of state.explosions) {
@@ -301,6 +394,12 @@ export class EntityViews {
     }
     for (const [id, mesh] of this.explosions) if (!seenE.has(id)) { mesh.removeFromParent(); this.explosions.delete(id); }
 
+    for (const b of this.beams) {
+      b.t -= dtReal * 2.5;
+      (b.line.material as THREE.LineBasicMaterial).opacity = Math.max(0, b.t);
+      if (b.t <= 0) { b.line.removeFromParent(); b.line.geometry.dispose(); }
+    }
+    this.beams = this.beams.filter((b) => b.t > 0);
     this.flashT = Math.max(0, this.flashT - dtReal * 3);
     this.flashLight.intensity = 60 * this.flashT;
   }

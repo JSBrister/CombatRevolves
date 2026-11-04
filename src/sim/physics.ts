@@ -96,16 +96,20 @@ function applyDrag(v: Vec3, h: number, cfg: SimConfig) {
 }
 
 function kick(r: Vec3, v: Vec3, h: number, omega: number, cfg: SimConfig, support: Vec3 | null) {
-  if (!cfg.centrifugal) return;
-  const w2 = omega * omega;
+  const w2 = cfg.centrifugal ? omega * omega : 0;
   let ax = w2 * r[0], ay = w2 * r[1], az = 0;
   if (support) {
-    // Contact constraint: a surface we rest on cancels the part of the
-    // fictitious force pushing into it (the normal force). `support` is the
-    // surface normal pointing out of the surface.
-    const an = ax * support[0] + ay * support[1] + az * support[2];
+    // Contact constraint: a surface we rest on supplies a normal force that
+    // cancels the part of the TOTAL fictitious acceleration (centrifugal +
+    // Coriolis) pushing into it. `support` is the outward surface normal.
+    // (Cancelling only the centrifugal part let Coriolis lift a body running
+    // antispinward off the floor every few ticks, which broke jumping.)
+    let tx = ax, ty = ay;
+    if (cfg.coriolis) { tx += 2 * omega * v[1]; ty -= 2 * omega * v[0]; }
+    const an = tx * support[0] + ty * support[1];
     if (an < 0) { ax -= an * support[0]; ay -= an * support[1]; az -= an * support[2]; }
   }
+  if (ax === 0 && ay === 0 && az === 0) return;
   v[0] += ax * h; v[1] += ay * h; v[2] += az * h;
 }
 

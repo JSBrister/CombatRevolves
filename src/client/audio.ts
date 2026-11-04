@@ -57,6 +57,9 @@ export class Sfx {
   shot(kind: string, d: number) {
     const a = Sfx.att(d);
     if (kind === 'rifle') this.tone('square', 900, 260, 0.09, 0.18 * a);
+    else if (kind === 'redRifle') this.tone('square', 1300, 420, 0.07, 0.16 * a);
+    else if (kind === 'fuelRod') { this.tone('sawtooth', 160, 60, 0.4, 0.35 * a); this.noise(0.25, 0.2 * a, 900); }
+    else if (kind === 'laser') { this.tone('sawtooth', 2400, 300, 0.25, 0.3 * a); this.tone('sine', 4000, 3000, 0.12, 0.15 * a); }
     else if (kind === 'pistol') this.tone('sawtooth', 1300, 400, 0.12, 0.2 * a);
     else if (kind === 'overcharge') { this.tone('sawtooth', 300, 1200, 0.35, 0.3 * a); this.tone('sine', 120, 60, 0.4, 0.3 * a); }
     else if (kind === 'hover') this.tone('sine', 400, 1600, 0.25, 0.2 * a);
@@ -71,5 +74,6 @@ export class Sfx {
   overheat() { this.noise(0.6, 0.25, 4000); this.tone('sine', 700, 200, 0.6, 0.15); }
   jump() { this.tone('sine', 220, 330, 0.08, 0.05); }
   bounce(d: number, speed: number) { this.tone('triangle', 900, 500, 0.07, Math.min(0.25, 0.04 * speed) * Sfx.att(d)); }
+  pickup() { this.tone('sine', 660, 990, 0.08, 0.15); this.tone('sine', 990, 1320, 0.1, 0.12); }
   thud(d: number) { this.tone('sine', 120, 60, 0.12, 0.2 * Sfx.att(d)); }
 }

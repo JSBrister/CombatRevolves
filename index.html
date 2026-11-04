@@ -20,10 +20,14 @@
     <div id="motion">
       <div><span id="weight">1.00</span><small> g apparent</small></div>
       <div><span id="speed">0.0</span><small> m/s vs floor</small></div>
+      <div class="small" id="sprint"></div>
     </div>
     <div id="weapon">
+      <div id="weapons"></div>
       <div id="weapon-name"></div>
       <div class="bar heat"><div id="heat-fill"></div></div>
+      <div id="ammo"></div>
+      <div class="bar jet" id="jet"><div></div></div>
       <div id="grenades"></div>
     </div>
     <div id="feed"></div>
@@ -34,12 +38,13 @@
   <div id="loading" class="overlay">
     <h1>COMBAT <span>REVOLVES</span></h1>
     <div class="controls">
-      <div><b>WASD</b> move</div><div><b>Shift</b> sprint · <b>Space</b> jump</div>
-      <div><b>Mouse</b> look</div><div><b>Left click</b> fire</div>
-      <div><b>Right click</b> show trajectory</div><div><b>1</b> plasma rifle · <b>2</b> plasma pistol</div>
-      <div><b>Wheel</b> swap weapon</div><div>Pistol: <b>hold</b> to overcharge</div>
+      <div><b>WASD</b> move</div><div><b>Shift</b> toggle sprint (on)</div>
+      <div><b>Mouse</b> look</div><div><b>Space</b> jump · hold for jetpack</div>
+      <div><b>Left click</b> fire</div><div><b>Right click</b> show trajectory</div>
+      <div><b>1–5</b> weapons you own</div><div><b>Wheel</b> next weapon</div>
       <div><b>G</b> sticky grenade</div><div><b>F</b> bouncing grenade</div>
-      <div class="wide">Grenades: hold to aim, release to throw · <b>Esc</b> pause</div>
+      <div class="wide">Pistol: hold to overcharge · Laser: hold to charge, slows you · Grenades: hold to aim, release to throw</div>
+      <div class="wide">Walk over items to pick them up · <b>Esc</b> pause</div>
     </div>
     <div class="start">Click to spawn</div>
   </div>
@@ -47,12 +52,13 @@
   <div id="pause" class="overlay hidden">
     <h2>PAUSED</h2>
     <div class="controls">
-      <div><b>WASD</b> move</div><div><b>Shift</b> sprint · <b>Space</b> jump</div>
-      <div><b>Mouse</b> look</div><div><b>Left click</b> fire</div>
-      <div><b>Right click</b> show trajectory</div><div><b>1</b> plasma rifle · <b>2</b> plasma pistol</div>
-      <div><b>Wheel</b> swap weapon</div><div>Pistol: <b>hold</b> to overcharge</div>
+      <div><b>WASD</b> move</div><div><b>Shift</b> toggle sprint (on)</div>
+      <div><b>Mouse</b> look</div><div><b>Space</b> jump · hold for jetpack</div>
+      <div><b>Left click</b> fire</div><div><b>Right click</b> show trajectory</div>
+      <div><b>1–5</b> weapons you own</div><div><b>Wheel</b> next weapon</div>
       <div><b>G</b> sticky grenade</div><div><b>F</b> bouncing grenade</div>
-      <div class="wide">Grenades: hold to aim, release to throw · <b>Esc</b> pause</div>
+      <div class="wide">Pistol: hold to overcharge · Laser: hold to charge, slows you · Grenades: hold to aim, release to throw</div>
+      <div class="wide">Walk over items to pick them up · <b>Esc</b> pause</div>
     </div>
     <div class="start">Click to resume</div>
     <div class="note">Debug settings: panel at top right</div>

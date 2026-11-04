@@ -34,6 +34,13 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 #weapon { position: absolute; right: 16px; bottom: 16px; width: 220px; text-align: right; }
 #weapon-name { font-size: 15px; letter-spacing: 1px; margin-bottom: 4px; }
 #grenades { font-size: 16px; letter-spacing: 2px; }
+#weapons { font-family: ui-monospace, monospace; font-size: 13px; margin-bottom: 4px; }
+#weapons span { display: inline-block; width: 20px; text-align: center; margin-left: 3px; border: 1px solid var(--hud-dim); }
+#weapons span.cur { border-color: var(--hud); background: rgba(159, 230, 255, 0.2); }
+#weapons span.no { opacity: 0.25; border-style: dashed; }
+#ammo { font-family: ui-monospace, monospace; font-size: 18px; min-height: 0; }
+.bar.jet > div { background: #ffa040; box-shadow: 0 0 6px #ff7a20; }
+#motion .small { font-size: 12px; opacity: 0.7; }
 #grenades .sticky { color: #7fb6ff; }
 #grenades .bounce { color: #ffd23a; }
 #feed { position: absolute; right: 16px; top: 12px; font-size: 13px; text-align: right; line-height: 1.6; }

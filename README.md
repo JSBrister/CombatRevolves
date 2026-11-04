@@ -11,12 +11,28 @@ npm run headless   # runs the sim with 4 bots in Node, no DOM/three.js
 npx tsc -p src/sim # proves the sim compiles without DOM types
 ```
 
-**Play online:** https://jsbrister.github.io/CombatRevolves/ (built and deployed by GitHub Actions on every push to `main`).
+**Play online:** this repo builds and deploys itself to GitHub Pages on every push to `main` (enable it under Settings → Pages → Source: GitHub Actions).
 
-**Controls:** WASD move · Shift sprint · Space jump · mouse look · left click fire · right click show trajectory ·
-1 plasma rifle · 2 plasma pistol (hold to overcharge) · wheel swap · G sticky grenade · F bouncing grenade (hold to aim, release to throw) · Esc pause.
-The debug panel (ring size, forces, speeds, time scale, inertial-frame overlay, free-fly camera, hover gun, bots) only appears while paused.
-G sticky grenade / F bouncing grenade (hold to aim, release to throw) · 1/2/3 rifle/pistol/hover gun · I inertial overlay · V free-fly camera · T slow-mo · P pause · B add bot · H help.
+**Controls:** WASD move · Shift toggle sprint (on by default) · Space jump (hold in the air with a jetpack) · mouse look ·
+left click fire · right click show trajectory · 1–5 weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
+(hold to aim, release to throw) · walk over items to pick them up · Esc pause.
+The debug panel (ring size 10–5000 m, forces, movement, every weapon's stats, time scale, inertial-frame overlay, free-fly camera,
+hover gun, bots) only appears while paused.
+
+## Weapons and items
+
+| Slot | Weapon | Notes |
+|---|---|---|
+| 1 | Plasma rifle | Automatic, overheats. Starting weapon. |
+| 2 | Plasma pistol | Tap to fire, hold to overcharge (strips shields). Starting weapon. |
+| 3 | Red plasma rifle | Faster bolts, overheats sooner. |
+| 4 | Fuel rod launcher | 10 rounds; slow bolt that explodes on impact with its own blast settings. |
+| 5 | Pulse laser | Hold to charge (you move and aim slowly meanwhile); fires a ~3 km/s bolt. |
+| — | Hover gun | Debug only: fires a bolt at rest in the inertial frame. |
+
+Items float at fixed spots (respawning after 25 s): health, sticky and bouncing grenade refills (max 4 of each), the
+special weapons, and a jetpack (about 4 s of thrust). Picking up something you already have refills it; if it would do
+nothing, it stays put. When a player dies they drop their special weapons, jetpack and grenades, which last 30 s.
 
 ## Layout
 
@@ -37,7 +53,12 @@ G sticky grenade / F bouncing grenade (hold to aim, release to throw) · 1/2/3 r
 - **Rotating frame everywhere.** The level is static, and up is −radial. The stars, sun, planet and inertial trails live in a group rotated by −`frameAngle`. `frameAngle` is accumulated in sim state each tick, so it equals ω·t when ω is constant and stays continuous if you change g.
 - **Integrator:** symmetric splitting D·K·C·X·C·K·D (drag, centrifugal kick, *exact* Coriolis rotation, drift). Coriolis acts like a magnetic force, so this is the rotating-frame Boris pusher. It is time-reversible and 2nd-order, the Coriolis step never does work, and the Jacobi integral oscillates with no secular drift. RK4 is 4th-order but drifts slowly in energy and costs 4× the force evaluations.
 - **Exact projectiles:** with drag = 0 (and both forces on), bolts and grenades use the analytic inertial straight line, rotated back by −ωt. They apply it from the current state each tick, which is mathematically identical to applying it once from launch, and the test checks the two agree to 1e-9 m. Hits are swept per tick with SDF sphere tracing, so nothing tunnels.
-- **Contacts:** a resting body gets an explicit support (normal) force that cancels the into-surface part of the centrifugal force. A body at rest therefore stays *exactly* at rest, with no Coriolis creep from penetration jitter. Push-outs compensate kinetic energy so the Jacobi integral survives bounces.
+- **Contacts:** a resting body gets an explicit support (normal) force that cancels the into-surface part of the *total* fictitious force (centrifugal + Coriolis). A body at rest therefore stays *exactly* at rest, and a player running antispinward stays on the floor (cancelling only the centrifugal part used to let Coriolis lift them off every few ticks, which broke jumping). Push-outs compensate kinetic energy so the Jacobi integral survives bounces.
+- **Apparent weight** on the HUD is measured from what the contact actually did each tick, so it includes the floor's curvature: running at speed v you weigh (ωR ± v)²/R.
+- **Jumping** works for 0.12 s after leaving a surface ("coyote time"). In the air you get a little control, but only up to walk speed.
+- **Weapons are data:** every stat lives in `config.weapons` (per weapon), so the debug panel can tune them live and the state still serializes.
+- **Impact damage:** hitting a surface faster than 22 m/s (normal component) hurts; a knock into a wall credits whoever hit you.
+- **Ring size** scales the map: rim walls are capped at 40% of the radius, staircases and cover shrink on small rings.
 - **Obstacle boxes** are axis-aligned in the *local frame* of their ring angle, not in world XYZ. World-aligned boxes would sit crooked on a curved floor.
 - **Inputs:** players without a command for a tick repeat their last one, as a server would. Edge-triggered actions (jump, pistol tap, grenade release) use `prevButtons` stored in state, so they replay exactly.
 - **Snapshots** use the binary encoder, not JSON, because JSON turns −0 into 0. That can flip an `atan2` branch and break bit-exact replay.
@@ -52,3 +73,4 @@ G sticky grenade / F bouncing grenade (hold to aim, release to throw) · 1/2/3 r
 - Player-vs-player and prop collisions are simple positional pushes. There is no rigid-body rotation, and prop rolling is visual only.
 - Explosions ignore line of sight.
 - Bots aim in a straight line and don't compensate for Coriolis. That is on purpose.
+- Pickups are floating items, not physics objects. Dropped items hang where they land, 0.7 m above the floor.

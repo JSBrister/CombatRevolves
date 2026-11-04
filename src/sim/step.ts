@@ -7,40 +7,39 @@ import { levelSdf, sphereTrace, spawnPosition } from './level';
 import { advanceFree, fictitiousAccel, integrate, localBasis, viewVectors } from './physics';
 import { rngInt } from './rng';
 import {
-  BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, omegaOf,
-  WEAPON_HOVER, WEAPON_PISTOL, WEAPON_RIFLE,
-  type Bolt, type BoltKind, type Grenade, type GrenadeKind, type InputCmd, type Level, type ThrownKind, type Player, type Prop, type SimConfig, type SimState,
+  BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LASER,
+  omegaOf,
+  type Bolt, type BoltKind, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
+  type Player, type Prop, type SimConfig, type SimState, type WeaponId,
 } from './types';
 import { type Vec3, add, addScaled, clone, dist, dot, len, norm, rhoOf, scale, sub } from './vec';
 import {
-  EYE_OFFSET, MAX_GRENADES, PLAYER_HALF_SEG, PLAYER_MASS, PLAYER_RADIUS, PLAYER_STAND, allocId, dummyHome,
+  EYE_OFFSET, MAX_GRENADES, PLAYER_HALF_SEG, PLAYER_MASS, PLAYER_RADIUS, PLAYER_STAND, addPickup, allocId, dummyHome,
 } from './world';
 
 const secs = (s: number) => Math.round(s / DT);
 
-export const BOLT_SPECS: Record<BoltKind, { radius: number; damage: number; shieldDamage: number }> = {
-  rifle: { radius: 0.12, damage: 7, shieldDamage: 7 },
-  pistol: { radius: 0.15, damage: 13, shieldDamage: 13 },
-  overcharge: { radius: 0.45, damage: 20, shieldDamage: 120 },
-  hover: { radius: 0.25, damage: 10, shieldDamage: 10 },
-};
 export const GRENADE_RADIUS = 0.15;
-const RIFLE_INTERVAL = 9; // ticks (~13 shots/s)
-const RIFLE_HEAT_PER_SHOT = 0.045;
-const RIFLE_OVERHEAT_LOCK = 2.5; // s
-const PISTOL_INTERVAL = 18;
-const PISTOL_CHARGE_DELAY = 30; // ticks of holding before charging starts
-const PISTOL_CHARGE_TIME = 0.9; // s
+const PISTOL_CHARGE_DELAY = 30; // ticks of holding before the overcharge starts building
+
+/** Which weapon's stats a bolt kind uses. */
+export const BOLT_WEAPON: Record<BoltKind, WeaponId> = {
+  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', overcharge: 'pistol', fuelRod: 'launcher', laser: 'laser', hover: 'hover',
+};
+const WEAPON_BOLT: Record<WeaponId, BoltKind> = {
+  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', laser: 'laser', hover: 'hover',
+};
+
+/** Muzzle speed, damage, radius and lifetime of a bolt kind, from the live config. */
+export function boltStats(cfg: SimConfig, kind: BoltKind) {
+  const w = cfg.weapons[BOLT_WEAPON[kind]];
+  if (kind === 'overcharge') return { muzzle: w.ocMuzzle, damage: w.ocDamage, shieldDamage: w.ocShieldDamage, radius: 0.45, lifetime: w.lifetime };
+  return { muzzle: w.muzzle, damage: w.damage, shieldDamage: w.shieldDamage, radius: w.radius, lifetime: w.lifetime };
+}
 
 export function muzzleSpeed(cfg: SimConfig, kind: BoltKind | ThrownKind): number {
-  switch (kind) {
-    case 'rifle': return cfg.muzzleRifle;
-    case 'pistol': return cfg.muzzlePistol;
-    case 'overcharge': return cfg.muzzleOvercharge;
-    case 'grenade': return cfg.muzzleGrenade;
-    case 'bounceGrenade': return cfg.muzzleGrenade;
-    case 'hover': return 0;
-  }
+  if (kind === 'grenade' || kind === 'bounceGrenade') return cfg.muzzleGrenade;
+  return boltStats(cfg, kind).muzzle;
 }
 
 /** Where a player's shots originate. */
@@ -67,11 +66,11 @@ export function launchVelocity(cfg: SimConfig, p: Player, kind: BoltKind | Throw
 
 /** Spawn helpers (also used by tests). */
 export function spawnBolt(state: SimState, owner: number, kind: BoltKind, pos: Vec3, vel: Vec3): Bolt {
-  const spec = BOLT_SPECS[kind];
+  const spec = boltStats(state.config, kind);
   const b: Bolt = {
     id: allocId(state), type: 'bolt', kind, owner, pos: clone(pos), vel: clone(vel), launchVel: clone(vel),
     radius: spec.radius, damage: spec.damage, shieldDamage: spec.shieldDamage,
-    armed: owner < 0, spawnTick: state.tick, expireTick: state.tick + secs(state.config.projectileLifetime),
+    armed: owner < 0, spawnTick: state.tick, expireTick: state.tick + secs(Math.min(spec.lifetime, state.config.projectileLifetime)),
   };
   state.bolts.push(b);
   return b;
@@ -133,8 +132,9 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   updateGrenades(state, omega);
   state.explosions = state.explosions.filter((e) => tick < e.endTick);
 
-  // 6. vitals / respawn
+  // 6. vitals / respawn, then item pickups
   for (const p of state.players) updateVitals(state, p);
+  updatePickups(state);
   for (const p of state.players) p.prevButtons = p.lastInput.buttons;
 
   state.tick++;
@@ -146,21 +146,24 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
 
 function movePlayer(state: SimState, p: Player, omega: number) {
   const cfg = state.config;
+  const tick = state.tick;
   const inp = p.lastInput;
   p.yaw = inp.yaw;
   p.pitch = clamp(inp.pitch, -1.55, 1.55);
   const pressed = inp.buttons & ~p.prevButtons;
   const vv = viewVectors(p.pos, p.yaw, 0);
+  let mx = clamp(inp.moveX, -1, 1), my = clamp(inp.moveY, -1, 1);
+  const ml = Math.hypot(mx, my);
+  if (ml > 1) { mx /= ml; my /= ml; }
+  // Charging the pulse laser slows you right down.
+  const chargeSlow = p.weapon === WEAPON_LASER && p.charge > 0 ? cfg.weapons.laser.chargeMoveScale : 1;
 
   if (p.grounded && p.groundNormal) {
     // On the ground, input sets velocity RELATIVE TO THE FLOOR (which is the
     // rotating-frame velocity, since the floor is static in this frame).
     const n = p.groundNormal;
-    let mx = clamp(inp.moveX, -1, 1), my = clamp(inp.moveY, -1, 1);
-    const ml = Math.hypot(mx, my);
-    if (ml > 1) { mx /= ml; my /= ml; }
     const sprint = (inp.buttons & BTN_SPRINT) !== 0 && my > 0.3;
-    const speed = sprint ? cfg.sprintSpeed : cfg.walkSpeed;
+    const speed = (sprint ? cfg.sprintSpeed : cfg.walkSpeed) * chargeSlow;
     let wish = add(scale(vv.forward, my * speed), scale(vv.right, mx * speed));
     wish = sub(wish, scale(n, dot(wish, n)));
     const vn = dot(p.vel, n);
@@ -170,42 +173,81 @@ function movePlayer(state: SimState, p: Player, omega: number) {
     const maxDv = (sliding ? cfg.slideDecel : cfg.groundAccel) * DT;
     const dvl = len(dv);
     p.vel = add(p.vel, dvl > maxDv ? scale(dv, maxDv / dvl) : dv);
-    if (pressed & BTN_JUMP) {
-      // Jump = impulse along local up. Fictitious forces do the rest, so jump
-      // height and drift depend on direction of motion.
-      p.vel = addScaled(p.vel, vv.up, cfg.jumpSpeed);
-      p.grounded = false;
-      p.groundNormal = null;
-      state.events.push({ type: 'jump', id: p.id });
-    }
+  } else if (ml > 0.01) {
+    // Air control: accelerate along the wish direction, but only up to walk speed.
+    const up = vv.up;
+    let wish = add(scale(vv.forward, my), scale(vv.right, mx));
+    wish = norm(sub(wish, scale(up, dot(wish, up))));
+    const along = dot(p.vel, wish);
+    const add_ = Math.min(cfg.airAccel * DT, Math.max(0, cfg.walkSpeed * Math.min(1, ml) - along));
+    if (add_ > 0) p.vel = addScaled(p.vel, wish, add_);
   }
-  // Airborne: pure physics, no air control.
+
+  // Jump: an impulse along local up. Fictitious forces do the rest, so jump
+  // height and drift depend on direction of motion. A short "coyote time"
+  // keeps jumps working just after leaving a surface.
+  const canJump = p.grounded || (tick - p.lastGroundTick <= secs(cfg.coyoteTime) && p.lastJumpTick < p.lastGroundTick);
+  let jumped = false;
+  if (pressed & BTN_JUMP && canJump) {
+    p.vel = addScaled(p.vel, vv.up, cfg.jumpSpeed);
+    p.grounded = false;
+    p.groundNormal = null;
+    p.lastJumpTick = tick;
+    jumped = true;
+    state.events.push({ type: 'jump', id: p.id });
+  }
+
+  // Jetpack: hold jump while airborne.
+  p.jetting = false;
+  if (!p.grounded && !jumped && p.hasJetpack && p.jetFuel > 0 && inp.buttons & BTN_JUMP) {
+    let lateral = add(scale(vv.forward, my), scale(vv.right, mx));
+    if (len(lateral) > 1) lateral = norm(lateral);
+    p.vel = addScaled(addScaled(p.vel, vv.up, cfg.jetThrust * DT), lateral, cfg.jetLateral * DT);
+    p.jetFuel = Math.max(0, p.jetFuel - cfg.jetBurn * DT);
+    p.jetting = true;
+  }
 
   const support = p.grounded ? p.groundNormal : null;
+  const v0 = clone(p.vel);
+  const r0 = clone(p.pos);
   const n = clamp(Math.ceil((len(p.vel) * DT) / 0.2), 1, 24);
   const h = DT / n;
   let ground: Vec3 | null = null;
+  let impact = 0;
   for (let i = 0; i < n; i++) {
     integrate(p.pos, p.vel, h, omega, cfg, support);
-    const g = resolvePlayerLevel(state, p);
-    if (g) ground = g;
+    const res = resolvePlayerLevel(state, p);
+    if (res.ground) ground = res.ground;
+    impact = Math.max(impact, res.impact);
   }
   p.grounded = ground !== null;
   p.groundNormal = ground;
+  if (ground) p.lastGroundTick = tick;
 
-  // Apparent weight: normal force per unit mass / g. Airborne = weightless.
+  // Apparent weight = the normal force per unit mass, measured from what the
+  // contact actually did this tick (includes the floor's curvature):
+  // N = dv.n/dt - a_fictitious.n. Airborne = weightless.
   let target = 0;
-  if (ground) {
-    const a = fictitiousAccel(p.pos, p.vel, omega, cfg);
-    target = Math.max(0, -dot(a, ground)) / cfg.g;
+  if (ground && !jumped) {
+    const a = fictitiousAccel(r0, v0, omega, cfg);
+    target = Math.max(0, dot(sub(p.vel, v0), ground) / DT - dot(a, ground)) / cfg.g;
   }
   p.apparentG += (target - p.apparentG) * 0.12;
+
+  // Slamming into something fast hurts.
+  if (impact > cfg.impactDamageSpeed) {
+    const dmg = (impact - cfg.impactDamageSpeed) * cfg.impactDamagePerMs;
+    const credit = p.lastAttacker >= 0 && tick - p.lastDamageTick < secs(10) ? p.lastAttacker : p.id;
+    state.events.push({ type: 'bodyImpact', id: p.id, pos: clone(p.pos), speed: impact });
+    damagePlayer(state, p, credit, dmg, dmg, 'impact');
+  }
 }
 
-/** Push the capsule (3 spheres) out of the level. Returns a walkable ground normal if touching one. */
-function resolvePlayerLevel(state: SimState, p: Player): Vec3 | null {
+/** Push the capsule (3 spheres) out of the level. Returns a walkable ground normal if touching one, and the impact speed. */
+function resolvePlayerLevel(state: SimState, p: Player): { ground: Vec3 | null; impact: number } {
   const cfg = state.config;
   let ground: Vec3 | null = null;
+  let impact = 0;
   let bestUp = 0.6;
   for (let iter = 0; iter < 3; iter++) {
     const up = localBasis(p.pos).up;
@@ -220,14 +262,17 @@ function resolvePlayerLevel(state: SimState, p: Player): Vec3 | null {
           any = true;
         }
         const vn = dot(p.vel, hit.n);
-        if (vn < 0) p.vel = addScaled(p.vel, hit.n, -vn);
+        if (vn < 0) {
+          p.vel = addScaled(p.vel, hit.n, -vn);
+          impact = Math.max(impact, -vn);
+        }
         const u = dot(hit.n, up);
         if (u > bestUp) { bestUp = u; ground = hit.n; }
       }
     }
     if (!any) break;
   }
-  return ground;
+  return { ground, impact };
 }
 
 function collidePlayers(state: SimState) {
@@ -400,6 +445,8 @@ export function distanceOffRing(cfg: SimConfig, pos: Vec3): number {
 
 // =========================================================================== weapons
 
+export const isOwned = (cfg: SimConfig, p: Player, w: number) => p.owned.includes(w) || (w === WEAPON_HOVER && cfg.allowHoverGun);
+
 function updateWeapons(state: SimState, p: Player, omega: number) {
   const cfg = state.config;
   const tick = state.tick;
@@ -408,56 +455,82 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
   const pressed = btn & ~p.prevButtons;
   const released = p.prevButtons & ~btn;
 
-  if (inp.weapon !== p.weapon && inp.weapon >= 0 && inp.weapon <= 2) {
+  // Switch to the requested weapon if we own it.
+  if (inp.weapon !== p.weapon && inp.weapon >= 0 && inp.weapon < WEAPON_IDS.length && isOwned(cfg, p, inp.weapon)) {
     p.weapon = inp.weapon;
-    p.pistolCharge = 0;
-    p.pistolHoldTicks = 0;
+    p.charge = 0;
+    p.holdTicks = 0;
+    p.needRelease = false;
     p.fireReadyTick = Math.max(p.fireReadyTick, tick + secs(0.25));
   }
+  if (!isOwned(cfg, p, p.weapon)) p.weapon = p.owned[0] ?? 0;
 
-  // passive cooling
-  const firingRifle = p.weapon === WEAPON_RIFLE && (btn & BTN_FIRE) !== 0 && tick >= p.rifleOverheatUntil;
-  if (!firingRifle) p.rifleHeat = Math.max(0, p.rifleHeat - (tick < p.rifleOverheatUntil ? 1 / RIFLE_OVERHEAT_LOCK : 0.45) * DT);
-  p.pistolHeat = Math.max(0, p.pistolHeat - 0.3 * DT);
+  const wi = p.weapon;
+  const id = WEAPON_IDS[wi];
+  const st = cfg.weapons[id];
+  const held = (btn & BTN_FIRE) !== 0;
+  const locked = tick < p.overheatUntil[wi];
+  const hasAmmo = st.ammoMax === 0 || p.ammo[wi] > 0;
+  const ready = tick >= p.fireReadyTick && !locked && hasAmmo && p.heat[wi] < 1;
 
-  if (p.weapon === WEAPON_RIFLE) {
-    if (firingRifle && tick >= p.fireReadyTick) {
-      fireBolt(state, p, 'rifle');
-      p.fireReadyTick = tick + RIFLE_INTERVAL;
-      p.rifleHeat += RIFLE_HEAT_PER_SHOT;
-      if (p.rifleHeat >= 1) {
-        p.rifleHeat = 1;
-        p.rifleOverheatUntil = tick + secs(RIFLE_OVERHEAT_LOCK);
+  // Passive cooling (the active weapon doesn't cool while its trigger is held).
+  for (let i = 0; i < WEAPON_IDS.length; i++) {
+    if (i === wi && held && !locked) continue;
+    const ws = cfg.weapons[WEAPON_IDS[i]];
+    const rate = tick < p.overheatUntil[i] ? 1 / Math.max(0.1, ws.overheatLock) : ws.coolRate;
+    p.heat[i] = Math.max(0, p.heat[i] - rate * DT);
+  }
+
+  const shoot = (kind: BoltKind, heat: number, interval: number) => {
+    fireBolt(state, p, kind);
+    p.fireReadyTick = tick + Math.max(1, secs(interval));
+    if (st.ammoMax > 0) p.ammo[wi]--;
+    if (heat > 0) {
+      p.heat[wi] += heat;
+      if (p.heat[wi] >= 1) {
+        p.heat[wi] = 1;
+        p.overheatUntil[wi] = tick + secs(st.overheatLock);
         state.events.push({ type: 'overheat', id: p.id });
       }
     }
-  } else if (p.weapon === WEAPON_PISTOL) {
-    if (pressed & BTN_FIRE) {
-      p.pistolHoldTicks = 0;
-      p.pistolCharge = 0;
-      if (tick >= p.fireReadyTick && p.pistolHeat < 1) {
-        fireBolt(state, p, 'pistol');
-        p.fireReadyTick = tick + PISTOL_INTERVAL;
-        p.pistolHeat = Math.min(1, p.pistolHeat + 0.08);
+  };
+
+  switch (id) {
+    case 'rifle':
+    case 'redRifle':
+      if (held && ready) shoot(WEAPON_BOLT[id], st.heatPerShot, st.interval);
+      break;
+    case 'launcher':
+    case 'hover':
+      if (pressed & BTN_FIRE && ready) shoot(WEAPON_BOLT[id], st.heatPerShot, st.interval);
+      break;
+    case 'pistol':
+      // Tap to fire; keep holding to build an overcharge, release to let it go.
+      if (pressed & BTN_FIRE) {
+        p.holdTicks = 0;
+        p.charge = 0;
+        if (ready) shoot('pistol', st.heatPerShot, st.interval);
+      } else if (held) {
+        p.holdTicks++;
+        if (p.holdTicks > PISTOL_CHARGE_DELAY && p.heat[wi] < 1) p.charge = Math.min(1, p.charge + DT / Math.max(0.05, st.chargeTime));
       }
-    } else if (btn & BTN_FIRE) {
-      p.pistolHoldTicks++;
-      if (p.pistolHoldTicks > PISTOL_CHARGE_DELAY && p.pistolHeat < 1) p.pistolCharge = Math.min(1, p.pistolCharge + DT / PISTOL_CHARGE_TIME);
-    }
-    if (released & BTN_FIRE) {
-      if (p.pistolCharge >= 1) {
-        fireBolt(state, p, 'overcharge');
-        p.pistolHeat = Math.min(1, p.pistolHeat + 0.35);
-        p.fireReadyTick = tick + secs(0.4);
+      if (released & BTN_FIRE) {
+        if (p.charge >= 1 && !locked) shoot('overcharge', st.ocHeat, 0.4);
+        p.charge = 0;
+        p.holdTicks = 0;
       }
-      p.pistolCharge = 0;
-      p.pistolHoldTicks = 0;
-    }
-  } else if (p.weapon === WEAPON_HOVER) {
-    if (pressed & BTN_FIRE && tick >= p.fireReadyTick) {
-      fireBolt(state, p, 'hover');
-      p.fireReadyTick = tick + 15;
-    }
+      break;
+    case 'laser':
+      // Hold to charge; it fires itself when charged. Release to charge again.
+      if (!held) { p.charge = 0; p.needRelease = false; break; }
+      if (p.needRelease || !ready) { p.charge = 0; break; }
+      p.charge = Math.min(1, p.charge + DT / Math.max(0.05, st.chargeTime));
+      if (p.charge >= 1) {
+        shoot('laser', st.heatPerShot, st.interval);
+        p.charge = 0;
+        p.needRelease = true;
+      }
+      break;
   }
 
   // Grenade: hold to aim (client shows preview), release to throw.
@@ -539,7 +612,11 @@ function updateBolts(state: SimState, omega: number) {
         hit.prop.vel = addScaled(hit.prop.vel, sub(b.vel, hit.prop.vel), k);
         hit.prop.contactNormal = null;
       }
-      state.events.push({ type: 'impact', pos: hit.pos, kind: b.kind, target: hit.player?.id ?? hit.prop?.id ?? -1 });
+      state.events.push({ type: 'impact', pos: hit.pos, kind: b.kind, target: hit.player?.id ?? hit.prop?.id ?? -1, owner: b.owner });
+      if (b.kind === 'fuelRod') {
+        const w = cfg.weapons.launcher;
+        detonate(state, hit.pos, b.owner, b.id, { radius: w.blastRadius, damage: w.blastDamage, knockback: w.blastKnockback }, 'fuel rod');
+      }
       continue;
     }
     if (!b.armed && !stillInsideOwner(state, b.pos, b.radius, b.owner)) b.armed = true;
@@ -646,18 +723,25 @@ export function falloff(cfg: SimConfig, x: number): number {
  * from the blast (optionally biased toward the axis), scaled by falloff of the
  * distance to the body's surface. Owner is included (grenade jumping).
  */
-export function detonate(state: SimState, c: Vec3, owner: number, sourceId: number) {
+export interface Blast {
+  radius: number;
+  damage: number;
+  knockback: number; // point-blank delta-v for an 80 kg player (before knockbackScale)
+}
+
+export function detonate(state: SimState, c: Vec3, owner: number, sourceId: number, blast?: Blast, cause = 'grenade') {
   const cfg = state.config;
-  const rad = cfg.explosionRadius;
+  const b = blast ?? { radius: cfg.explosionRadius, damage: cfg.explosionDamage, knockback: cfg.knockbackSpeed };
+  const rad = b.radius;
   const id = allocId(state);
   state.explosions.push({ id, type: 'explosion', owner, pos: clone(c), radius: rad, tick: state.tick, endTick: state.tick + secs(0.7) });
   state.events.push({ type: 'explode', id: sourceId, owner, pos: clone(c) });
-  const kb = cfg.knockbackSpeed * cfg.knockbackScale;
+  const kb = b.knockback * cfg.knockbackScale;
 
   for (const p of state.players) {
     if (!p.alive) continue;
-    const [a, b] = capsuleEnds(p);
-    const q = closestOnSeg(c, a, b).point;
+    const [e0, e1] = capsuleEnds(p);
+    const q = closestOnSeg(c, e0, e1).point;
     const d = Math.max(0, dist(c, q) - PLAYER_RADIUS);
     if (d >= rad) continue;
     const f = falloff(cfg, d / rad);
@@ -666,8 +750,8 @@ export function detonate(state: SimState, c: Vec3, owner: number, sourceId: numb
     p.vel = addScaled(p.vel, dir, kb * f);
     p.grounded = false;
     p.groundNormal = null;
-    const dmg = cfg.explosionDamage * f * (p.id === owner ? cfg.selfDamageScale : 1);
-    if (dmg > 0) damagePlayer(state, p, owner, dmg, dmg, 'grenade');
+    const dmg = b.damage * f * (p.id === owner ? cfg.selfDamageScale : 1);
+    if (dmg > 0) damagePlayer(state, p, owner, dmg, dmg, cause);
   }
   for (const pr of state.props) {
     const d = Math.max(0, dist(c, pr.pos) - pr.radius);
@@ -711,6 +795,104 @@ function kill(state: SimState, p: Player, killer: number, cause: string) {
   const k = state.players.find((q) => q.id === killer);
   if (k && k.id !== p.id) k.kills++;
   state.events.push({ type: 'kill', killer, victim: p.id, cause });
+  dropItems(state, p);
+  for (const g of state.grenades) if (g.stuck && g.stuck.kind === 'player' && g.stuck.id === p.id) g.stuck = null;
+}
+
+/** Drop special weapons, jetpack and grenades as floating pickups on the floor below. */
+function dropItems(state: SimState, p: Player) {
+  const cfg = state.config;
+  if (distanceOffRing(cfg, p.pos) > 0) return; // lost to space with them
+  const drops: { item: ItemKind; amount: number }[] = [];
+  for (const w of p.owned) {
+    if (STARTING_WEAPONS.includes(w)) continue;
+    const id = WEAPON_IDS[w];
+    if (cfg.weapons[id].ammoMax > 0 && p.ammo[w] <= 0) continue;
+    drops.push({ item: id as ItemKind, amount: cfg.weapons[id].ammoMax > 0 ? p.ammo[w] : -1 });
+  }
+  if (p.hasJetpack && p.jetFuel > 0.05) drops.push({ item: 'jetpack', amount: Math.round(p.jetFuel * 100) });
+  if (p.grenades > 0) drops.push({ item: 'sticky', amount: p.grenades });
+  if (p.bounceGrenades > 0) drops.push({ item: 'bounce', amount: p.bounceGrenades });
+  if (!drops.length) return;
+  // find the floor below (down = away from the axis)
+  const b = localBasis(p.pos);
+  const hit = sphereTrace(state.level, cfg, p.pos, addScaled(p.pos, b.up, -60), 0.3);
+  if (!hit) return;
+  const base = addScaled(hit.pos, b.up, 0.7);
+  drops.forEach((d, i) => {
+    const a = (i / drops.length) * Math.PI * 2;
+    const r = drops.length > 1 ? 0.9 : 0;
+    const pos = add(base, add(scale(b.spin, Math.cos(a) * r), scale(b.axial, Math.sin(a) * r)));
+    addPickup(state, d.item, pos, d.amount, 0, state.tick + secs(cfg.dropLifetime));
+  });
+}
+
+// =========================================================================== pickups
+
+const PICKUP_RANGE = 1.3;
+
+/** Apply an item to a player. Returns false (and the item stays) if it would do nothing. */
+export function applyItem(cfg: SimConfig, p: Player, item: ItemKind, amount: number): boolean {
+  const full = amount < 0;
+  switch (item) {
+    case 'health':
+      if (p.health >= cfg.maxHealth) return false;
+      p.health = cfg.maxHealth;
+      return true;
+    case 'sticky':
+      if (p.grenades >= MAX_GRENADES) return false;
+      p.grenades = full ? MAX_GRENADES : Math.min(MAX_GRENADES, p.grenades + amount);
+      return true;
+    case 'bounce':
+      if (p.bounceGrenades >= MAX_GRENADES) return false;
+      p.bounceGrenades = full ? MAX_GRENADES : Math.min(MAX_GRENADES, p.bounceGrenades + amount);
+      return true;
+    case 'jetpack': {
+      const fuel = full ? 1 : amount / 100;
+      if (p.hasJetpack && p.jetFuel >= fuel) return false;
+      p.hasJetpack = true;
+      p.jetFuel = Math.max(p.jetFuel, fuel);
+      return true;
+    }
+    default: {
+      // a weapon: new ones are added; ammo weapons you already have are refilled
+      const w = WEAPON_IDS.indexOf(item as WeaponId);
+      const st = cfg.weapons[item as WeaponId];
+      const ammo = full ? st.ammoMax : Math.min(st.ammoMax, amount);
+      if (!p.owned.includes(w)) {
+        p.owned = [...p.owned, w].sort((a, b) => a - b);
+        p.ammo[w] = ammo;
+        p.heat[w] = 0;
+        return true;
+      }
+      if (st.ammoMax > 0 && p.ammo[w] < st.ammoMax) {
+        p.ammo[w] = Math.max(p.ammo[w], ammo);
+        return true;
+      }
+      return false;
+    }
+  }
+}
+
+function updatePickups(state: SimState) {
+  const cfg = state.config;
+  const tick = state.tick;
+  const keep = [];
+  for (const it of state.pickups) {
+    if (it.expireTick >= 0 && tick >= it.expireTick) continue;
+    if (tick >= it.activeAt) {
+      for (const p of state.players) {
+        if (!p.alive || p.kind === 'dummy' || dist(p.pos, it.pos) > PICKUP_RANGE) continue;
+        if (!applyItem(cfg, p, it.item, it.amount)) continue;
+        state.events.push({ type: 'pickup', id: it.id, item: it.item, player: p.id, pos: clone(it.pos) });
+        it.activeAt = it.respawnTicks > 0 ? tick + it.respawnTicks : Infinity;
+        break;
+      }
+    }
+    if (it.respawnTicks === 0 && it.activeAt === Infinity) continue; // one-shot, taken
+    keep.push(it);
+  }
+  state.pickups = keep;
 }
 
 function updateVitals(state: SimState, p: Player) {
@@ -735,7 +917,16 @@ function updateVitals(state: SimState, p: Player) {
   p.shield = cfg.maxShield;
   p.grounded = false;
   p.groundNormal = localBasis(p.pos).up;
-  p.rifleHeat = 0; p.rifleOverheatUntil = 0; p.pistolHeat = 0; p.pistolCharge = 0;
+  p.owned = [...STARTING_WEAPONS];
+  p.weapon = STARTING_WEAPONS[0];
+  p.heat = WEAPON_IDS.map(() => 0);
+  p.overheatUntil = WEAPON_IDS.map(() => 0);
+  p.ammo = WEAPON_IDS.map(() => 0);
+  p.charge = 0;
+  p.holdTicks = 0;
+  p.needRelease = false;
+  p.hasJetpack = false;
+  p.jetFuel = 0;
   p.grenades = MAX_GRENADES;
   p.bounceGrenades = MAX_GRENADES;
   p.lastAttacker = -1;

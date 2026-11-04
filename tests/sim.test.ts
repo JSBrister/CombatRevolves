@@ -3,7 +3,8 @@ import {
   BTN_FIRE, BTN_JUMP, BTN_SPRINT, DT, PLAYER_HALF_SEG, PLAYER_RADIUS, GRENADE_RADIUS,
   addPlayer, addProp, botInput, createState, decode, detonate, encode, falloff, hash01, integrate,
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
-  step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2, type InputCmd, type SimState, type Vec3,
+  step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
+  WEAPON_HOVER, WEAPON_LASER, WEAPON_LAUNCHER, WEAPON_RED, applyItem, damagePlayer, addScaled, dot, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -205,8 +206,8 @@ describe('7. relative launch', () => {
     expect(s.bolts.length).toBe(1);
     const b = s.bolts[0];
     const aim = viewVectors(p.pos, p.yaw, p.pitch).aim;
-    for (let i = 0; i < 3; i++) expect(b.launchVel[i]).toBeCloseTo(p.vel[i] + s.config.muzzleRifle * aim[i], 12);
-    expect(Math.hypot(...b.vel)).toBeGreaterThan(s.config.muzzleRifle + 5);
+    for (let i = 0; i < 3; i++) expect(b.launchVel[i]).toBeCloseTo(p.vel[i] + s.config.weapons.rifle.muzzle * aim[i], 12);
+    expect(Math.hypot(...b.vel)).toBeGreaterThan(s.config.weapons.rifle.muzzle + 5);
   });
   it('the same rule applies to thrown grenades', () => {
     const s = empty();
@@ -231,7 +232,7 @@ describe('7. relative launch', () => {
     for (let k = 0; k < 4; k++) {
       const m = muzzlePoint(p, yaw, pitch);
       const want: Vec3 = [w * m[1], -w * m[0], 0]; // -w x r
-      s.config.muzzleRifle = Math.hypot(...want);
+      s.config.weapons.rifle.muzzle = Math.hypot(...want);
       const b = localBasis(p.pos);
       const ft = want[0] * b.spin[0] + want[1] * b.spin[1], fu = want[0] * b.up[0] + want[1] * b.up[1];
       yaw = Math.atan2(0, ft);
@@ -524,4 +525,242 @@ describe('14. staircases', () => {
     }
     expect(maxH).toBeGreaterThan(10.5);
   });
+});
+
+// ------------------------------------------------------------ quick wins (round 3)
+
+const cmdFor = (s: SimState, id: number, o: Partial<InputCmd> = {}): InputCmd => ({
+  playerId: id, tick: s.tick, moveX: 0, moveY: 0, yaw: 0, pitch: 0, buttons: 0, weapon: 0, ...o,
+});
+
+describe('15. running and jumping (regression)', () => {
+  for (const [label, yaw, sign] of [['antispinward', Math.PI, -1], ['spinward', 0, 1]] as const) {
+    it(`sprinting ${label} stays on the floor, can always jump, and weighs (wR ${sign > 0 ? '+' : '-'} v)^2/R`, () => {
+      const v = 9;
+      const s = empty({ sprintSpeed: v });
+      const id = addPlayer(s, 'human', 'P');
+      const p = s.players[0];
+      run(s, 240, () => [cmdFor(s, id, { moveY: 1, yaw, buttons: BTN_SPRINT })]);
+      let flips = 0, prev = p.grounded;
+      for (let i = 0; i < 240; i++) {
+        step(s, [cmdFor(s, id, { moveY: 1, yaw, buttons: BTN_SPRINT })], s.tick);
+        if (p.grounded !== prev) flips++;
+        prev = p.grounded;
+      }
+      expect(flips).toBe(0);
+      const w = omegaOf(s.config), R = s.config.R;
+      const expected = (w * R + sign * v) ** 2 / R / s.config.g;
+      expect(Math.abs(p.apparentG - expected) / expected).toBeLessThan(0.05);
+      step(s, [cmdFor(s, id, { moveY: 1, yaw, buttons: BTN_SPRINT | BTN_JUMP })], s.tick);
+      expect(s.events.some((e) => e.type === 'jump')).toBe(true);
+    });
+  }
+  it('coyote time: a jump still works just after leaving a surface, not long after', () => {
+    for (const [ago, ok] of [[5, true], [40, false]] as const) {
+      const s = empty();
+      const id = addPlayer(s, 'human', 'P');
+      const p = s.players[0];
+      run(s, 20);
+      p.pos = addScaled(p.pos, localBasis(p.pos).up, 0.5); // just above the floor
+      p.grounded = false;
+      p.groundNormal = null;
+      p.lastGroundTick = s.tick - ago;
+      step(s, [cmdFor(s, id, { buttons: BTN_JUMP })], s.tick);
+      expect(s.events.some((e) => e.type === 'jump')).toBe(ok);
+    }
+  });
+  it('air control steers you, but only up to walk speed', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    run(s, 20);
+    p.vel = addScaled([0, 0, 0], localBasis(p.pos).up, 12); // straight up, long hang time
+    p.grounded = false;
+    p.groundNormal = null;
+    const before = dot(p.vel, [0, 0, 1]);
+    run(s, 120, () => [cmdFor(s, id, { moveY: 1, yaw: Math.PI / 2 })]); // push toward +Z
+    const vz = p.vel[2] - before;
+    expect(p.grounded).toBe(false);
+    expect(vz).toBeGreaterThan(4);
+    expect(vz).toBeLessThanOrEqual(s.config.walkSpeed + 1e-9);
+  });
+});
+
+describe('16. impact damage', () => {
+  it('hitting the floor hard hurts; landing a normal jump does not', () => {
+    for (const [speed, hurts] of [[35, true], [12, false]] as const) {
+      const s = empty();
+      const id = addPlayer(s, 'human', 'P');
+      const p = s.players[0];
+      run(s, 20);
+      const h0 = p.health + p.shield;
+      p.pos = addScaled(p.pos, localBasis(p.pos).up, 1);
+      p.vel = addScaled([0, 0, 0], localBasis(p.pos).up, -speed);
+      p.grounded = false;
+      p.groundNormal = null;
+      run(s, 30);
+      expect(p.health + p.shield < h0).toBe(hurts);
+      void id;
+    }
+  });
+});
+
+describe('17. weapons', () => {
+  const give = (s: SimState, item: string) => {
+    const p = s.players[0];
+    expect(applyItem(s.config, p, item as never, -1)).toBe(true);
+    return p;
+  };
+  it('fuel rod launcher: 10 rounds, explodes on impact, refilled by picking one up', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    run(s, 20);
+    const p = give(s, 'launcher');
+    expect(p.ammo[WEAPON_LAUNCHER]).toBe(10);
+    let shots = 0, booms = 0;
+    for (let i = 0; i < 120 * 20; i++) {
+      const fire = i % 130 === 10 ? BTN_FIRE : 0; // one tap per ~1.1 s
+      step(s, [cmdFor(s, id, { weapon: WEAPON_LAUNCHER, pitch: -0.6, buttons: fire })], s.tick);
+      shots += s.events.filter((e) => e.type === 'fire' && e.kind === 'fuelRod').length;
+      booms += s.events.filter((e) => e.type === 'explode').length;
+    }
+    expect(shots).toBe(10);
+    expect(booms).toBe(10);
+    expect(p.ammo[WEAPON_LAUNCHER]).toBe(0);
+    expect(applyItem(s.config, p, 'launcher', -1)).toBe(true);
+    expect(p.ammo[WEAPON_LAUNCHER]).toBe(10);
+    expect(applyItem(s.config, p, 'launcher', -1)).toBe(false); // already full: leave it
+  });
+  it('pulse laser: charges first, slows you down, then fires a ~3 km/s bolt', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    run(s, 20);
+    const p = give(s, 'laser');
+    run(s, 60, () => [cmdFor(s, id, { weapon: WEAPON_LASER })]);
+    const chargeTicks = Math.round(s.config.weapons.laser.chargeTime / DT);
+    let firedAt = -1, maxSpeed = 0;
+    for (let i = 0; i < chargeTicks + 10 && firedAt < 0; i++) {
+      step(s, [cmdFor(s, id, { weapon: WEAPON_LASER, moveY: 1, buttons: BTN_FIRE })], s.tick);
+      if (i > 20) maxSpeed = Math.max(maxSpeed, Math.hypot(...p.vel));
+      if (s.bolts.some((b) => b.kind === 'laser')) firedAt = i;
+    }
+    expect(firedAt).toBeGreaterThanOrEqual(chargeTicks - 2);
+    expect(maxSpeed).toBeLessThan(s.config.walkSpeed * s.config.weapons.laser.chargeMoveScale + 0.5);
+    const b = s.bolts.find((q) => q.kind === 'laser')!;
+    expect(Math.hypot(...b.vel)).toBeGreaterThan(2900);
+  });
+  it('red rifle overheats in fewer shots than the blue one', () => {
+    const shotsToOverheat = (weaponItem: string | null, weapon: number) => {
+      const s = empty();
+      const id = addPlayer(s, 'human', 'P');
+      run(s, 20);
+      if (weaponItem) give(s, weaponItem);
+      run(s, 40, () => [cmdFor(s, id, { weapon })]);
+      let shots = 0;
+      for (let i = 0; i < 1200; i++) {
+        step(s, [cmdFor(s, id, { weapon, buttons: BTN_FIRE })], s.tick);
+        shots += s.events.filter((e) => e.type === 'fire').length;
+        if (s.events.some((e) => e.type === 'overheat')) return shots;
+      }
+      return Infinity;
+    };
+    const blue = shotsToOverheat(null, 0);
+    const red = shotsToOverheat('redRifle', WEAPON_RED);
+    expect(blue).toBeLessThan(Infinity);
+    expect(red).toBeLessThan(blue);
+  });
+  it("you can't select a weapon you don't own; the hover gun is debug-only", () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    step(s, [cmdFor(s, id, { weapon: WEAPON_LASER })], s.tick);
+    expect(p.weapon).toBe(0);
+    step(s, [cmdFor(s, id, { weapon: WEAPON_HOVER })], s.tick);
+    expect(p.weapon).toBe(0);
+    s.config.allowHoverGun = true;
+    step(s, [cmdFor(s, id, { weapon: WEAPON_HOVER })], s.tick);
+    expect(p.weapon).toBe(WEAPON_HOVER);
+  });
+});
+
+describe('18. pickups, drops and the jetpack', () => {
+  it('level pickups are collected by touch, capped, and respawn', () => {
+    const s = createState({ seed: 3, props: false });
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    const pk = s.pickups.find((q) => q.item === 'sticky')!;
+    expect(pk).toBeDefined();
+    p.grenades = 1;
+    p.pos = [...pk.pos] as Vec3;
+    step(s, [], s.tick);
+    expect(p.grenades).toBe(4); // refilled to the cap, never above
+    expect(s.events.some((e) => e.type === 'pickup' && e.player === id)).toBe(true);
+    expect(pk.activeAt).toBe(s.tick - 1 + Math.round(s.config.pickupRespawn / DT));
+    p.grenades = 4;
+    run(s, Math.round(s.config.pickupRespawn / DT) + 5);
+    expect(s.pickups).toContain(pk);
+  });
+  it('a full item is left on the ground', () => {
+    const s = createState({ seed: 3, props: false });
+    addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    const pk = s.pickups.find((q) => q.item === 'health')!;
+    p.pos = [...pk.pos] as Vec3;
+    step(s, [], s.tick);
+    expect(s.events.some((e) => e.type === 'pickup')).toBe(false);
+  });
+  it('weapons and grenades drop on death and expire later', () => {
+    const s = empty();
+    addPlayer(s, 'human', 'P');
+    run(s, 20);
+    const p = s.players[0];
+    applyItem(s.config, p, 'launcher', -1);
+    p.ammo[WEAPON_LAUNCHER] = 3;
+    p.grenades = 2;
+    p.bounceGrenades = 0;
+    p.pos = addScaled(p.pos, localBasis(p.pos).up, 5); // die in mid-air: drops land on the floor below
+    damagePlayer(s, p, -1, 1e6, 1e6, 'test');
+    const items = s.pickups.map((q) => [q.item, q.amount]);
+    expect(items).toEqual(expect.arrayContaining([['launcher', 3], ['sticky', 2]]));
+    expect(items.length).toBe(2);
+    for (const q of s.pickups) expect(Math.abs(Math.hypot(q.pos[0], q.pos[1]) - (s.config.R - 1))).toBeLessThan(0.05);
+    run(s, Math.round(s.config.dropLifetime / DT) + 5);
+    expect(s.pickups.length).toBe(0);
+  });
+  it('jetpack: hold jump in the air to climb until the fuel runs out', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    run(s, 20);
+    const p = s.players[0];
+    applyItem(s.config, p, 'jetpack', -1);
+    step(s, [cmdFor(s, id, { buttons: BTN_JUMP })], s.tick); // jump
+    let maxH = 0, ticks = 0;
+    const height = () => s.config.R - Math.hypot(p.pos[0], p.pos[1]) - 0.9;
+    while (p.jetFuel > 0 && ticks < 2000) {
+      step(s, [cmdFor(s, id, { buttons: BTN_JUMP })], s.tick);
+      maxH = Math.max(maxH, height());
+      ticks++;
+    }
+    expect(Math.abs(ticks * DT - 1 / s.config.jetBurn)).toBeLessThan(0.05);
+    // a plain jump peaks at ~3 m; four seconds of thrust gets far higher
+    expect(maxH).toBeGreaterThan(20);
+    step(s, [cmdFor(s, id, { buttons: BTN_JUMP })], s.tick);
+    expect(p.jetting).toBe(false);
+  });
+});
+
+describe('19. ring size range', () => {
+  for (const R of [10, 5000]) {
+    it(`R = ${R}: the level fits and play is stable`, () => {
+      const s = createState({ seed: 4, config: { R } });
+      const id = addPlayer(s, 'human', 'P');
+      const bot = addPlayer(s, 'bot', 'B');
+      for (const b of s.level.boxes) expect(2 * b.half[1]).toBeLessThan(0.45 * R + 0.5);
+      for (const h of [...s.level.wallPos, ...s.level.wallNeg]) expect(h).toBeLessThanOrEqual(0.4 * R);
+      run(s, 1200, (st) => [cmdFor(st, id), botInput(st, bot)]);
+      const p = s.players.find((q) => q.id === id)!;
+      expect(p.pos.every(Number.isFinite)).toBe(true);
+      expect(p.grounded).toBe(true);
+    });
+  }
 });

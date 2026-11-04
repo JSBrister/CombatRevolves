@@ -34,7 +34,7 @@ export class RingScene {
     const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
     const segs = Math.min(720, Math.max(192, Math.round(R * 2.4)));
     this.starRadius = Math.max(4000, R * 12);
-    this.scene.fog = new THREE.Fog(0x0b1020, R * 1.5, R * 7);
+    this.scene.fog = new THREE.Fog(0x0b1020, Math.max(R * 1.5, 80), Math.max(R * 7, 400));
 
     // Floor: inside of a cylinder about Z.
     const deck = this.textures.deck.clone();

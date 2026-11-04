@@ -5,7 +5,7 @@
 
 import { localBasis } from './physics';
 import { hash01 } from './rng';
-import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, WEAPON_PISTOL, WEAPON_RIFLE, type InputCmd, type SimState } from './types';
+import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, WEAPON_HOVER, WEAPON_IDS, type InputCmd, type SimState } from './types';
 import { type Vec3, dot, len, sub } from './vec';
 import { EYE_OFFSET } from './world';
 
@@ -53,11 +53,20 @@ export function botInput(state: SimState, playerId: number): InputCmd {
     cmd.pitch = aim.pitch + (hash01(playerId, tick >> 4, 5) - 0.5) * 0.05;
     cmd.moveY = best > 15 ? 1 : 0;
     cmd.moveX = hash01(playerId, tick >> 7, 6) < 0.5 ? -1 : 1;
-    cmd.weapon = hash01(playerId, tick >> 11, 7) < 0.7 ? WEAPON_RIFLE : WEAPON_PISTOL;
+    // Pick one of the weapons we own for a few seconds at a time; prefer the new toys.
+    const options = me.owned.filter((w) => w !== WEAPON_HOVER);
+    const special = options.filter((w) => w > 1 && (state.config.weapons[WEAPON_IDS[w]].ammoMax === 0 || me.ammo[w] > 0));
+    const pool = special.length && hash01(playerId, tick >> 10, 10) < 0.6 ? special : options;
+    cmd.weapon = pool[Math.floor(hash01(playerId, tick >> 10, 7) * pool.length)] ?? 0;
+    const id = WEAPON_IDS[cmd.weapon];
     const burst = (tick >> 5) % 4 !== 0;
-    if (cmd.weapon === WEAPON_RIFLE) {
-      if (burst && me.rifleHeat < 0.85) cmd.buttons |= BTN_FIRE;
-    } else if ((tick >> 3) % 3 === 0) cmd.buttons |= BTN_FIRE; // tap tap
+    if (id === 'rifle' || id === 'redRifle') {
+      if (burst && me.heat[cmd.weapon] < 0.85) cmd.buttons |= BTN_FIRE;
+    } else if (id === 'laser') {
+      if ((tick >> 7) % 2 === 0) cmd.buttons |= BTN_FIRE; // hold to charge, it fires itself
+    } else if (id === 'launcher') {
+      if ((tick >> 4) % 8 === 0) cmd.buttons |= BTN_FIRE;
+    } else if ((tick >> 3) % 3 === 0) cmd.buttons |= BTN_FIRE; // pistol: tap tap
     // Grenade: hold for 0.25 s then release, every ~8 s, if close.
     const gPhase = (tick + playerId * 97) % 960;
     if (best < 28 && gPhase < 30) cmd.buttons |= hash01(playerId, tick / 960 | 0, 9) < 0.5 ? BTN_GRENADE : BTN_GRENADE2;

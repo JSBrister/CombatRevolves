@@ -10,6 +10,12 @@ export class InputSampler {
   pitch = 0;
   weapon = 0;
   sensitivity = 0.0022;
+  /** Multiplies mouse look (the pulse laser slows your aim while charging). */
+  lookScale = 1;
+  /** Sprint is a toggle (Shift), on by default. */
+  sprintOn = true;
+  /** Weapons the local player owns (kept up to date by the game loop) for the scroll wheel. */
+  owned: number[] = [0, 1];
   mouseButtons = 0;
   private latched = 0; // presses shorter than a tick still register
   enabled = true; // false while free-flying: player gets neutral movement
@@ -23,9 +29,10 @@ export class InputSampler {
       if (e.code === 'Space') this.latched |= BTN_JUMP;
       if (e.code === 'KeyG') this.latched |= BTN_GRENADE;
       if (e.code === 'KeyF') this.latched |= BTN_GRENADE2;
+      if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && this.enabled) this.sprintOn = !this.sprintOn;
       if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5)) - 1;
-        if (n >= 0 && n <= 1) this.weapon = n; // the hover gun is debug-panel only
+        if (n >= 0 && n <= 4) this.weapon = n; // the hover gun (slot 6) is debug-panel only
       }
       this.onKey(e.code);
       if (['Space', 'Tab'].includes(e.code)) e.preventDefault();
@@ -41,10 +48,19 @@ export class InputSampler {
     window.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== this.el) return;
       if (this.freeLook) return this.freeLook(e.movementX, e.movementY);
-      this.yaw += e.movementX * this.sensitivity;
-      this.pitch = Math.max(-1.55, Math.min(1.55, this.pitch - e.movementY * this.sensitivity));
+      const k = this.sensitivity * this.lookScale;
+      this.yaw += e.movementX * k;
+      this.pitch = Math.max(-1.55, Math.min(1.55, this.pitch - e.movementY * k));
     });
-    el.addEventListener('wheel', (e) => { this.weapon = this.weapon === 0 ? 1 : 0; });
+    el.addEventListener('wheel', (e) => this.cycleWeapon(e.deltaY > 0 ? 1 : -1), { passive: true });
+  }
+
+  /** Step through the weapons we own. */
+  cycleWeapon(dir: number) {
+    const list = this.owned.filter((w) => w <= 4);
+    if (!list.length) return;
+    const i = list.indexOf(this.weapon);
+    this.weapon = list[(i < 0 ? 0 : i + dir + list.length) % list.length];
   }
 
   get aiming() { return (this.mouseButtons & 4) !== 0; }
@@ -59,7 +75,7 @@ export class InputSampler {
     if (this.mouseButtons & 1) buttons |= BTN_FIRE;
     if (this.mouseButtons & 4) buttons |= BTN_AIM;
     if (k.has('Space')) buttons |= BTN_JUMP;
-    if (k.has('ShiftLeft') || k.has('ShiftRight')) buttons |= BTN_SPRINT;
+    if (this.sprintOn) buttons |= BTN_SPRINT;
     if (k.has('KeyG')) buttons |= BTN_GRENADE;
     if (k.has('KeyF')) buttons |= BTN_GRENADE2;
     const moveY = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);

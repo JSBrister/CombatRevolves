@@ -1,7 +1,7 @@
 import { generateLevel, spawnPosition } from './level';
 import { localBasis } from './physics';
 import { rngRange } from './rng';
-import { defaultConfig, neutralInput, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
+import { STARTING_WEAPONS, WEAPON_IDS, defaultConfig, neutralInput, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
 import type { Vec3 } from './vec';
 
 export const PLAYER_RADIUS = 0.4;
@@ -20,6 +20,8 @@ export interface WorldOptions {
   dummies?: boolean;
   /** Rim walls with low and medium stretches (default true). False = full height all round. */
   variedWalls?: boolean;
+  /** Item pickups at the level's fixed spots (default: same as `obstacles`). */
+  pickups?: boolean;
 }
 
 export function createState(opts: WorldOptions = {}): SimState {
@@ -30,15 +32,19 @@ export function createState(opts: WorldOptions = {}): SimState {
     rng: (opts.seed ?? 1234) >>> 0,
     nextId: 1,
     config,
-    level: { boxes: [], spawns: [], wallPos: [], wallNeg: [] },
+    level: { boxes: [], spawns: [], pickupSpots: [], wallPos: [], wallNeg: [] },
     players: [],
     bolts: [],
     grenades: [],
     props: [],
     explosions: [],
+    pickups: [],
     events: [],
   };
   state.level = generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true);
+  if (opts.pickups ?? opts.obstacles ?? true) {
+    for (const spot of state.level.pickupSpots) addPickup(state, spot.item, spot.pos, -1, Math.round(config.pickupRespawn * 120), -1);
+  }
   if (opts.props ?? true) {
     for (let i = 0; i < 12; i++) {
       const a = ((i + 0.5) / 12) * Math.PI * 2 + rngRange(state, -0.1, 0.1);
@@ -83,8 +89,11 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
     alive: true, respawnTick: 0, homeSpawn: si,
     health: state.config.maxHealth, shield: state.config.maxShield,
     lastDamageTick: -1e9, lastAttacker: -1,
-    weapon: 0, rifleHeat: 0, rifleOverheatUntil: 0, pistolHeat: 0, pistolCharge: 0, pistolHoldTicks: 0,
-    fireReadyTick: 0, grenades: MAX_GRENADES, bounceGrenades: MAX_GRENADES, grenadeReadyTick: 0,
+    weapon: 0, owned: [...STARTING_WEAPONS],
+    heat: WEAPON_IDS.map(() => 0), overheatUntil: WEAPON_IDS.map(() => 0), ammo: WEAPON_IDS.map(() => 0),
+    charge: 0, holdTicks: 0, needRelease: false,
+    fireReadyTick: 0, hasJetpack: false, jetFuel: 0, jetting: false, lastGroundTick: -1e9, lastJumpTick: -1e9,
+    grenades: MAX_GRENADES, bounceGrenades: MAX_GRENADES, grenadeReadyTick: 0,
     prevButtons: 0, lastInput: neutralInput(id, 0),
     kills: 0, deaths: 0,
   };
@@ -103,4 +112,10 @@ export function dummyHome(cfg: SimConfig, homeSpawn: number): Vec3 {
 export function removePlayer(state: SimState, id: number) {
   state.players = state.players.filter((p) => p.id !== id);
   for (const g of state.grenades) if (g.stuck && g.stuck.kind === 'player' && g.stuck.id === id) g.stuck = null;
+}
+
+export function addPickup(state: SimState, item: ItemKind, pos: Vec3, amount: number, respawnTicks: number, expireTick: number): number {
+  const id = allocId(state);
+  state.pickups.push({ id, type: 'pickup', item, pos, amount, respawnTicks, activeAt: state.tick, expireTick });
+  return id;
 }

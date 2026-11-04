@@ -3,7 +3,7 @@
 // are axis-aligned in the local frame of their ring angle.
 
 import { rngNext, rngRange } from './rng';
-import type { Box, Level, SimConfig, SpawnPoint } from './types';
+import type { Box, ItemKind, Level, SimConfig, SpawnPoint } from './types';
 import { type Vec3, rhoOf } from './vec';
 
 export interface SdfHit {
@@ -20,7 +20,7 @@ function annulus(p: Vec3, rho: number, rMin: number, rMax: number, zMin: number,
   let d: number, nr: number, nz: number;
   if (qr > 0 || qz > 0) {
     const ur = Math.max(qr, 0), uz = Math.max(qz, 0);
-    d = Math.hypot(ur, uz);
+    d = Math.sqrt(ur * ur + uz * uz);
     nr = (ur / d) * Math.sign(rho - cr);
     nz = (uz / d) * Math.sign(p[2] - cz);
   } else if (qr > qz) {
@@ -50,7 +50,7 @@ function sectorAnnulus(p: Vec3, rho: number, theta: number, rMin: number, rMax: 
   const edge = d0 < d1 ? a0 : a1;
   const dAng = Math.min(d0, d1, Math.PI / 2);
   const ut = rho * Math.sin(dAng);
-  const d = Math.hypot(ur, uz, ut);
+  const d = Math.sqrt(ur * ur + uz * uz + ut * ut);
   if (d >= out.d || d < 1e-9) return;
   const ir = rho > 1e-9 ? 1 / rho : 0;
   const nr = (ur / d) * Math.sign(rho - cr), nz = (uz / d) * Math.sign(p[2] - cz);
@@ -89,11 +89,15 @@ function boxSdf(p: Vec3, b: Box, out: SdfHit) {
   const lx = -s * dx + c * dy;
   const ly = -c * dx - s * dy;
   const lz = dz;
+  // cheap reject: can't beat the current best distance (squared, no sqrt/hypot)
+  const h0 = b.half[0], h1 = b.half[1], h2 = b.half[2];
+  const lim = out.d + Math.sqrt(h0 * h0 + h1 * h1 + h2 * h2);
+  if (lim > 0 && dx * dx + dy * dy + dz * dz >= lim * lim) return;
   const qx = Math.abs(lx) - b.half[0], qy = Math.abs(ly) - b.half[1], qz = Math.abs(lz) - b.half[2];
   let d: number, nx = 0, ny = 0, nz = 0;
   if (qx > 0 || qy > 0 || qz > 0) {
     const ux = Math.max(qx, 0), uy = Math.max(qy, 0), uz = Math.max(qz, 0);
-    d = Math.hypot(ux, uy, uz);
+    d = Math.sqrt(ux * ux + uy * uy + uz * uz);
     if (d >= out.d) return;
     nx = (ux / d) * Math.sign(lx); ny = (uy / d) * Math.sign(ly); nz = (uz / d) * Math.sign(lz);
   } else {
@@ -135,7 +139,7 @@ export interface TraceHit {
  */
 export function sphereTrace(level: Level, cfg: SimConfig, p0: Vec3, p1: Vec3, radius: number): TraceHit | null {
   const dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
-  const L = Math.hypot(dx, dy, dz);
+  const L = Math.sqrt(dx * dx + dy * dy + dz * dz);
   const eps = 1e-4;
   if (L < 1e-12) {
     const h = levelSdf(level, cfg, p0);
@@ -178,14 +182,18 @@ export function makeWalls(cfg: SimConfig, rng: { rng: number }, varied: boolean)
   const side = () => {
     const hs: number[] = [];
     for (let i = 0; i < n; i++) {
-      if (!varied) { hs.push(cfg.wallHeight); continue; }
+      if (!varied) { hs.push(fullWallHeight(cfg)); continue; }
       const r = rngNext(rng);
-      hs.push(r < 0.5 ? cfg.wallHeight : r < 0.75 ? Math.min(cfg.wallHeight, 4) : Math.min(cfg.wallHeight, 1));
+      const full = fullWallHeight(cfg);
+      hs.push(r < 0.5 ? full : r < 0.75 ? Math.min(full, 4, 0.15 * cfg.R) : Math.min(full, 1));
     }
     return hs;
   };
   return { wallPos: side(), wallNeg: side() };
 }
+
+/** Rim walls are at most 40% of the radius, so tiny rings still have a sky. */
+export const fullWallHeight = (cfg: SimConfig) => Math.min(cfg.wallHeight, 0.4 * cfg.R);
 
 export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacles: boolean, nextId: () => number, variedWalls = true): Level {
   const spawns = makeSpawns(cfg);
@@ -199,27 +207,45 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     boxes.push({ id: nextId(), type: 'box', kind, angle, center: [rc * Math.cos(angle), rc * Math.sin(angle), z], half: [ht, huTot, hz] });
   };
   const stairs: { angle: number; halfArc: number }[] = [];
+  const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
+  const at = (angle: number, height: number, z: number): Vec3 => [(R - height) * Math.cos(angle), (R - height) * Math.sin(angle), z];
+  // Features scale down on small rings so nothing towers over the axis.
+  const k = Math.min(1, R / 60);
   if (withObstacles) {
     const circ = 2 * Math.PI * R;
     // Staircases: solid steps each STAIR_RISE high (one jump per step) up to a
     // lookout platform. Placed midway between spawn points, alternating which
     // way they climb (climbing spinward vs antispinward feels different!).
     const nStairs = Math.max(2, Math.min(12, Math.round(circ / 150)));
-    for (let k = 0; k < nStairs; k++) {
-      const mid = ((k + 0.5) / nStairs) * Math.PI * 2 + Math.PI / spawns.length / 2;
-      const dir = k % 2 === 0 ? 1 : -1;
-      const z = k % 2 === 0 ? -7 : 7;
-      const total = STAIR_STEPS * STAIR_TREAD + STAIR_TOP;
+    const steps = Math.max(1, Math.min(STAIR_STEPS, Math.floor((0.3 * R) / STAIR_RISE)));
+    const topItems: ItemKind[] = ['laser', 'jetpack'];
+    for (let s = 0; s < nStairs; s++) {
+      const mid = ((s + 0.5) / nStairs) * Math.PI * 2 + Math.PI / spawns.length / 2;
+      const dir = s % 2 === 0 ? 1 : -1;
+      const z = s % 2 === 0 ? -7 : 7;
+      const total = steps * STAIR_TREAD + STAIR_TOP;
       const start = mid - (dir * total) / 2 / R;
-      for (let i = 0; i < STAIR_STEPS; i++) {
+      for (let i = 0; i < steps; i++) {
         const along = (i + 0.5) * STAIR_TREAD;
         addBox(start + (dir * along) / R, z, STAIR_TREAD / 2, ((i + 1) * STAIR_RISE) / 2, STAIR_WIDTH / 2, 'stair');
       }
-      const along = STAIR_STEPS * STAIR_TREAD + STAIR_TOP / 2;
-      addBox(start + (dir * along) / R, z, STAIR_TOP / 2, (STAIR_STEPS * STAIR_RISE) / 2, STAIR_WIDTH / 2, 'stair');
+      const along = steps * STAIR_TREAD + STAIR_TOP / 2;
+      const topAngle = start + (dir * along) / R;
+      addBox(topAngle, z, STAIR_TOP / 2, (steps * STAIR_RISE) / 2, STAIR_WIDTH / 2, 'stair');
       stairs.push({ angle: mid, halfArc: total / 2 });
+      // the lookout's prize: a pulse laser or a jetpack
+      pickupSpots.push({ pos: at(topAngle, steps * STAIR_RISE + 1, z), item: topItems[s % 2] });
     }
-    const count = Math.max(10, Math.min(60, Math.round(circ / 22)));
+    // Floor pickups at the midpoints between spawns that have no staircase.
+    const floorItems: ItemKind[] = ['launcher', 'health', 'redRifle', 'sticky', 'health', 'bounce', 'launcher', 'sticky'];
+    let fi = 0;
+    for (let i = 0; i < spawns.length; i++) {
+      const a = ((i + 0.5) / spawns.length) * Math.PI * 2;
+      const taken = stairs.some((s) => Math.abs(Math.atan2(Math.sin(a - s.angle), Math.cos(a - s.angle))) * R < s.halfArc + 2);
+      if (taken) continue;
+      pickupSpots.push({ pos: at(a, 1, 0), item: floorItems[fi++ % floorItems.length] });
+    }
+    const count = Math.max(4, Math.min(200, Math.round(circ / 22)));
     for (let i = 0; i < count; i++) {
       const angle = ((i + rngRange(rng, 0.2, 0.8)) / count) * Math.PI * 2;
       // keep spawns clear
@@ -227,14 +253,16 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       if (near) continue;
       const onStairs = stairs.some((s) => Math.abs(Math.atan2(Math.sin(angle - s.angle), Math.cos(angle - s.angle))) * R < s.halfArc + 4);
       if (onStairs) continue;
+      const nearPickup = pickupSpots.some((sp) => Math.abs(Math.atan2(Math.sin(angle - Math.atan2(sp.pos[1], sp.pos[0])), Math.cos(angle - Math.atan2(sp.pos[1], sp.pos[0])))) * R < 4);
+      if (nearPickup) continue;
       const kind = rngNext(rng);
       const z = rngRange(rng, -cfg.halfWidth + 4, cfg.halfWidth - 4);
-      if (kind < 0.5) addBox(angle, z, rngRange(rng, 0.8, 2.2), rngRange(rng, 0.5, 0.9), rngRange(rng, 1.5, 3.5)); // low cover
-      else if (kind < 0.8) addBox(angle, z, rngRange(rng, 1, 1.6), rngRange(rng, 1.8, 3), rngRange(rng, 1, 1.6)); // pillar
-      else addBox(angle, z, rngRange(rng, 3, 5), rngRange(rng, 0.4, 0.6), rngRange(rng, 3, 5)); // low platform
+      if (kind < 0.5) addBox(angle, z, rngRange(rng, 0.8, 2.2), rngRange(rng, 0.5, 0.9) * k, rngRange(rng, 1.5, 3.5)); // low cover
+      else if (kind < 0.8) addBox(angle, z, rngRange(rng, 1, 1.6), rngRange(rng, 1.8, 3) * k, rngRange(rng, 1, 1.6)); // pillar
+      else addBox(angle, z, rngRange(rng, 3, 5) * Math.max(k, 0.5), rngRange(rng, 0.4, 0.6) * k, rngRange(rng, 3, 5)); // low platform
     }
   }
-  return { boxes, spawns, ...walls };
+  return { boxes, spawns, pickupSpots, ...walls };
 }
 
 export const STAIR_STEPS = 5;

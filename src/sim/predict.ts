@@ -3,7 +3,7 @@
 
 import { sphereTrace } from './level';
 import { advanceFree } from './physics';
-import { BOLT_SPECS, GRENADE_RADIUS, launchVelocity, moveSphereBody, muzzlePoint, type SphereBody } from './step';
+import { GRENADE_RADIUS, boltStats, launchVelocity, moveSphereBody, muzzlePoint, type SphereBody } from './step';
 import { DT, omegaOf, type BoltKind, type SimState, type ThrownKind } from './types';
 import { type Vec3, clone } from './vec';
 
@@ -22,7 +22,7 @@ export function predictTrajectory(
   const from = muzzlePoint(p, yaw, pitch, thrown);
   const r = clone(from);
   const v = launchVelocity(state.config, p, kind, from, yaw, pitch);
-  const radius = thrown ? GRENADE_RADIUS : BOLT_SPECS[kind as BoltKind].radius;
+  const radius = thrown ? GRENADE_RADIUS : boltStats(state.config, kind as BoltKind).radius;
   const omega = omegaOf(state.config);
   const points: Vec3[] = [clone(r)];
   if (kind === 'bounceGrenade') {
