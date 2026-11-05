@@ -20,6 +20,12 @@ function speedColor(speed: number): number {
   return new THREE.Color().setHSL(0.66 * u, 1, 0.55 + 0.15 * u).getHex();
 }
 
+/** Blast colours by what went off (paler versions are used for the outer shell). */
+const BLAST_COLORS: Record<string, number> = {
+  grenade: 0x7fb6ff, 'bouncing grenade': 0xffd23a, 'fuel rod': 0x9dff3a, rocket: 0xff9a3a, seeker: 0xff6ad8,
+  supercombine: 0xff4ad8, 'bike explosion': 0xff7a2a,
+};
+
 /** How far along a gun model (+X) its muzzle is. */
 const MUZZLE_TIP: Record<number, number> = { [WEAPON_PISTOL]: 0.27, [WEAPON_LACONIC]: 1.08 };
 
@@ -92,6 +98,7 @@ interface PlayerView {
   marker: THREE.Sprite;
   gunHolder: THREE.Group; // floating gun beside the player, pitched with their aim
   gunWeapon: number;
+  wasAlive: boolean;
   chargeGlow: THREE.Sprite; // at the muzzle: the laser (red) or pistol overcharge (green) charging
   flame: THREE.Sprite; // jetpack exhaust
   shell: THREE.Mesh; // shield bubble, a little outside the body
@@ -110,7 +117,7 @@ export class EntityViews {
   players = new Map<number, PlayerView>();
   projs = new Map<number, ProjView>();
   props = new Map<number, THREE.Mesh>();
-  explosions = new Map<number, THREE.Mesh>();
+  explosions = new Map<number, THREE.Group>();
   pickups = new Map<number, PickupView>();
   vehicles = new Map<number, { group: THREE.Group; glow: THREE.Sprite }>();
   /** First-person gun, attached to the camera (main view only). */
@@ -172,6 +179,50 @@ export class EntityViews {
     rod.frustumCulled = false;
     this.root.add(rod);
     this.beams.push({ line: rod, t: 1 });
+  }
+
+  private unitSphere = new THREE.SphereGeometry(1, 24, 16);
+  private debris: { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3; up: THREE.Vector3; t: number }[] = [];
+  private ghosts: { group: THREE.Group; up: THREE.Vector3; t: number; scale: number }[] = [];
+
+  /**
+   * Someone died: their body shatters into fragments (in its colour) that fly
+   * apart and fall, and a small white ghost with a halo rises and fades.
+   */
+  private deathEffect(v: PlayerView) {
+    const pos = v.group.position.clone();
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(v.group.quaternion).normalize();
+    const color = (v.body.material as THREE.MeshStandardMaterial).color.getHex();
+    const size = v.group.scale.x;
+    for (let i = 0; i < 26; i++) {
+      const sz = (0.1 + Math.random() * 0.16) * size;
+      const mat = new THREE.MeshStandardMaterial({ color: i % 5 === 0 ? 0x333a44 : color, roughness: 0.4, metalness: 0.5, transparent: true });
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(sz, sz * (0.6 + Math.random()), sz), mat);
+      // start spread over the body's height
+      const along = (Math.random() - 0.5) * 1.6 * size;
+      mesh.position.copy(pos).addScaledVector(up, along);
+      const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+      const vel = dir.multiplyScalar(2.5 + Math.random() * 4).addScaledVector(up, 2 + Math.random() * 3);
+      mesh.castShadow = true;
+      this.root.add(mesh);
+      this.debris.push({ mesh, vel, spin: new THREE.Vector3((Math.random() - 0.5) * 18, (Math.random() - 0.5) * 18, 0), up, t: 0 });
+    }
+    const ghost = new THREE.Group();
+    const ghostMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false });
+    ghostMat.userData.base = 0.55;
+    ghost.add(new THREE.Mesh(new THREE.CapsuleGeometry(PLAYER_RADIUS, PLAYER_HALF_SEG * 2, 6, 14), ghostMat));
+    const haloMat = new THREE.MeshBasicMaterial({ color: 0xfff2a0, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending });
+    haloMat.userData.base = 0.9;
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.035, 8, 24), haloMat);
+    halo.position.y = PLAYER_HALF_SEG + PLAYER_RADIUS + 0.2;
+    halo.rotation.x = Math.PI / 2;
+    ghost.add(halo);
+    ghost.quaternion.copy(v.group.quaternion);
+    ghost.position.copy(pos);
+    const scale = 0.6 * size;
+    ghost.scale.setScalar(scale);
+    this.root.add(ghost);
+    this.ghosts.push({ group: ghost, up, t: 0, scale });
   }
 
   /** A mallet swing: animate the swinger and flash the arc it hit. */
@@ -343,7 +394,7 @@ export class EntityViews {
     const chargeGlow = this.makeGlow(0xff2a1a, 1, pl.id === this.localId ? LAYER_SELF : 0);
     chargeGlow.visible = false;
     gunHolder.add(chargeGlow);
-    const v = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, chargeGlow, flame, shell, shellGlow: 0, prevShield: pl.shield };
+    const v = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, wasAlive: pl.alive, chargeGlow, flame, shell, shellGlow: 0, prevShield: pl.shield };
     this.players.set(id, v);
     return v;
   }
@@ -390,6 +441,8 @@ export class EntityViews {
     for (const p of state.players) {
       seenP.add(p.id);
       const v = this.players.get(p.id) ?? this.createPlayer(p);
+      if (v.wasAlive && !p.alive) this.deathEffect(v);
+      v.wasAlive = p.alive;
       v.group.visible = p.alive;
       v.marker.visible = p.alive;
       if (!p.alive) continue;
@@ -556,22 +609,59 @@ export class EntityViews {
       vw.glow.material.opacity = veh.driver >= 0 ? 0.65 + 0.2 * Math.sin(performance.now() * 0.03) : 0.35;
     }
 
-    // explosions
+    // explosions: three shells, coloured by what went off. They punch out to
+    // full size in ~0.1 s (an ease-out), then the outer one lingers as the
+    // middle and the white-hot core die away.
     const seenE = new Set<number>();
     for (const e of state.explosions) {
       seenE.add(e.id);
-      let mesh = this.explosions.get(e.id);
-      if (!mesh) {
-        mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshBasicMaterial({ color: 0x8fc6ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-        this.root.add(mesh);
-        this.explosions.set(e.id, mesh);
+      let grp = this.explosions.get(e.id);
+      if (!grp) {
+        const base = new THREE.Color(BLAST_COLORS[e.cause] ?? 0x8fc6ff);
+        const pale = base.clone().lerp(new THREE.Color(0xffffff), 0.45);
+        grp = new THREE.Group();
+        for (const [k, col] of [[1, pale], [0.72, base], [0.42, new THREE.Color(0xffffff).lerp(base, 0.2)]] as const) {
+          const sh = new THREE.Mesh(this.unitSphere, new THREE.MeshBasicMaterial({ color: col, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+          sh.userData.k = k;
+          grp.add(sh);
+        }
+        this.root.add(grp);
+        this.explosions.set(e.id, grp);
       }
-      mesh.position.set(...this.toView(e.pos));
-      const t = (state.tick - e.tick + alpha) / (e.endTick - e.tick);
-      mesh.scale.setScalar(Math.max(0.1, e.radius * Math.sqrt(Math.min(1, t * 1.5))));
-      (mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.8 * (1 - t));
+      grp.position.set(...this.toView(e.pos));
+      const t = Math.max(0, (state.tick - e.tick + alpha) / (e.endTick - e.tick));
+      const grow = 1 - Math.pow(1 - Math.min(1, t * 7), 3); // full size by t = 1/7 (0.1 s)
+      for (const sh of grp.children as THREE.Mesh[]) {
+        const k = sh.userData.k as number;
+        sh.scale.setScalar(Math.max(0.05, e.radius * k * (0.15 + 0.85 * grow) * (k < 1 ? 1 - 0.3 * t : 1 + 0.1 * t)));
+        // the core flashes and goes first; the outer shell fades last
+        const life = k === 1 ? 1 - t : k > 0.5 ? 1 - Math.min(1, t * 1.6) : 1 - Math.min(1, t * 3);
+        (sh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (k === 1 ? 0.35 : k > 0.5 ? 0.6 : 0.9) * life);
+      }
     }
-    for (const [id, mesh] of this.explosions) if (!seenE.has(id)) { mesh.removeFromParent(); this.explosions.delete(id); }
+    for (const [id, grp] of this.explosions) if (!seenE.has(id)) { grp.removeFromParent(); this.explosions.delete(id); }
+
+    // deaths: flying fragments and a fading ghost
+    for (const d of this.debris) {
+      d.t += dtReal;
+      d.vel.addScaledVector(d.up, -9 * dtReal);
+      d.mesh.position.addScaledVector(d.vel, dtReal);
+      d.mesh.rotation.x += d.spin.x * dtReal; d.mesh.rotation.y += d.spin.y * dtReal;
+      const f = Math.max(0, 1 - d.t / 1.4);
+      (d.mesh.material as THREE.MeshStandardMaterial).opacity = f;
+      d.mesh.scale.setScalar(0.4 + 0.6 * f);
+      if (f <= 0) d.mesh.removeFromParent();
+    }
+    this.debris = this.debris.filter((d) => d.t < 1.4);
+    for (const g of this.ghosts) {
+      g.t += dtReal;
+      g.group.position.addScaledVector(g.up, 1.6 * dtReal);
+      const f = Math.max(0, 1 - g.t / 1.1);
+      g.group.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined; if (m) m.opacity = (m.userData.base ?? 0.5) * f; });
+      g.group.scale.setScalar(g.scale * (1 + 0.25 * g.t));
+      if (f <= 0) g.group.removeFromParent();
+    }
+    this.ghosts = this.ghosts.filter((g) => g.t < 1.1);
 
     for (const b of this.beams) {
       b.t -= dtReal * 2.5;

@@ -1077,7 +1077,7 @@ function updateGrenades(state: SimState, omega: number) {
     }
     if (g.fuseTick >= 0 && tick >= g.fuseTick) explode = true;
     if (tick >= g.expireTick) continue;
-    if (explode) detonate(state, g.pos, g.owner, g.id);
+    if (explode) detonate(state, g.pos, g.owner, g.id, undefined, g.variant === 'bounce' ? 'bouncing grenade' : 'grenade');
     else keep.push(g);
   }
   state.grenades = keep;
@@ -1109,7 +1109,7 @@ export function detonate(state: SimState, c: Vec3, owner: number, sourceId: numb
   const b = blast ?? { radius: cfg.explosionRadius, damage: cfg.explosionDamage, knockback: cfg.knockbackSpeed };
   const rad = b.radius;
   const id = allocId(state);
-  state.explosions.push({ id, type: 'explosion', owner, pos: clone(c), radius: rad, tick: state.tick, endTick: state.tick + secs(0.7) });
+  state.explosions.push({ id, type: 'explosion', owner, pos: clone(c), radius: rad, tick: state.tick, endTick: state.tick + secs(0.7), cause });
   state.events.push({ type: 'explode', id: sourceId, owner, pos: clone(c) });
   const kb = b.knockback * cfg.knockbackScale;
 

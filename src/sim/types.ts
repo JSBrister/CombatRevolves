@@ -427,6 +427,8 @@ export interface Explosion {
   radius: number;
   tick: number;
   endTick: number;
+  /** What went off (grenade, fuel rod, rocket, ...): the renderer colours the blast by it. */
+  cause: string;
 }
 
 /** Obstacle box: axis-aligned in the local frame of its ring angle. */
