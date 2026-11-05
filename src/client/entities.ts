@@ -2,7 +2,7 @@
 // the previous and current tick.
 
 import * as THREE from 'three';
-import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_HAMMER } from '../sim';
+import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_HAMMER, WEAPON_LACONIC, WEAPON_PISTOL } from '../sim';
 import { makeBike, makeGun, makePickup } from './models';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
@@ -13,6 +13,9 @@ const PICKUP_GLOW: Record<string, number> = {
 };
 
 export type PosMap = Map<number, Vec3>;
+
+/** How far along a gun model (+X) its muzzle is. */
+const MUZZLE_TIP: Record<number, number> = { 1: 0.27, 5: 1.08 };
 
 const BOLT_COLORS: Record<string, number> = {
   rifle: 0x55c8ff, redRifle: 0xff4a3a, pistol: 0x8dff5a, overcharge: 0x5dff7a, fuelRod: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a,
@@ -83,6 +86,7 @@ interface PlayerView {
   marker: THREE.Sprite;
   gunHolder: THREE.Group; // floating gun beside the player, pitched with their aim
   gunWeapon: number;
+  chargeGlow: THREE.Sprite; // at the muzzle: the laser (red) or pistol overcharge (green) charging
   flame: THREE.Sprite; // jetpack exhaust
   shell: THREE.Mesh; // shield bubble, a little outside the body
   shellGlow: number; // 0..1, decays
@@ -191,6 +195,32 @@ export class EntityViews {
   reloadDip = 0; // 0..1 while reloading
 
   /** Show the local player's current weapon in first person. */
+  /** Glow at the muzzle while a weapon charges: red for the Laconic Laser (also while it streams), green for the pistol. */
+  setChargeGlow(glow: THREE.Sprite, p: Player, tick: number) {
+    const laser = p.weapon === WEAPON_LACONIC, pistol = p.weapon === WEAPON_PISTOL;
+    const streaming = laser && tick < p.burstUntil;
+    const k = streaming ? 1 : (laser || pistol) ? p.charge : 0;
+    glow.visible = p.alive && k > 0.02;
+    if (!glow.visible) return;
+    glow.material.color.setHex(laser ? (k > 0.95 ? 0xffb090 : 0xff5030) : 0x9dffb0);
+    glow.position.set((MUZZLE_TIP[p.weapon] ?? 0.4) + 0.12, 0, 0);
+    const flicker = 0.85 + 0.15 * Math.sin(performance.now() * (streaming ? 0.08 : 0.02));
+    glow.scale.setScalar((laser ? 2.6 : 1.0) * (0.3 + k) * flicker);
+    glow.material.opacity = 1;
+  }
+
+  /** First-person charge glow (on the view model). */
+  private fpGlow: THREE.Sprite | null = null;
+  setViewCharge(p: Player | undefined, tick: number) {
+    if (!this.fpGlow) {
+      this.fpGlow = this.makeGlow(0xff2a1a, 1, LAYER_ROT_TRAILS);
+      this.fpGlow.visible = false;
+    }
+    if (this.fpGlow.parent !== this.viewModel.children[0] && this.viewModel.children[0]) this.viewModel.children[0].add(this.fpGlow);
+    if (!p) { this.fpGlow.visible = false; return; }
+    this.setChargeGlow(this.fpGlow, p, tick);
+  }
+
   setViewWeapon(weapon: number, visible: boolean) {
     this.viewModel.visible = visible;
     if (weapon === this.viewWeapon) return;
@@ -302,7 +332,10 @@ export class EntityViews {
     if (id === this.localId) group.traverse((o) => o.layers.set(LAYER_SELF));
     const marker = this.makeGlow(kind === 'human' ? 0x66aaff : 0xff6644, Math.max(4, this.rs.starRadius / 600), LAYER_INERTIAL_ONLY);
     this.root.add(group, marker);
-    const v = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, flame, shell, shellGlow: 0, prevShield: pl.shield };
+    const chargeGlow = this.makeGlow(0xff2a1a, 1, pl.id === this.localId ? LAYER_SELF : 0);
+    chargeGlow.visible = false;
+    gunHolder.add(chargeGlow);
+    const v = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, chargeGlow, flame, shell, shellGlow: 0, prevShield: pl.shield };
     this.players.set(id, v);
     return v;
   }
@@ -354,6 +387,7 @@ export class EntityViews {
         v.gunWeapon = p.weapon;
       }
       v.gunHolder.rotation.z = p.pitch; // tip the gun up/down with the aim
+      this.setChargeGlow(v.chargeGlow, p, state.tick);
       const sw = this.swingT.get(p.id);
       if (sw !== undefined && p.weapon === WEAPON_HAMMER) {
         // wind up over the right shoulder, then sweep across to the left

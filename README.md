@@ -14,7 +14,7 @@ npx tsc -p src/sim # proves the sim compiles without DOM types
 **Play online:** this repo builds and deploys itself to GitHub Pages on every push to `main` (enable it under Settings → Pages → Source: GitHub Actions).
 
 **Modes:** *Campaign* (fixed levels: kill every enemy to clear it, no respawns, enemies don't hurt each other) and
-*Deathmatch* (free-for-all with bots and respawns; the debug panel is in the pause menu). Levels are rings of different sizes and widths (some with rolling hills, a bowl-shaped *sphere band*, or a planet's pull), plus *Earth* (flat ground, normal gravity, no spin: the reference for what everything should do) and *Boot Camp*, the first campaign level, also on Earth.
+*Deathmatch* (free-for-all with bots and respawns; the debug panel is in the pause menu). Levels are rings of different sizes and widths (some with rolling hills, a bowl-shaped *sphere band*, or a planet's pull), plus *Earth* (flat ground, normal gravity, no spin: the reference for what everything should do) and *Shore Leave*, the last campaign level, also on Earth. (They come last in each list on purpose: the spin is the point.)
 
 **Controls:** WASD move · Shift toggle sprint (on by default) · Space jump (hold in the air with a jetpack) · mouse look ·
 left click fire · right click show trajectory · 1–9 weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade

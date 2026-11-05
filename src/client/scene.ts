@@ -61,6 +61,15 @@ export class RingScene {
     this.sunLight.intensity = 2.6;
     this.sunDir.set(Math.sin(0.7), 0, Math.cos(0.7));
     const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
+    // Closed worlds (inside a torus, a whole sphere): no sunlight gets in, so no
+    // sweeping sun shadows; they're lit from inside instead.
+    const enclosed = level.terrain?.tube?.kind === 'inside' || (!!level.terrain?.sphere && W > 0.9 * R);
+    if (enclosed) {
+      this.sunLight.intensity = 0;
+      this.ambient.intensity = 1.0;
+      this.axisLight.intensity = 1.2;
+    }
+    this.sunLight.castShadow = !enclosed;
     const segs = Math.min(720, Math.max(192, Math.round(R * 2.4)));
     this.starRadius = Math.max(4000, R * 12);
     this.scene.fog = new THREE.Fog(0x0b1020, Math.max(R * 1.5, 80), Math.max(R * 7, 400));
@@ -197,6 +206,7 @@ export class RingScene {
     this.ambient.intensity = 1.0;
     this.axisLight.intensity = 0;
     this.sunLight.intensity = 2.2;
+    this.sunLight.castShadow = true;
     // sun high in the sky over the arena (around angle 0, "up" is -x)
     this.sunDir.set(-0.8, 0.25, 0.45).normalize();
     const half = 600; // metres of ground drawn each way
@@ -215,15 +225,15 @@ export class RingScene {
     ground.position.copy(centre);
     ground.receiveShadow = true;
     this.level.add(ground);
-    // painted arena floor on top of the grass
-    const deck = this.textures.deck.clone();
+    // the arena: a mown, slightly greener patch of the same grass
+    const deck = this.textures.grass.clone();
     deck.needsUpdate = true;
-    deck.repeat.set(cfg.arena / 5, (2 * W) / 5);
+    deck.repeat.set(cfg.arena / 4, (2 * W) / 4);
     const a2 = cfg.arena / R;
     const fg = new THREE.CylinderGeometry(R - 0.03, R - 0.03, 2 * W, Math.round(cfg.arena / 2), 1, true, -a2 / 2 + Math.PI / 2, a2);
     fg.rotateX(Math.PI / 2);
     fg.translate(-R, 0, 0);
-    const floor = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: deck, side: THREE.BackSide, roughness: 0.85, metalness: 0.1 }));
+    const floor = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: deck, color: 0xb8e8a0, side: THREE.BackSide, roughness: 0.95, metalness: 0 }));
     floor.position.copy(centre);
     floor.receiveShadow = true;
     this.level.add(floor);

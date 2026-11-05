@@ -324,7 +324,14 @@ export function makeSpawns(cfg: SimConfig): SpawnPoint[] {
   const n = 8;
   const off = cfg.arena > 0 ? 0.5 : 0;
   const sz = cfg.tube !== 'none' ? Math.min(8, 0.3 * cfg.tubeRadius) : 8; // (a log is narrow)
-  for (let i = 0; i < n; i++) spawns.push({ angle: arcAngle(cfg, (i + off) / n), z: i % 2 === 0 ? -sz : sz });
+  // On wide floors spread the spawns across the width too (spawnPosition puts
+  // them on the floor however it curves); on a sphere stay at low latitudes.
+  const Wz = cfg.terrainSphere ? Math.min(cfg.halfWidth, 0.45 * cfg.R) : cfg.halfWidth;
+  const across = [-0.6, 0.25, 0.6, -0.25, 0.4, -0.45, 0.1, -0.1];
+  for (let i = 0; i < n; i++) {
+    const z = cfg.tube === 'none' && Wz >= 35 ? across[i % across.length] * (Wz - 6) : i % 2 === 0 ? -sz : sz;
+    spawns.push({ angle: arcAngle(cfg, (i + off) / n), z });
+  }
   return spawns;
 }
 

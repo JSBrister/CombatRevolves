@@ -393,6 +393,7 @@ function frame(now: number) {
   views.setPreview(pk ? predictTrajectory(state, localId, pk, input.yaw, input.pitch, maxT) : null, BOLT_COLORS[pk ?? 'rifle']);
   // first-person gun, mouse slowdown while charging the laser, owned list for the wheel
   views.setViewWeapon(me?.weapon ?? 0, !!me && me.alive && !view.freefly && me.vehicle < 0);
+  views.setViewCharge(me, state.tick);
   input.lookScale = me && isLaconicBusy(me, state.tick) ? cfg.weapons.laconic.chargeLookScale : 1;
   views.reloadDip = me && me.reloadUntil > state.tick && me.reloadWeapon === me.weapon ? Math.min(1, views.reloadDip + dtReal * 6) : Math.max(0, views.reloadDip - dtReal * 6);
   if (me) input.owned = me.owned;
@@ -484,6 +485,7 @@ function showLevels(mode: GameMode) {
   const groupOf = (d: LevelDef) => {
     const c = d.config;
     if (d.mode === 'campaign') return '';
+    if (c.spin === false) return 'EARTH (FOR COMPARISON)';
     if (c.floorHoles || c.deckHeight || c.spinChange || c.planetPull || (c.dragType && c.dragType !== 'none')) return 'GIMMICKS';
     if (c.tube || c.terrainSphere || c.hills || c.ridgeHeight) return 'SHAPES AND TERRAIN';
     return 'RINGS';

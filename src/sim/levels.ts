@@ -49,17 +49,10 @@ export interface LevelDef {
  * toward the floor. Over the 120 m arena the floor curves by about 2 cm, so
  * it's flat ground: the reference for what everything "should" do.
  */
-const EARTH: Partial<SimConfig> = { R: 100000, spin: false, gravity: 9.81, arena: 120, halfWidth: 40, wallHeight: 5 };
+const EARTH: Partial<SimConfig> = { R: 100000, spin: false, gravity: 9.81, arena: 300, halfWidth: 90, wallHeight: 5 };
 
 export const LEVELS: LevelDef[] = [
   // ------------------------------------------------------------ campaign
-  {
-    id: 'c0', mode: 'campaign', name: 'Boot Camp', seed: 11, sky: 'earth', variedWalls: false,
-    blurb: 'Flat ground, normal gravity, no spin. Three grunts. Learn the guns before physics gets weird.',
-    config: { ...EARTH },
-    start: { angle: 0, z: 0 },
-    enemies: [{ type: 'grunt', along: 25, z: -10 }, { type: 'grunt', along: 35, z: 8 }, { type: 'grunt', along: 45, z: 0 }],
-  },
   {
     id: 'c1', mode: 'campaign', name: 'First Contact', seed: 101,
     blurb: 'A standard 100 m ring. Four grunts and a soldier. Mind the Coriolis drift on your shots.',
@@ -146,9 +139,14 @@ export const LEVELS: LevelDef[] = [
       { type: 'sniper', stair: 0 },
     ],
   },
+  {
+    id: 'c0', mode: 'campaign', name: 'Shore Leave (Earth)', seed: 11, sky: 'earth', variedWalls: false,
+    blurb: 'Back on Earth: flat ground, normal gravity, no spin. Three grunts. Everything you learned up there is now subtly wrong.',
+    config: { ...EARTH },
+    start: { angle: 0, z: 0 },
+    enemies: [{ type: 'grunt', along: 25, z: -10 }, { type: 'grunt', along: 35, z: 8 }, { type: 'grunt', along: 45, z: 0 }],
+  },
   // ------------------------------------------------------------ sandbox
-  { id: 's-earth', mode: 'sandbox', name: 'Earth (reference)', seed: 21, config: { ...EARTH }, bots: 2, sky: 'earth', variedWalls: false,
-    blurb: 'Uniform 1 g, flat ground, no spin: what everything "should" do. Compare any trick here and on a ring.' },
   { id: 's-standard', mode: 'sandbox', name: 'Standard ring (100 m)', seed: 1234, config: { R: 100 }, bots: 3,
     blurb: '1 g at the floor, a 20 s spin, 31 m/s rim speed. Three bots.' },
   { id: 's-tiny', mode: 'sandbox', name: 'Tiny ring (12 m)', seed: 11, config: { R: 12 }, bots: 1,
@@ -192,6 +190,8 @@ export const LEVELS: LevelDef[] = [
     blurb: 'The one ring with air. Bolts slow down and droop, grenades fall short, jetpacks hit a terminal speed.' },
   { id: 's-empty', mode: 'sandbox', name: 'Empty ring (100 m)', seed: 15, config: { R: 100 }, bots: 0,
     blurb: 'No bots, no clutter: a physics playground.' },
+  { id: 's-earth', mode: 'sandbox', name: 'Earth (reference)', seed: 21, config: { ...EARTH }, bots: 2, sky: 'earth', variedWalls: false,
+    blurb: 'Uniform 1 g, flat ground, no spin: what everything "should" do. Compare any trick here and on a ring.' },
 ];
 
 /** Settings that describe the world itself: reset for every level. */
