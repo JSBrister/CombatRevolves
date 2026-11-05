@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import {
   DT, LEVELS, WEAPON_HOVER, WEAPON_IDS, WEAPON_NAMES, isLaconicBusy, addPlayer, applyItem, botInput, createState, damagePlayer,
   eyeOffset, levelById, localBasis, omegaOf, startLevel,
-  predictTrajectory, removePlayer, step, viewVectors, addVehicle, addScaled, convertDir,
+  predictTrajectory, removePlayer, step, viewVectors, addVehicle, addScaled, convertDir, transportYaw, dist,
   type BoltKind, type GameMode, type InputCmd, type ItemKind, type LevelDef, type ThrownKind, type SimConfig, type SimEvent, type SimState, type Vec3,
 } from '../sim';
 import { Sfx } from './audio';
@@ -327,7 +327,12 @@ function simTick() {
   prevFrameAngle = state.frameAngle;
   const inputs: InputCmd[] = [input.sample(localId, state.tick)];
   for (const b of botIds) inputs.push(botInput(state, b));
+  const meBefore = state.players.find((p) => p.id === localId);
+  const from: Vec3 | null = meBefore && meBefore.alive ? [...meBefore.pos] as Vec3 : null;
   step(state, inputs, state.tick);
+  // on a planet, keep facing the same way as you move (near a pole "east" swings round)
+  const meAfter = state.players.find((p) => p.id === localId);
+  if (cfg.world === 'planet' && from && meAfter && meAfter.alive && dist(from, meAfter.pos) < 5) input.yaw = transportYaw(input.yaw, from, meAfter.pos);
   for (const e of state.events) handleEvent(e);
   views.onTick(state);
 }

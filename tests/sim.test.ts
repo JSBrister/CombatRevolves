@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -2044,5 +2044,34 @@ describe('40. nested spheres', () => {
       expect(landed).toBe(true);
       expect(p.alive).toBe(true);
     }
+  });
+});
+
+describe('41. walking over a pole', () => {
+  it('carrying your facing along (as the client does), you walk straight over the pole', () => {
+    const { state: s, localId: id } = startLevel(levelById('s-world')!);
+    s.players = s.players.filter((p) => p.id === id);
+    s.level.boxes = [];
+    const p = s.players[0];
+    const R = s.config.R, lat0 = (80 * Math.PI) / 180;
+    p.pos = [(R + 0.95) * Math.cos(lat0), 0, (R + 0.95) * Math.sin(lat0)];
+    p.vel = [0, 0, 0];
+    run(s, 60, () => [cmdFor(s, id)]);
+    let yaw = aimAt(p.pos, [0, 0, R + 0.95]).yaw; // facing the pole
+    const fwd = () => viewVectors(p.pos, yaw, 0).forward;
+    let f0 = fwd(), worst = 0, passedPole = false;
+    for (let i = 0; i < 120 * 6; i++) {
+      const from = clone(p.pos);
+      step(s, [cmdFor(s, id, { yaw, moveY: 1 })], s.tick);
+      yaw = transportYaw(yaw, from, p.pos);
+      const f1 = fwd();
+      worst = Math.max(worst, Math.acos(Math.min(1, dot(f0, f1))) * (180 / Math.PI));
+      f0 = f1;
+      if (Math.hypot(p.pos[0], p.pos[1]) < 2) passedPole = true;
+    }
+    expect(passedPole).toBe(true);
+    expect(worst).toBeLessThan(1); // never jerked round
+    expect(p.pos[0]).toBeLessThan(0); // came out the far side, still going straight
+    expect(Math.abs(p.pos[1])).toBeLessThan(0.15 * R);
   });
 });

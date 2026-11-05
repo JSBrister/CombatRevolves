@@ -56,6 +56,26 @@ function planetBasis(r: Vec3): Basis {
   return { up: [ux, uy, uz], spin: [ex, ey, ez], axial: [ax, ay, az] };
 }
 
+/**
+ * Carry a facing (local yaw) from `from` to `to` without turning it: take the
+ * world direction it points, lay it flat on the new ground, and measure it
+ * from the new spinward direction. On a ring this is the same yaw (the local
+ * frame turns with you); on a planet, near a pole, "east" swings round as
+ * you move (it flips walking over the pole), so a fixed yaw would turn you.
+ */
+export function transportYaw(yaw: number, from: Vec3, to: Vec3): number {
+  const a = localBasis(from), b = localBasis(to);
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  let fx = a.spin[0] * c + a.axial[0] * s, fy = a.spin[1] * c + a.axial[1] * s, fz = a.spin[2] * c + a.axial[2] * s;
+  const u = fx * b.up[0] + fy * b.up[1] + fz * b.up[2];
+  fx -= u * b.up[0]; fy -= u * b.up[1]; fz -= u * b.up[2];
+  const x = fx * b.spin[0] + fy * b.spin[1] + fz * b.spin[2], z = fx * b.axial[0] + fy * b.axial[1] + fz * b.axial[2];
+  if (x * x + z * z < 1e-18) return yaw;
+  // keep it continuous (no 2 pi jumps)
+  const ny = Math.atan2(z, x);
+  return yaw + Math.atan2(Math.sin(ny - yaw), Math.cos(ny - yaw));
+}
+
 /** forward/right/aim directions for a local-frame yaw/pitch at position r. */
 export function viewVectors(r: Vec3, yaw: number, pitch: number) {
   const b = localBasis(r);
