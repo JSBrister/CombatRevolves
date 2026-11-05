@@ -165,18 +165,22 @@ export class RingScene {
     const wallMat = new THREE.MeshStandardMaterial({ map: this.textures.wall, roughness: 0.7, metalness: 0.3 });
     const stairMat = new THREE.MeshStandardMaterial({ map: this.textures.wall, color: 0xd6e2f5, emissive: 0x1c2a40, roughness: 0.6, metalness: 0.15 });
     const liftMat = new THREE.MeshStandardMaterial({ color: 0x4a5a70, emissive: 0x1a4a7a, roughness: 0.5, metalness: 0.6 });
+    // bases: that particular blue-grey alloy, faintly lit, with glowing edges
+    const structMat = new THREE.MeshStandardMaterial({ color: 0x9aa3ae, emissive: 0x0c1218, roughness: 0.32, metalness: 0.55 });
+    const structEdge = new THREE.LineBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.55 });
     this.liftMeshes.clear();
     for (const b of level.boxes) {
       const geo = new THREE.BoxGeometry(2 * b.half[0], 2 * b.half[1], 2 * b.half[2]);
-      const mesh = new THREE.Mesh(geo, b.kind === 'ramp' ? stairMat : b.kind === 'wall' ? wallMat : b.kind === 'lift' ? liftMat : boxMat);
+      const mesh = new THREE.Mesh(geo, b.kind === 'ramp' ? stairMat : b.kind === 'wall' ? wallMat : b.kind === 'lift' ? liftMat : b.kind === 'struct' ? structMat : boxMat);
       if (b.lift) this.liftMeshes.set(b.id, mesh);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       basisMatrix(m, b.angle, 0, 0);
       mesh.quaternion.setFromRotationMatrix(m);
+      if (b.yaw) mesh.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -b.yaw));
       if (b.tilt) mesh.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), b.tilt));
       mesh.position.set(b.center[0], b.center[1], b.center[2]);
-      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat));
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), b.kind === 'struct' ? structEdge : edgeMat));
       this.level.add(mesh);
     }
 

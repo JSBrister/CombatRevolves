@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1692,5 +1692,63 @@ describe('33. lifts', () => {
     expect(top).toBeLessThan(dk.r - 0.5); // carried right up to deck level
     expect(airborne).toBeLessThan(20); // no hopping on the way
     expect(p.alive).toBe(true);
+  });
+});
+
+describe('34. bases and mountains', () => {
+  const wrapA = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+  it('a box turned 45 degrees collides along its own axes', () => {
+    const s = empty();
+    const R = s.config.R;
+    const c: Vec3 = [R - 3, 0, 0];
+    s.level.boxes = [{ id: 999, type: 'box', kind: 'struct', angle: 0, tilt: 0, center: c, half: [2, 1, 0.2], yaw: Math.PI / 4 }];
+    // at angle 0: spin = +y, axial = +z; the box runs along (y + z)/sqrt 2
+    const along: Vec3 = [0, Math.SQRT1_2, Math.SQRT1_2], across: Vec3 = [0, -Math.SQRT1_2, Math.SQRT1_2];
+    const d = (p: Vec3) => levelSdf(s.level, s.config, p).d;
+    expect(d(addScaled(c, along, 1.9))).toBeLessThan(0);
+    expect(d(addScaled(c, along, 2.1))).toBeCloseTo(0.1, 6);
+    expect(d(addScaled(c, across, 0.5))).toBeCloseTo(0.3, 6);
+    const n = levelSdf(s.level, s.config, addScaled(c, across, 0.5)).n;
+    for (let i = 0; i < 3; i++) expect(n[i]).toBeCloseTo(across[i], 6);
+  });
+  const outposts = () => {
+    const { state, localId } = startLevel(levelById('s-outposts')!);
+    state.players = state.players.filter((p) => p.id === localId);
+    const ramps = state.level.boxes.filter((b) => b.kind === 'ramp' && b.tilt !== 0);
+    const pillar = state.level.boxes.find((b) => b.kind === 'struct' && b.yaw && b.half[0] === 1 && b.half[2] === 1 && b.half[1] > 1.5)!; // a base's centre pillar
+    return { s: state, id: localId, p: state.players[0], ramps, pillar };
+  };
+  it('the big levels have bases and mountains', () => {
+    const { s, pillar } = outposts();
+    expect(pillar).toBeTruthy();
+    expect(s.level.terrain!.hills.some((h) => h.height > 20 && h.radius >= h.height)).toBe(true);
+  });
+  it('you can run up a ramp onto a base roof, and walk in through a doorway', () => {
+    const { s, id, p, pillar } = outposts();
+    const R = s.config.R, a0 = pillar.angle, zc = pillar.center[2];
+    // the ramp on the spinward end climbs antispinward, at z = zc - (9/2 - 1)
+    const stand = (x: number, z: number) => {
+      const a = a0 + x / R;
+      const r = floorRadius(s.level, s.config, a, z) - 0.9;
+      p.pos = [r * Math.cos(a), r * Math.sin(a), z];
+      p.vel = [0, 0, 0];
+    };
+    stand(9 + 0.3 + 14, zc - 3.5);
+    let onRoof = false;
+    for (let i = 0; i < 120 * 4 && !onRoof; i++) {
+      step(s, [cmdFor(s, id, { yaw: Math.PI, moveY: 1 })], s.tick);
+      const x = wrapA(angleOf(p.pos) - a0) * R;
+      const height = floorRadius(s.level, s.config, angleOf(p.pos), p.pos[2]) - Math.hypot(p.pos[0], p.pos[1]) - 0.9;
+      onRoof = p.grounded && Math.abs(x) < 8 && height > 4.5; // standing on the roof (its top is 4.8 m up)
+    }
+    expect(onRoof).toBe(true);
+    // through the north doorway: start outside, walk across the ring into the room
+    stand(0.3, zc + 14);
+    let inside = false;
+    for (let i = 0; i < 120 * 3 && !inside; i++) {
+      step(s, [cmdFor(s, id, { yaw: -Math.PI / 2, moveY: 1 })], s.tick);
+      inside = p.pos[2] - zc < 7 && p.pos[2] - zc > 2; // through the wall line (z = 9) and into the room
+    }
+    expect(inside).toBe(true);
   });
 });

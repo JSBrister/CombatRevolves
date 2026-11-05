@@ -16,6 +16,9 @@ export interface SimConfig {
   terrainSphere: boolean; // floor is a band round the inside of a sphere of radius R (curves up at the edges)
   hills: number; // how many Gaussian hills on the floor (0 = flat)
   hillHeight: number; // tallest hill (m)
+  mountains: number; // big, wide massifs
+  mountainHeight: number; // tallest (m)
+  bases: number; // grey two-storey bases (on flat ground)
   ridgeHeight: number; // a ridge along the middle of the ring, this high (m): a Lambda-shaped cross-section
   ridgePlateau: number; // how rounded the ridge's top is (m)
   /**
@@ -409,11 +412,13 @@ export interface Explosion {
 export interface Box {
   id: number;
   type: 'box';
-  kind: 'cover' | 'ramp' | 'wall' | 'lift';
+  kind: 'cover' | 'ramp' | 'wall' | 'lift' | 'struct';
   angle: number; // ring angle of the box centre
   tilt: number; // rotation about the axial direction (ramps): + tips the spinward end up
   center: Vec3;
   half: Vec3; // half extents along (spinward, up, axial) at `angle`
+  /** Optional turn about the local up (radians): the box's length runs along cos(yaw) spinward + sin(yaw) axial. */
+  yaw?: number;
   /** A lift: `center` moves `travel` m up from `base` and back, on a cycle of `period` s (a pure function of time). */
   lift?: { base: Vec3; travel: number; period: number; phase: number };
 }

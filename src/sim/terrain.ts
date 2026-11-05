@@ -63,10 +63,15 @@ export function floorRadius(level: Level, cfg: SimConfig, angle: number, z: numb
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
+/** Somewhere that must stay flat: an angular band (the whole width), or a patch if z/halfZ are given. */
+export interface ClearZone { angle: number; halfArc: number; z?: number; halfZ?: number }
+const blocks = (cfg: SimConfig, k: ClearZone, angle: number, z: number, m: number) =>
+  Math.abs(wrap(angle - k.angle)) * cfg.R < k.halfArc + m && (k.z === undefined || Math.abs(z - k.z) < (k.halfZ ?? 0) + m);
+
 /** Seeded hills for a level (kept away from the rim walls). */
 export function makeHills(
   cfg: SimConfig, count: number, maxHeight: number, rand: () => number, arc: (u: number) => number,
-  keepClear: { angle: number; halfArc: number }[] = [],
+  keepClear: ClearZone[] = [], margin = 2.5,
 ): Hill[] {
   const hills: Hill[] = [];
   for (let i = 0; i < count; i++) {
@@ -76,10 +81,37 @@ export function makeHills(
     const z = (rand() * 2 - 1) * zr;
     const height = maxHeight * (0.3 + 0.7 * rand());
     // ramps and lookouts need flat ground: no hill within 2.5 sigma of one
-    if (keepClear.some((k) => Math.abs(wrap(angle - k.angle)) * cfg.R < k.halfArc + 2.5 * radius)) continue;
+    if (keepClear.some((k) => blocks(cfg, k, angle, z, margin * radius))) continue;
     hills.push({ angle, z, height, radius });
   }
   return hills;
+}
+
+/**
+ * Mountains: like hills, but as wide as they're tall (sigma = 1.0-1.4 x the
+ * height), so the slopes stay walkable (under ~30 degrees) and they read as
+ * massifs, not bumps. Kept 3 sigma clear of `keepClear` (where they've faded out).
+ */
+export function makeMountains(
+  cfg: SimConfig, count: number, maxHeight: number, rand: () => number, arc: (u: number) => number,
+  keepClear: ClearZone[] = [], pickAngle?: (rand: () => number) => number, maxRadius = Math.max(20, cfg.halfWidth / 2.5),
+): Hill[] {
+  const out: Hill[] = [];
+  for (let i = 0; i < count; i++) {
+    const height = maxHeight * (0.5 + 0.5 * rand());
+    const radius = Math.min(maxRadius, height * (1.0 + 0.4 * rand()));
+    const zr = Math.max(0, cfg.halfWidth - radius * 2);
+    // a few tries at a spot that's clear (between windows, away from bases)
+    for (let tryN = 0; tryN < 10; tryN++) {
+      const angle = pickAngle ? pickAngle(rand) : arc(rand());
+      const z = (rand() * 2 - 1) * zr;
+      if (keepClear.some((k) => blocks(cfg, k, angle, z, 3 * radius))) continue;
+      if (out.some((m) => Math.abs(wrap(angle - m.angle)) * cfg.R < 1.5 * (radius + m.radius) && Math.abs(z - m.z) < 1.5 * (radius + m.radius))) continue;
+      out.push({ angle, z, height: Math.min(height, radius), radius }); // never steeper than ~30 degrees
+      break;
+    }
+  }
+  return out;
 }
 
 /** How high the floor is at the ring's edges (z = +-halfWidth): where the rim walls stand. */

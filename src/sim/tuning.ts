@@ -24,6 +24,9 @@ export const defaultConfig = (): SimConfig => ({
   terrainSphere: false, // true = the floor is a band round the inside of a sphere (bowl-shaped across)
   hills: 0, // number of rolling hills on the floor
   hillHeight: 8, // tallest hill (m)
+  mountains: 0, // big, wide mountains (walkable slopes)
+  mountainHeight: 120, // tallest mountain (m)
+  bases: 0, // two-storey bases: a room with doorways, ramps up to a roof with cover
   ridgeHeight: 0, // a ridge along the middle, this high (m): the floor's cross-section becomes a Lambda
   ridgePlateau: 12, // how rounded its top is (m)
   tube: 'none', // 'inside' / 'half' / 'outside' a torus whose tube has radius tubeRadius

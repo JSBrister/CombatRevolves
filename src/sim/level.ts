@@ -5,7 +5,7 @@
 import { rngNext, rngRange } from './rng';
 import type { Box, Deck, Hole, ItemKind, Level, SimConfig, SpawnPoint } from './types';
 import { type Vec3, rhoOf } from './vec';
-import { edgeHeight, floorRadius, makeHills, terrainAt } from './terrain';
+import { type ClearZone, edgeHeight, floorRadius, makeHills, makeMountains, terrainAt } from './terrain';
 
 export interface SdfHit {
   d: number; // signed distance (negative = inside solid)
@@ -136,12 +136,14 @@ function boxSdf(p: Vec3, b: Box, out: SdfHit) {
   // local axes: spin = (-s, c, 0), up = (-c, -s, 0), axial = (0,0,1)
   const dx = p[0] - b.center[0], dy = p[1] - b.center[1], dz = p[2] - b.center[2];
   // (spinward, up) components, then rotate into the box's tilted frame
-  const ls = -s * dx + c * dy;
+  let ls = -s * dx + c * dy;
   const lu = -c * dx - s * dy;
+  let lz = dz;
+  const cy = b.yaw ? Math.cos(b.yaw) : 1, sy = b.yaw ? Math.sin(b.yaw) : 0;
+  if (b.yaw) { const a = cy * ls + sy * lz; lz = -sy * ls + cy * lz; ls = a; } // into the box's turned frame
   const ct = Math.cos(b.tilt), st = Math.sin(b.tilt);
   const lx = ct * ls + st * lu;
   const ly = -st * ls + ct * lu;
-  const lz = dz;
   // cheap reject: can't beat the current best distance (squared, no sqrt/hypot)
   const h0 = b.half[0], h1 = b.half[1], h2 = b.half[2];
   const lim = out.d + Math.sqrt(h0 * h0 + h1 * h1 + h2 * h2);
@@ -161,8 +163,10 @@ function boxSdf(p: Vec3, b: Box, out: SdfHit) {
     else nz = Math.sign(lz) || 1;
   }
   out.d = d;
-  // undo the tilt, then back to world: spin*ns + up*nu + axial*nz
-  const ns = ct * nx - st * ny, nu = st * nx + ct * ny;
+  // undo the tilt and the turn, then back to world: spin*ns + up*nu + axial*nz
+  let ns = ct * nx - st * ny;
+  const nu = st * nx + ct * ny;
+  if (b.yaw) { const a = cy * ns - sy * nz; nz = sy * ns + cy * nz; ns = a; }
   out.n = [-s * ns - c * nu, c * ns - s * nu, nz];
 }
 
@@ -364,7 +368,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const R = cfg.R;
   // where the lookout ramps will go (same formula as below), so hills keep clear of them
   const span0 = playSpan(cfg);
-  const nRamps0 = withObstacles ? Math.max(2, Math.min(12, Math.round(span0 / 150))) : 0;
+  const nRamps0 = withObstacles && !(cfg.bases > 0) ? Math.max(2, Math.min(12, Math.round(span0 / 150))) : 0;
   const H0 = Math.max(2, Math.min(LOOKOUT_HEIGHT, 0.3 * R));
   const rampClear = Array.from({ length: nRamps0 }, (_, s) => ({
     angle: arcAngle(cfg, (s + 0.5) / nRamps0 + (cfg.arena > 0 ? 0 : 1 / 16)),
@@ -375,8 +379,33 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const windows = cfg.windows > 0
     ? Array.from({ length: cfg.windows }, (_, i) => ({ angle: ((i + 0.5) / cfg.windows) * 2 * Math.PI, halfArc: (Math.PI * R) / (2 * cfg.windows) }))
     : [];
-  const terrain: Level['terrain'] = cfg.terrainSphere || cfg.hills > 0 || ridge || cfg.tube !== 'none'
-    ? { sphere: cfg.terrainSphere, hills: makeHills(cfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), [...rampClear, ...windows]), ...(ridge ? { ridge } : {}) }
+  // Bases need flat ground: pick their sites first (clear of the windows), so hills and mountains avoid them.
+  const baseSites: { angle: number; z: number }[] = [];
+  for (let i = 0; i < (withObstacles ? cfg.bases : 0); i++) {
+    const zMax = Math.max(0, Math.min(cfg.halfWidth - BASE_HALF - 6, 300));
+    const z = (((i * 0.618034) % 1) * 2 - 1) * zMax;
+    // try a few spots in this base's share of the ring: off the windows, lookouts and spawn points
+    for (const f of [0.62, 0.37, 0.12, 0.87, 0.5]) {
+      const angle = arcAngle(cfg, (i + f) / cfg.bases);
+      const near = (a: number, m: number) => Math.abs(wrapAngle(angle - a)) * R < m;
+      if (windows.some((w) => near(w.angle, w.halfArc + BASE_REACH))) continue;
+      if (rampClear.some((r) => near(r.angle, r.halfArc + BASE_REACH + 4))) continue;
+      if (spawns.some((sp) => near(sp.angle, BASE_REACH + 4) && Math.abs(sp.z - z) < BASE_HALF + 6)) continue;
+      baseSites.push({ angle, z });
+      break;
+    }
+  }
+  const flat: ClearZone[] = [...rampClear, ...windows, ...baseSites.map((b) => ({ angle: b.angle, halfArc: BASE_REACH, z: b.z, halfZ: BASE_HALF + 3 }))];
+  const hills = makeHills(cfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), flat, windows.length ? 3 : 2.5);
+  if (cfg.mountains > 0) {
+    // with windows, put the mountains in the land strips (and keep them narrow enough to fade out before the glass)
+    const n = windows.length;
+    const pick = n ? (rand: () => number) => (Math.floor(rand() * n) / n) * 2 * Math.PI + (rand() * 2 - 1) * (0.3 * Math.PI) / n : undefined;
+    const maxR = n ? (0.7 * windows[0].halfArc) / 3 : undefined;
+    hills.push(...makeMountains(cfg, cfg.mountains, cfg.mountainHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), flat, pick, maxR));
+  }
+  const terrain: Level['terrain'] = cfg.terrainSphere || hills.length > 0 || ridge || cfg.tube !== 'none'
+    ? { sphere: cfg.terrainSphere, hills, ...(ridge ? { ridge } : {}) }
     : null;
   if (cfg.tube !== 'none' && terrain) terrain.tube = { kind: cfg.tube, radius: cfg.tubeRadius };
   // Ramps and mesas need flat ground; on a sphere keep clutter to the lower latitudes.
@@ -393,11 +422,11 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     const t = terrainAt(probe, cfg, angle, z);
     return Math.abs(t.dhds) * ht + Math.abs(t.dhdz) * hz + 0.3;
   };
-  const addBox = (angle: number, z: number, ht: number, hu: number, hz: number, kind: Box['kind'] = 'cover', base?: number) => {
+  const addBox = (angle: number, z: number, ht: number, hu: number, hz: number, kind: Box['kind'] = 'cover', base?: number, yaw = 0) => {
     const sag = (ht * ht) / (2 * R) + 0.05 + (base ? 0 : bury(angle, z, ht, hz)); // bury the bottom so the curved floor never shows a gap
     const huTot = hu + sag / 2;
     const rc = (base ?? Rf(angle, z)) - 2 * hu + huTot; // top stays at height 2*hu (on the floor, or on a deck at radius `base`)
-    boxes.push({ id: nextId(), type: 'box', kind, angle, tilt: 0, center: [rc * Math.cos(angle), rc * Math.sin(angle), z], half: [ht, huTot, hz] });
+    boxes.push({ id: nextId(), type: 'box', kind, angle, tilt: 0, center: [rc * Math.cos(angle), rc * Math.sin(angle), z], half: [ht, huTot, hz], ...(yaw ? { yaw } : {}) });
   };
   /**
    * A ramp: one straight tilted slab, centred at `midAngle`, climbing `H` over
@@ -446,7 +475,8 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     const circ = playSpan(cfg);
     // Ramps up to lookout platforms, midway between spawn points, alternating
     // which way they climb (climbing spinward vs antispinward feels different!).
-    const nStairs = steep || deck ? 0 : Math.max(2, Math.min(12, Math.round(circ / 150)));
+    // (no lookouts where bases bring their own heights)
+    const nStairs = steep || deck || cfg.bases > 0 ? 0 : Math.max(2, Math.min(12, Math.round(circ / 150)));
     const H = Math.max(2, Math.min(LOOKOUT_HEIGHT, 0.3 * R)); // lookout height
     const rampLen = H / RAMP_SLOPE;
     const topItems: ItemKind[] = ['cannon', 'jetpack', 'hammer'];
@@ -481,6 +511,51 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       const z = i % 2 ? 5 : -5;
       vehicleSpots.push({ pos: at(a, BIKE_RADIUS, z), yaw: i % 2 ? Math.PI : 0 });
     }
+    // Bases: a room with doorways and chamfered (45 degree) corners, a roof you
+    // reach by ramps, and low walls up there for partial cover.
+    const baseItems: ItemKind[] = ['health', 'redRifle', 'rocket', 'sticky', 'cannon', 'seeker', 'bounce', 'launcher'];
+    baseSites.forEach((site, bi) => {
+      const a0 = site.angle, zc = site.z;
+      if (spawns.some((sp) => Math.abs(wrapAngle(sp.angle - a0)) * R < BASE_REACH + 4 && Math.abs(sp.z - zc) < BASE_HALF + 6)) return;
+      if (stairs.some((st) => Math.abs(wrapAngle(st.angle - a0)) * R < st.halfArc + BASE_REACH)) return;
+      const hx = BASE_HALF, hz = BASE_HALF, H = 4.2, t = 0.3, c = 3, door = 1.7, roof = 0.3;
+      const ground = Rf(a0, zc);
+      const at2 = (x: number) => a0 + x / R;
+      const part = (x: number, z: number, ht: number, hu: number, hzz: number, lift = 0, yaw = 0) =>
+        addBox(at2(x), zc + z, ht, hu, hzz, 'struct', ground - lift, yaw);
+      // walls along the ring (z = +-hz), each with a doorway in the middle
+      for (const sz of [-1, 1]) for (const sx of [-1, 1]) {
+        const x0 = door, x1 = hx - c;
+        part(sx * (x0 + x1) / 2, sz * hz, (x1 - x0) / 2, H / 2, t);
+      }
+      // end walls (x = +-hx), solid: the ramps run up their outsides
+      for (const sx of [-1, 1]) part(sx * hx, 0, t, H / 2, hz - c);
+      // chamfered corners
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        part(sx * (hx - c / 2), sz * (hz - c / 2), (c * Math.SQRT2) / 2, H / 2, t, 0, Math.atan2(-sz, sx));
+      }
+      // a diamond pillar in the middle holding up the roof
+      part(0, 0, 1, H / 2, 1, 0, Math.PI / 4);
+      // the roof, and its low walls: corner chamfers and short runs, a diamond in the middle
+      part(0, 0, hx + 0.3, roof, hz + 0.3, H); // overhangs the walls, so the ramps meet its edge
+      const top = H + 2 * roof;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        part(sx * (hx - c / 2 - 0.3), sz * (hz - c / 2 - 0.3), (c * Math.SQRT2) / 2, 0.6, 0.25, top, Math.atan2(-sz, sx));
+        part(sx * (hx - c - 1.5), sz * (hz - 0.5), 1.5, 0.6, 0.25, top);
+      }
+      part(0, 0, 1.3, 0.7, 1.3, top, Math.PI / 4);
+      // ramps up the outside of each end wall, on opposite sides of the base
+      const rampLen = top / RAMP_SLOPE;
+      for (const sx of [-1, 1]) {
+        const zr = zc - sx * (hz / 2 - 1);
+        addRamp(at2(sx * (hx + 0.3 + rampLen / 2)), zr, rampLen, top, -sx, 3.5);
+      }
+      // something worth fighting for inside, and a prize on the roof
+      const ai = a0 + (hx / 2) / R;
+      pickupSpots.push({ pos: [(ground - 1) * Math.cos(ai), (ground - 1) * Math.sin(ai), zc + hz / 2], item: baseItems[bi % baseItems.length] });
+      pickupSpots.push({ pos: [(ground - top - 1) * Math.cos(a0 - 4 / R), (ground - top - 1) * Math.sin(a0 - 4 / R), zc], item: baseItems[(bi + 3) % baseItems.length] });
+      stairs.push({ angle: a0, halfArc: BASE_REACH });
+    });
     // Mesas: low raised platforms with a ramp, for some verticality on bigger rings.
     const angDist = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) * R;
     const nMesas = steep ? 0 : Math.min(40, Math.floor((circ / 80) * Math.max(1, Wp / 20)));
@@ -605,6 +680,8 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
 }
 
 export const BIKE_RADIUS = 0.8; // hover-bike collision sphere
+export const BASE_HALF = 9; // a base's room is 18 m square
+export const BASE_REACH = 24; // ...and with its ramps it reaches this far along the ring from its centre
 export const LOOKOUT_HEIGHT = 11; // m (capped at 30% of the radius on small rings)
 export const MESA_HEIGHT = 3.5; // m: low raised platforms (capped at 15% of the radius)
 export const RAMP_SLOPE = 0.45; // rise per metre (about 24 degrees): walkable

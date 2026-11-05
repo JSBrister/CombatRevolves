@@ -153,9 +153,9 @@ export const LEVELS: LevelDef[] = [
     blurb: 'Spins every 7 s. Sprint antispinward faster than the rim and you float.' },
   { id: 's-small', mode: 'sandbox', name: 'Small ring (40 m)', seed: 12, config: { R: 40 }, bots: 2,
     blurb: 'A 12.7 s spin. Strong Coriolis: grenades curve visibly.' },
-  { id: 's-large', mode: 'sandbox', name: 'Large ring (500 m)', seed: 13, config: { R: 500 }, bots: 4,
+  { id: 's-large', mode: 'sandbox', name: 'Large ring (500 m)', seed: 13, config: { R: 500, bases: 4 }, bots: 4,
     blurb: 'A 45 s spin and 70 m/s rim speed. Feels almost like home.' },
-  { id: 's-huge', mode: 'sandbox', name: 'Huge ring (2000 m)', seed: 14, config: { R: 2000 }, bots: 4,
+  { id: 's-huge', mode: 'sandbox', name: 'Huge ring (2000 m)', seed: 14, config: { R: 2000, bases: 8, mountains: 8, mountainHeight: 60, halfWidth: 120 }, bots: 4,
     blurb: '12.6 km around. The far side is a thin line in the sky.' },
   { id: 's-hills', mode: 'sandbox', name: 'Rolling Hills (200 m)', seed: 31, config: { R: 200, halfWidth: 50, hills: 30, hillHeight: 10 }, bots: 3,
     blurb: 'A wide ring of grassy hills. Balls and bouncing grenades roll downhill, and "downhill" changes as you run.' },
@@ -167,9 +167,9 @@ export const LEVELS: LevelDef[] = [
     blurb: 'The whole inside of a spinning sphere. Gravity is g cos^2 of your latitude; past ~53 degrees the floor is too steep to stand on, and at the poles you float. Jetpacks and bikes recommended.' },
   { id: 's-ridge', mode: 'sandbox', name: 'The Ridge (Lambda)', seed: 36, config: { R: 240, halfWidth: 150, ridgeHeight: 120, ridgePlateau: 12 }, bots: 4,
     blurb: 'A 120 m ridge runs round the middle of a 240 m ring: the floor is a Lambda in cross-section. Gravity on the crest is half what it is at the foot, and the slopes are 40 degrees.' },
-  { id: 's-oneill', mode: 'sandbox', name: "O'Neill Cylinder (1 km x 3 km)", seed: 37, config: { R: 1000, halfWidth: 1500, hills: 60, hillHeight: 35, wallHeight: 1000, windows: 3 },
+  { id: 's-oneill', mode: 'sandbox', name: "O'Neill Cylinder (1 km x 3 km)", seed: 37, config: { R: 1000, halfWidth: 1500, hills: 50, hillHeight: 20, mountains: 16, mountainHeight: 170, bases: 12, wallHeight: 1000, windows: 3 },
     variedWalls: false, bots: 6,
-    blurb: 'A proper space colony: 2 km across, 3 km long, a minute per turn. Three strips of land alternate with three glass windows you can walk on, with space under your feet. Take a bike.' },
+    blurb: 'A proper space colony: 2 km across, 3 km long, a minute per turn. Mountains, bases and three strips of land alternating with three glass windows you can walk on, space under your feet. Take a bike.' },
   { id: 's-swiss', mode: 'sandbox', name: 'Swiss Cheese (holes in the floor)', seed: 38, config: { R: 120, floorHoles: 18 }, bots: 3,
     blurb: 'Somebody forgot the floor plates. Fall through a hole and the spin flings you out into space; so does a good blast.' },
   { id: 's-decks', mode: 'sandbox', name: 'Double Decker (two levels)', seed: 39, config: { R: 150, halfWidth: 25, deckHeight: 10 }, bots: 4,
@@ -182,6 +182,8 @@ export const LEVELS: LevelDef[] = [
     blurb: 'You stand on the OUTSIDE of a spinning tube, on the side facing the axis. Stray too far either way and you slide off into space.' },
   { id: 's-spincycle', mode: 'sandbox', name: 'Spin Cycle (spin stops and starts)', seed: 43, config: { R: 100, spinChange: 1, spinPeriod: 90 }, bots: 3,
     blurb: 'Every 90 s the ring spins down to a dead stop, floats weightless for 13 s, then spins back up. While it changes, the Euler force pushes everything along the floor.' },
+  { id: 's-outposts', mode: 'sandbox', name: 'Outposts (bases and mountains)', seed: 44, config: { R: 300, halfWidth: 80, bases: 6, mountains: 5, mountainHeight: 45, hills: 12, hillHeight: 6 }, bots: 5,
+    blurb: 'Six grey two-storey bases between the mountains: doorways into the lower rooms, ramps up to roofs with low walls to hide behind.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
     blurb: '140 m across: room to flank, and to watch your shots curve sideways.' },
   { id: 's-planet', mode: 'sandbox', name: 'Skyhook (planet below)', seed: 34, config: { R: 100, planetPull: 8.8, planetAngle: Math.PI }, bots: 2,
@@ -195,7 +197,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
