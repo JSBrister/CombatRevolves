@@ -167,6 +167,9 @@ export const LEVELS: LevelDef[] = [
     blurb: 'The whole inside of a spinning sphere. Gravity is g cos^2 of your latitude; past ~53 degrees the floor is too steep to stand on, and at the poles you float. Jetpacks and bikes recommended.' },
   { id: 's-ridge', mode: 'sandbox', name: 'The Ridge (Lambda)', seed: 36, config: { R: 240, halfWidth: 150, ridgeHeight: 120, ridgePlateau: 12 }, bots: 4,
     blurb: 'A 120 m ridge runs round the middle of a 240 m ring: the floor is a Lambda in cross-section. Gravity on the crest is half what it is at the foot, and the slopes are 40 degrees.' },
+  { id: 's-oneill-small', mode: 'sandbox', name: "Little O'Neill (three biomes)", seed: 47,
+    config: { R: 250, halfWidth: 350, windows: 3, biomes: true, hills: 30, hillHeight: 7, mountains: 6, mountainHeight: 40, bases: 4, wallHeight: 1000 }, bots: 6,
+    blurb: "A pocket O'Neill cylinder: three land strips (meadow, desert and snowy mountains) between three glass windows, with bases to fight over. 32 s per turn." },
   { id: 's-oneill', mode: 'sandbox', name: "O'Neill Cylinder (1 km x 3 km)", seed: 37, config: { R: 1000, halfWidth: 1500, hills: 50, hillHeight: 20, mountains: 16, mountainHeight: 170, bases: 12, wallHeight: 1000, windows: 3 },
     variedWalls: false, bots: 6,
     blurb: 'A proper space colony: 2 km across, 3 km long, a minute per turn. Mountains, bases and three strips of land alternating with three glass windows you can walk on, space under your feet. Take a bike.' },
@@ -201,7 +204,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'floorTexture', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 

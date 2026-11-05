@@ -35,6 +35,7 @@ export interface SimConfig {
   tubeRadius: number;
   floorHoles: number; // holes in the floor you can fall through into space
   floorTexture: 'auto' | 'deck' | 'grass' | 'sand' | 'snow' | 'rock'; // how the floor looks (rendering only)
+  biomes: boolean; // O'Neill windows: each land strip its own biome (grass, sand, snow...); mountains on the snow
   windows: number; // O'Neill-style: this many glass strips the length of the ring, alternating with land
   spinChange: number; // 0 = steady spin; >0: the spin periodically drops by this fraction (1 = stops dead) and comes back
   spinPeriod: number; // s per spin-change cycle

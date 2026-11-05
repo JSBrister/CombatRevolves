@@ -508,12 +508,14 @@ function showLevels(mode: GameMode) {
     const c = d.config;
     if (d.mode === 'campaign') return '';
     if (c.spin === false) return 'EARTH (FOR COMPARISON)';
+    if ((c.R ?? 0) >= 500 || (c.halfWidth ?? 0) >= 500) return 'HUGE (BEST ONCE VEHICLES ARE BETTER)';
     if (c.floorHoles || c.deckHeight || c.spinChange || c.planetPull || (c.dragType && c.dragType !== 'none')) return 'GIMMICKS';
     if (c.tube || c.terrainSphere || c.hills || c.ridgeHeight) return 'SHAPES AND TERRAIN';
     return 'RINGS';
   };
   const defs = LEVELS.filter((l) => l.mode === mode);
-  const groups = [...new Set(defs.map(groupOf))];
+  const ORDER = ['', 'RINGS', 'SHAPES AND TERRAIN', 'GIMMICKS', 'HUGE (BEST ONCE VEHICLES ARE BETTER)', 'EARTH (FOR COMPARISON)'];
+  const groups = [...new Set(defs.map(groupOf))].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
   for (const def of groups.flatMap((g) => defs.filter((d) => groupOf(d) === g))) {
     const g = groupOf(def);
     if (g && list.dataset.last !== g) {

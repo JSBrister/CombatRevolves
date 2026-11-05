@@ -47,6 +47,8 @@ Items float at fixed spots (respawning after 25 s): health, sticky and bouncing 
 special weapons, and a jetpack (about 4 s of thrust). Picking up something you already have refills it; if it would do
 nothing, it stays put. When a player dies they drop their special weapons, jetpack and grenades, which last 30 s.
 
+The deathmatch list groups the oversized levels (radius or half-width of 500 m or more) together under *Huge*, until the vehicles are better.
+
 ## Build a level
 
 *Build a level* on the title screen gives you the level generator as a form:
@@ -116,6 +118,7 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 - **A whole sphere** (*Inside a Sphere*): a band that goes all the way to the poles, which the rim walls close off. You weigh g cos²(latitude); past about 53° the floor is too steep to stand on (an orange ring marks it) and you slide back toward the equator; near the poles you're almost weightless. The height-field distance estimate breaks down near the poles, so a plain sphere uses its exact distance. A glowing line along the axis and latitude rings make the shape readable, since there's no sky.
 - **Silly worlds:**
   - *O'Neill Cylinder*: 2 km across, 3 km long and hilly, with a minute per turn. Three strips of land alternate with three walkable glass windows.
+  - *Little O'Neill*: a 500 m-wide pocket version with a biome per land strip (`biomes`): meadow, desert, and snow with the mountains, plus bases.
   - *Swiss Cheese*: holes in the floor. Fall through and the spin flings you out into space.
   - *Double Decker*: a second deck 10 m up, reached by ramps through slots in it and by lifts. A lift is a box whose position is a pure function of time (so replays stay exact), and it carries whoever stands on it.
   - *Stanford Torus*: inside a 40 m tube, so the floor curves up into a ceiling.

@@ -521,7 +521,9 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   if (cfg.mountains > 0) {
     // with windows, put the mountains in the land strips (and keep them narrow enough to fade out before the glass)
     const n = windows.length;
-    const pick = n ? (rand: () => number) => (Math.floor(rand() * n) / n) * 2 * Math.PI + (rand() * 2 - 1) * (0.3 * Math.PI) / n : undefined;
+    // (with biomes, the mountains all go on the snow strip: strip 2)
+    const strip = (rand: () => number) => (cfg.biomes && n >= 3 ? 2 : Math.floor(rand() * n));
+    const pick = n ? (rand: () => number) => (strip(rand) / n) * 2 * Math.PI + (rand() * 2 - 1) * (0.3 * Math.PI) / n : undefined;
     const maxR = n ? (0.7 * windows[0].halfArc) / 3 : undefined;
     hills.push(...makeMountains(cfg, cfg.mountains, cfg.mountainHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), flat, pick, maxR));
   }

@@ -561,23 +561,45 @@ export class RingScene {
         k++;
       }
     }
-    const idx: number[] = [];
     const wins = level.windows ?? [];
     const inWindow = (a: number) => wins.some((w) => Math.abs(Math.atan2(Math.sin(a - w.angle), Math.cos(a - w.angle))) * R < w.halfArc);
+    // biomes: land strip k (centred on angle k/n of a turn) gets BIOMES[k]; otherwise one material
+    const BIOMES = ['grass', 'sand', 'snow', 'rock'] as const;
+    const nw = wins.length;
+    const biomeOf = (a: number) => (cfg.biomes && nw ? Math.round(((((a / (2 * Math.PI)) * nw) % nw) + nw) % nw) % nw : 0);
+    const idxs: number[][] = [[], [], [], []];
     for (let i = 0; i < nu; i++) {
-      if (wins.length && inWindow(((i + 0.5) / nu) * Math.PI * 2)) continue; // glass there (drawn separately)
+      const ac = ((i + 0.5) / nu) * Math.PI * 2;
+      if (nw && inWindow(ac)) continue; // glass there (drawn separately)
+      const list = idxs[biomeOf(ac) % 4];
       for (let j = 0; j < nv; j++) {
         const a = i * (nv + 1) + j, b = (i + 1) * (nv + 1) + j;
-        idx.push(a, a + 1, b, b, a + 1, b + 1);
+        list.push(a, a + 1, b, b, a + 1, b + 1);
       }
     }
+    const idx = idxs.flat();
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     g.setIndex(idx);
     g.computeVertexNormals();
     const tex = this.floorTex(level.terrain!.hills.length ? 'grass' : 'deck');
-    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.9, metalness: 0.05 }));
+    const mats: THREE.Material[] = [new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.9, metalness: 0.05 })];
+    if (cfg.biomes && nw) {
+      // one draw group (and texture) per biome
+      let start = 0;
+      g.clearGroups();
+      idxs.forEach((list, k) => {
+        if (k > 0) {
+          const t = this.textures[BIOMES[k]].clone();
+          t.needsUpdate = true;
+          mats.push(new THREE.MeshStandardMaterial({ map: t, side: THREE.DoubleSide, roughness: 0.9, metalness: 0.05 }));
+        }
+        if (list.length) g.addGroup(start, list.length, k);
+        start += list.length;
+      });
+    }
+    const mesh = new THREE.Mesh(g, mats.length > 1 ? mats : mats[0]);
     mesh.receiveShadow = true;
     // O'Neill windows: faintly tinted glass with mullions, flush with the floor
     const glass = new THREE.MeshPhysicalMaterial({ color: 0x9fc8ff, transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0, side: THREE.DoubleSide, depthWrite: false });
