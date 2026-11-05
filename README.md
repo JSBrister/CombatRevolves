@@ -34,7 +34,7 @@ hover gun, bots) only appears while paused.
 | 6 | Laconic Laser | Superweapon: hold to charge (1.2 s), then it streams very fast red bolts for 0.5 s. You move and aim slowly the whole time. Most of a stream kills. |
 | 7 | Grav Mallet | Melee weapon: a wide swing (3.2 m reach) that hits everything in the arc in front of you (shown briefly): 90 damage and a 28 m/s shove to people, a knock to bikes, and loose grenades get batted away (they're yours now). |
 | 8 | Torch Rocket | A real rocket: leaves at 20 m/s, then its motor pushes it along its nose at 70 m/s² for 1.5 s. The nose starts where you aimed and keeps its direction relative to the stars, so in the ring's frame it slowly turns against the spin. Big blast. 2-round magazine. |
-| 9 | Seeker Swarm | Hold for a stream of little homing rockets. Each steers its nose toward the nearest enemy within 50° of it, cancelling its own drift and the spin's pull, so it can actually hit. Small blasts; 6 hits on one target in quick succession *supercombine* into a big one. |
+| 9 | Seeker Swarm | Hold for a stream of little homing rockets. Each locks onto an enemy within 20° of its nose in its first moments, and its motor burns for only 0.8 s. It steers by what it sees and knows nothing about the spin. So it corrects a near miss, but you still have to lead the shot and allow for the spin, and lobbing it high does nothing. Six hits in quick succession *supercombine*. |
 | — | Hover gun | Debug only: fires a bolt at rest in the inertial frame. |
 
 Every hit gives a small kick along the bolt's path (tunable per weapon). A reload carries on if you switch weapons. **Q** is a melee shove with any weapon: short

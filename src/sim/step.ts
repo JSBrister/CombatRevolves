@@ -853,19 +853,20 @@ function moveRocket(state: SimState, b: Bolt, ws: WeaponStats, omega: number) {
       const q = state.players.find((x) => x.id === b.target);
       if (q && q.alive) {
         const to = sub(q.pos, b.pos);
-        if (len(to) < ws.seekRange * 1.5 && dot(to, sub(b.vel, q.vel)) > 0) tgt = q;
+        if (len(to) < ws.seekRange * 1.5 && dot(to, sub(b.vel, q.vel)) > 0 && state.tick < b.burnUntil) tgt = q;
       }
     }
-    tgt ??= seekTarget(state, b, d, ws);
+    // it only acquires a target in the first moments of flight, within its narrow cone
+    if (!tgt && state.tick - b.spawnTick < secs(0.25)) tgt = seekTarget(state, b, d, ws);
     b.target = tgt?.id ?? -1;
     if (tgt) {
       const los = norm(sub(tgt.pos, b.pos));
       const rel = sub(b.vel, tgt.vel);
       const drift = sub(rel, scale(los, dot(rel, los))); // velocity across the line of sight
-      // the acceleration we'd like (kill the drift, keep closing), minus what the
-      // spin (and any planet) is already doing to us: thrust makes up the difference
-      const aWant = sub(scale(los, 0.4 * ws.thrust), scale(drift, 3));
-      const want = norm(sub(aWant, fictitiousAccel(b.pos, b.vel, omega, state.config, pull)));
+      // the acceleration we'd like: kill the drift, keep closing. It steers by
+      // what it sees and knows nothing about the spin, so the spin still bends
+      // its path: you have to aim it about right yourself.
+      const want = norm(sub(scale(los, 0.4 * ws.thrust), scale(drift, 3)));
       d = turnToward(d, want, ws.turnRate * DT);
     }
   }

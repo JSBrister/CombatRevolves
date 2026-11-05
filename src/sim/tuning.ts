@@ -183,8 +183,9 @@ export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
   rocket: w({ muzzle: 20, damage: 40, shieldDamage: 40, interval: 0.7, radius: 0.22, knockback: 4, lifetime: 8,
     magSize: 2, ammoMax: 8, reloadTime: 2.5, thrust: 70, burnTime: 1.5, blastRadius: 5, blastDamage: 110, blastKnockback: 20 }),
   // a stream of little homing rockets: each steers its nose at the nearest enemy in front of it
-  seeker: w({ muzzle: 18, damage: 9, shieldDamage: 12, interval: 0.11, radius: 0.12, knockback: 0.8, lifetime: 5,
-    magSize: 20, ammoMax: 60, reloadTime: 2.2, thrust: 45, burnTime: 2.5, turnRate: 4, seekRange: 60, seekAngle: 50,
+  // the motor only burns briefly, and it steers without knowing about the spin: aim it properly
+  seeker: w({ muzzle: 20, damage: 9, shieldDamage: 12, interval: 0.13, radius: 0.12, knockback: 0.8, lifetime: 5,
+    magSize: 16, ammoMax: 48, reloadTime: 2.2, thrust: 40, burnTime: 0.8, turnRate: 3, seekRange: 40, seekAngle: 20,
     blastRadius: 1.2, blastDamage: 6, blastKnockback: 1.5 }),
   hover: w({ muzzle: 0, damage: 10, shieldDamage: 10, interval: 0.125, radius: 0.25, knockback: 1 }),
 });

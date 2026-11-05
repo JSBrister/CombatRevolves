@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, sub, scale, addVehicle, WEAPON_ROCKET, terrainAt, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1403,29 +1403,32 @@ describe('29. rockets', () => {
     }
     expect(boom).toBe(true);
   });
-  it('a seeker steers onto someone off to the side; a plain rocket on the same line misses', () => {
-    const shoot = (kind: 'seeker' | 'rocket') => {
+  it('a seeker corrects a near miss at short range; it cannot rescue a lob aimed high', () => {
+    // fire along `dir` (spin, up, axial components) at someone `along` metres away and `side` metres across
+    const shoot = (kind: 'seeker' | 'rocket', along: number, side: number, dir: [number, number, number]) => {
       const s = empty({ R: 1000, halfWidth: 40 });
       const a = addPlayer(s, 'human', 'A'), t = addPlayer(s, 'human', 'T');
       run(s, 10);
       const A = s.players.find((q) => q.id === a)!, T = s.players.find((q) => q.id === t)!;
       const R = s.config.R;
       const at = (ang: number, z: number): Vec3 => [(R - 0.9) * Math.cos(ang), (R - 0.9) * Math.sin(ang), z];
-      A.pos = at(0, 0); T.pos = at(35 / R, 9);
+      A.pos = at(0, 0); T.pos = at(along / R, side);
       A.vel = [0, 0, 0]; T.vel = [0, 0, 0];
       T.maxHealth = T.health = 1e6;
       const b = localBasis(A.pos);
       const from = addScaled(A.pos, b.up, 0.6);
-      spawnBolt(s, a, kind, from, scale(b.spin, 15), b.spin);
+      const d = norm(add(add(scale(b.spin, dir[0]), scale(b.up, dir[1])), scale(b.axial, dir[2])));
+      spawnBolt(s, a, kind, from, scale(d, 20), d);
       let hit = false;
-      for (let i = 0; i < 400 && !hit; i++) {
+      for (let i = 0; i < 600 && !hit; i++) {
         step(s, [], s.tick);
         hit = s.events.some((e) => e.type === 'hit' && e.target === t);
       }
       return hit;
     };
-    expect(shoot('seeker')).toBe(true);
-    expect(shoot('rocket')).toBe(false);
+    expect(shoot('seeker', 18, 2.5, [1, 0, 0])).toBe(true); // aimed straight down the ring, target a little to the side
+    expect(shoot('rocket', 18, 2.5, [1, 0, 0])).toBe(false);
+    expect(shoot('seeker', 30, 0, [1, 0.6, 0])).toBe(false); // lobbed 30 degrees high: never locks on
   });
   it('enough seeker hits in quick succession supercombine; spread out, they do not', () => {
     const pelt = (gapTicks: number) => {
