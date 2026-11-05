@@ -14,6 +14,8 @@ export interface SimConfig {
   spin: boolean; // false: the world doesn't rotate at all (Earth)
   world: 'ring' | 'planet'; // 'planet': you stand on the OUTSIDE of a spinning ball of radius R, with gravity g toward its centre
   planetSpin: number; // planet: how much of g the spin cancels at the equator (0..1); sets the spin rate
+  twin: boolean; // two rings side by side spinning opposite ways (z < 0 at +omega, z > 0 at -omega), a gap at the seam
+  twinGap: number; // width of the gap between them (m)
   arena: number; // 0 = the whole ring is playable; >0 = only this many metres of it (end walls), e.g. Earth
   terrainSphere: boolean; // floor is a band round the inside of a sphere of radius R (curves up at the edges)
   hills: number; // how many Gaussian hills on the floor (0 = flat)
@@ -429,6 +431,8 @@ export interface Box {
   tilt: number; // rotation about the axial direction (ramps): + tips the spinward end up
   center: Vec3;
   half: Vec3; // half extents along (spinward, up, axial) at `angle`
+  /** Twin rings: which ring this box belongs to (its coordinates are in that ring's frame). */
+  ring?: 0 | 1;
   /** Optional explicit orientation: the box's own x, y (its up) and z axes in world space (used on a planet). */
   axes?: [Vec3, Vec3, Vec3];
   /** Optional turn about the local up (radians): the box's length runs along cos(yaw) spinward + sin(yaw) axial. */

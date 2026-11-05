@@ -261,6 +261,14 @@ function cutHoles(p: Vec3, theta: number, holes: Hole[], R: number, hit: SdfHit)
   }
 }
 
+/**
+ * Twin rings: which frame SDF queries come from (set before each body's update,
+ * like the spin's alpha), so a box belonging to the other ring can be rotated
+ * into place. Ring 0's angle is theta, ring 1's is -theta.
+ */
+let sdfFrame: 0 | 1 = 0, sdfTheta = 0;
+export function setSdfFrame(f: 0 | 1, theta: number) { sdfFrame = f; sdfTheta = theta; }
+
 /** Signed distance from p to the level. Positive in free space. */
 export function levelSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   switch (level.shape) {
@@ -342,7 +350,14 @@ function ringSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   const rho = rhoOf(p);
   const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
   const theta = Math.atan2(p[1], p[0]);
-  if (level.terrain) terrainFloor(level, cfg, p, rho, theta, out);
+  if (cfg.twin) {
+    // two floors with a gap at the seam, and a curb along each side of it
+    const g = cfg.twinGap / 2, curb = 0.6;
+    annulus(p, rho, R, R + hull, -(W + T), -g, out);
+    annulus(p, rho, R, R + hull, g, W + T, out);
+    annulus(p, rho, R - curb, R + hull, -g - T, -g, out);
+    annulus(p, rho, R - curb, R + hull, g, g + T, out);
+  } else if (level.terrain) terrainFloor(level, cfg, p, rho, theta, out);
   else if (level.holes?.length) {
     const f: SdfHit = { d: Infinity, n: [0, 0, 1] };
     annulus(p, rho, R, R + hull, -(W + T), W + T, f); // floor / hull...
@@ -359,6 +374,19 @@ function ringSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   const edge = edgeHeight(level, cfg);
   rimWall(p, rho, theta, level.wallPos, R - edge, R + hull, W, W + T, out); // +Z rim wall
   rimWall(p, rho, theta, level.wallNeg, R - edge, R + hull, -(W + T), -W, out); // -Z rim wall
+  if (cfg.twin) {
+    // a box of the other ring: rotate the query into its frame, and the normal back
+    const da = (sdfFrame ? -sdfTheta : sdfTheta) - (sdfFrame ? sdfTheta : -sdfTheta); // theta_from - theta_to
+    const c = Math.cos(da), s = Math.sin(da);
+    const q: Vec3 = [c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]];
+    for (const b of level.boxes) {
+      if ((b.ring ?? 0) === sdfFrame) { boxSdf(p, b, out); continue; }
+      const before = out.d;
+      boxSdf(q, b, out);
+      if (out.d < before) { const n = out.n; out.n = [c * n[0] + s * n[1], -s * n[0] + c * n[1], n[2]]; }
+    }
+    return out;
+  }
   for (const b of level.boxes) boxSdf(p, b, out);
   return out;
 }
@@ -763,6 +791,15 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     ? boxes.filter((b) => b.kind === 'wall' || !holes.some((h) =>
       Math.abs(wrapAngle(b.angle - h.angle)) * R < h.halfArc + b.half[0] && Math.abs(b.center[2] - h.z) < h.halfZ + b.half[2]))
     : boxes;
+  // twin rings: every box belongs to the ring it stands on; nothing straddles the seam
+  if (cfg.twin) {
+    for (let j = filtered.length - 1; j >= 0; j--) {
+      const b = filtered[j];
+      if (Math.abs(b.center[2]) < b.half[2] + cfg.twinGap / 2 + 2.5) filtered.splice(j, 1);
+      else b.ring = b.center[2] >= 0 ? 1 : 0;
+    }
+    for (const sp of pickupSpots) if (Math.abs(sp.pos[2]) < cfg.twinGap / 2 + 2) sp.pos[2] = (sp.pos[0] > 0 ? 1 : -1) * cfg.halfWidth * 0.5;
+  }
   // inside or on the outside of a torus, the rim walls would only get in the way
   const noWalls = cfg.tube === 'inside' || cfg.tube === 'outside';
   return {

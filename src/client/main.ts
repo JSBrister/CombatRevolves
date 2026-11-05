@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import {
   DT, LEVELS, WEAPON_HOVER, WEAPON_IDS, WEAPON_NAMES, isLaconicBusy, addPlayer, applyItem, botInput, createState, damagePlayer,
   eyeOffset, levelById, localBasis, omegaOf, startLevel,
-  predictTrajectory, removePlayer, step, viewVectors, addVehicle, addScaled,
+  predictTrajectory, removePlayer, step, viewVectors, addVehicle, addScaled, convertDir,
   type BoltKind, type GameMode, type InputCmd, type ItemKind, type LevelDef, type ThrownKind, type SimConfig, type SimEvent, type SimState, type Vec3,
 } from '../sim';
 import { Sfx } from './audio';
@@ -263,7 +263,14 @@ function listenerPos(): Vec3 {
 }
 // Where each player's last laser shot left the muzzle (for the beam effect).
 const laserFrom = new Map<number, Vec3>();
-function handleEvent(e: SimEvent) {
+function handleEvent(e0: SimEvent) {
+  // twin rings: events happen in their ring's frame; show them in ours
+  let e = e0;
+  if (cfg.twin && 'pos' in e0) {
+    const th = state.frameAngle, f: 0 | 1 = e0.pos[2] >= 0 ? 1 : 0;
+    e = { ...e0, pos: views.toView(e0.pos, th) } as SimEvent;
+    if (e.type === 'melee') e = { ...e, from: views.toView(e.from, th), aim: convertDir(e.aim, f, views.viewFrame, th), up: convertDir(e.up, f, views.viewFrame, th) };
+  }
   const lp = listenerPos();
   const d = (p: Vec3) => Math.hypot(p[0] - lp[0], p[1] - lp[1], p[2] - lp[2]);
   switch (e.type) {
@@ -351,8 +358,15 @@ function frame(now: number) {
   const alpha = acc / DT;
 
   const fa = prevFrameAngle + (state.frameAngle - prevFrameAngle) * alpha;
-  rs.setFrameAngle(fa);
   const me = state.players.find((p) => p.id === localId);
+  // Twin rings: draw everything in the frame of the ring you're on.
+  const vf: 0 | 1 = cfg.twin && me && me.pos[2] >= 0 ? 1 : 0;
+  views.twin = cfg.twin;
+  views.viewFrame = vf;
+  views.viewTheta = fa;
+  const viewAngle = vf ? -fa : fa;
+  rs.setFrameAngle(viewAngle);
+  rs.setTwinView(fa, vf);
   // camera
   if (view.freefly) {
     const speed = (input.keys.has('ShiftLeft') ? 60 : 15) * dtReal;
@@ -365,8 +379,8 @@ function frame(now: number) {
     camera.position.copy(ff.pos);
     camera.quaternion.copy(ff.quat);
   } else if (me) {
-    const p0 = prev.get(me.id) ?? me.pos;
-    const pos: Vec3 = [p0[0] + (me.pos[0] - p0[0]) * alpha, p0[1] + (me.pos[1] - p0[1]) * alpha, p0[2] + (me.pos[2] - p0[2]) * alpha];
+    const p0 = views.toView(prev.get(me.id) ?? me.pos), p1 = views.toView(me.pos);
+    const pos: Vec3 = [p0[0] + (p1[0] - p0[0]) * alpha, p0[1] + (p1[1] - p0[1]) * alpha, p0[2] + (p1[2] - p0[2]) * alpha];
     const v = viewVectors(pos, input.yaw, input.pitch);
     const eo = eyeOffset(me);
     const eye = new THREE.Vector3(pos[0] + v.up[0] * eo, pos[1] + v.up[1] * eo, pos[2] + v.up[2] * eo);
@@ -389,7 +403,7 @@ function frame(now: number) {
   }
 
   views.cameraPos.copy(camera.position);
-  rs.updateSun(fa, camera.position);
+  rs.updateSun(viewAngle, camera.position);
   rs.updateLifts(state.level);
   views.render(state, prev, alpha, dtReal);
   // trajectory preview (real physics, includes the shooter's own velocity)
@@ -433,7 +447,8 @@ function frame(now: number) {
   }
 
   checkOutcome(now);
-  hud.update(state, me, { yaw: input.yaw, timeScale: view.timeScale, paused: view.paused, freefly: view.freefly, sprintOn: input.sprintOn, showScores: input.keys.has('Tab') });
+  // (on ring 1 of the twin rings, spinward is the other way round)
+  hud.update(state, me, { yaw: input.yaw + (vf ? Math.PI : 0), timeScale: view.timeScale, paused: view.paused, freefly: view.freefly, sprintOn: input.sprintOn, showScores: input.keys.has('Tab') });
   requestAnimationFrame(frame);
 }
 

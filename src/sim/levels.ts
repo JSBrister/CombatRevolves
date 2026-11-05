@@ -186,6 +186,8 @@ export const LEVELS: LevelDef[] = [
     blurb: 'Six grey two-storey bases between the mountains: doorways into the lower rooms, ramps up to roofs with low walls to hide behind.' },
   { id: 's-world', mode: 'sandbox', name: 'Dense Planet (outside a spinning ball)', seed: 45, config: { world: 'planet', R: 150, g: 9.81, planetSpin: 0.4 }, props: false, bots: 4,
     blurb: 'A 150 m ball with full gravity, spinning fast: you weigh 60% at the equator and 100% at the poles. Orbit is 38 m/s; throw a grenade east hard enough and it comes back round behind you.' },
+  { id: 's-twin', mode: 'sandbox', name: 'Twin Rings (counter-rotating)', seed: 46, config: { R: 60, halfWidth: 30, twin: true }, variedWalls: false, bots: 4,
+    blurb: 'Two rings side by side spinning opposite ways. The other ring\'s floor goes past at 49 m/s: shots across the seam swerve, and stepping over is a ride. Near the axis the speeds match.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
     blurb: '140 m across: room to flank, and to watch your shots curve sideways.' },
   { id: 's-planet', mode: 'sandbox', name: 'Skyhook (planet below)', seed: 34, config: { R: 100, planetPull: 8.8, planetAngle: Math.PI }, bots: 2,
@@ -199,7 +201,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
@@ -237,7 +239,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
   });
   const cfg = state.config;
   // default start: angle 0, or near one end of an arena (so the enemies are ahead of you)
-  const start = def.start ?? { angle: cfg.arena > 0 ? ((-cfg.arena / 2 + 8) / cfg.R) * (180 / Math.PI) : 0, z: 0 };
+  const start = def.start ?? { angle: cfg.arena > 0 ? ((-cfg.arena / 2 + 8) / cfg.R) * (180 / Math.PI) : 0, z: cfg.twin ? -cfg.halfWidth / 2 : 0 };
   const startAngle = (start.angle * Math.PI) / 180;
 
   const localId = addPlayer(state, 'human', 'You');

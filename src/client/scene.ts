@@ -79,6 +79,8 @@ export class RingScene {
     const deck = this.textures.deck.clone();
     deck.needsUpdate = true;
     deck.repeat.set((2 * Math.PI * R) / 5, (2 * W) / 5);
+    this.twinGroups = [];
+    if (cfg.twin) return this.buildTwin(cfg, level, segs);
     const floorGeo = new THREE.CylinderGeometry(R, R, 2 * W, segs, 1, true);
     floorGeo.rotateX(Math.PI / 2);
     const tube = level.terrain?.tube;
@@ -145,6 +147,79 @@ export class RingScene {
 
     this.buildBoxes(cfg, level);
     this.buildSky(cfg);
+  }
+
+  /**
+   * Twin rings: each ring is its own group, built in its own frame. Every frame
+   * the groups are turned so the scene is drawn in the frame of the ring the
+   * viewer is on: that ring stands still and the other one turns past.
+   */
+  private twinGroups: THREE.Group[] = [];
+  private buildTwin(cfg: SimConfig, level: Level, segs: number) {
+    const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness, g = cfg.twinGap / 2;
+    const saved = this.level;
+    const m = new THREE.Matrix4();
+    for (const k of [0, 1] as const) {
+      const grp = new THREE.Group();
+      this.level = grp;
+      const sg = k ? 1 : -1;
+      const len = W + T - g, zc = (sg * (W + T + g)) / 2;
+      const tint = k ? 0xffe2c8 : 0xc8e2ff; // the two rings in slightly different light
+      const tex = this.textures.deck.clone();
+      tex.needsUpdate = true;
+      tex.repeat.set((2 * Math.PI * R) / 5, len / 5);
+      const fg = new THREE.CylinderGeometry(R, R, len, segs, 1, true);
+      fg.rotateX(Math.PI / 2);
+      fg.translate(0, 0, zc);
+      const floor = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: tex, color: tint, side: THREE.BackSide, roughness: 0.85, metalness: 0.2 }));
+      floor.receiveShadow = true;
+      grp.add(floor);
+      // a stripe down the middle of each ring
+      const st = new THREE.CylinderGeometry(R - 0.02, R - 0.02, 0.6, segs, 1, true);
+      st.rotateX(Math.PI / 2);
+      st.translate(0, 0, zc);
+      grp.add(new THREE.Mesh(st, new THREE.MeshStandardMaterial({ color: k ? 0xff9a3a : 0x3ac8ff, side: THREE.BackSide, roughness: 0.6 })));
+      // the curb along the seam: its top and its face over the gap, in hazard orange
+      const hazard = new THREE.MeshStandardMaterial({ color: 0xff5a2a, emissive: 0x551400, side: THREE.DoubleSide });
+      const top = new THREE.CylinderGeometry(R - 0.6, R - 0.6, T, segs, 1, true);
+      top.rotateX(Math.PI / 2);
+      top.translate(0, 0, sg * (g + T / 2));
+      grp.add(new THREE.Mesh(top, hazard));
+      const face = new THREE.Mesh(new THREE.RingGeometry(R - 0.6, R + hull, segs), new THREE.MeshStandardMaterial({ color: 0x3a404a, side: THREE.DoubleSide, roughness: 0.9 }));
+      face.position.z = sg * g;
+      grp.add(face);
+      // chevrons pointing this ring's way round (ring 1 turns the other way)
+      const chev = new THREE.BufferGeometry();
+      const x = k ? -1 : 1;
+      chev.setAttribute('position', new THREE.Float32BufferAttribute([1.4 * x, 0, 0, -0.4 * x, 0, -0.9, 0, 0, 0, 1.4 * x, 0, 0, 0, 0, 0, -0.4 * x, 0, 0.9], 3));
+      chev.computeVertexNormals();
+      const nPer = Math.round((2 * Math.PI * R) / 8);
+      const inst = new THREE.InstancedMesh(chev, new THREE.MeshBasicMaterial({ color: k ? 0xff9a3a : 0x3ac8ff, side: THREE.DoubleSide }), nPer);
+      for (let i = 0; i < nPer; i++) { basisMatrix(m, (i / nPer) * Math.PI * 2, R - 0.03, zc + sg * 6); inst.setMatrixAt(i, m); }
+      grp.add(inst);
+      // outer rim wall, hull and ribs
+      if (k) this.buildWalls(cfg, level.wallPos, 1, segs, level); else this.buildWalls(cfg, level.wallNeg, -1, segs, level);
+      const hg = new THREE.CylinderGeometry(R + hull, R + hull, len, segs, 1, true);
+      hg.rotateX(Math.PI / 2);
+      hg.translate(0, 0, zc);
+      grp.add(new THREE.Mesh(hg, new THREE.MeshStandardMaterial({ color: 0x2a2f38, roughness: 0.9, metalness: 0.5 })));
+      const ribs = new THREE.InstancedMesh(new THREE.BoxGeometry(1.2, hull * 1.2, len), new THREE.MeshStandardMaterial({ color: k ? 0xc86a2a : 0x2a8ac8, roughness: 0.6 }), 24);
+      for (let i = 0; i < 24; i++) { basisMatrix(m, (i / 24) * Math.PI * 2, R + hull, zc); ribs.setMatrixAt(i, m); }
+      grp.add(ribs);
+      this.buildBoxes(cfg, { ...level, boxes: level.boxes.filter((b) => (b.ring ?? 0) === k), spawns: level.spawns.filter((sp) => (sp.z >= 0 ? 1 : 0) === k) });
+      saved.add(grp);
+      this.twinGroups.push(grp);
+    }
+    this.level = saved;
+    this.buildSky(cfg);
+  }
+
+  /** Twin rings: turn each ring's group into the viewer's frame (ring 0 at angle theta, ring 1 at -theta). */
+  setTwinView(theta: number, view: 0 | 1) {
+    if (!this.twinGroups.length) return;
+    const tv = view ? -theta : theta;
+    this.twinGroups[0].rotation.z = theta - tv;
+    this.twinGroups[1].rotation.z = -theta - tv;
   }
 
   private liftMeshes = new Map<number, THREE.Mesh>();

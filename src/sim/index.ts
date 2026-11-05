@@ -14,3 +14,4 @@ export * from './predict';
 export { rngNext, hash01 } from './rng';
 export * from './terrain';
 export * from './vehicles';
+export * from './twin';

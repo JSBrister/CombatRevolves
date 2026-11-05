@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, convertBody, setSdfFrame, clone, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1796,7 +1796,7 @@ describe('35. scattergun and Roulette Repeater', () => {
 describe('36. custom levels', () => {
   it('every shape the builder offers makes a working level; links round-trip', async () => {
     const { CUSTOM_DEFAULTS, customLevel, encodeCustom, decodeCustom } = await import('../src/client/custom');
-    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet'] as const) {
+    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'twin'] as const) {
       const set = { ...CUSTOM_DEFAULTS, shape, R: 200, width: shape === 'log' ? 12 : 30, hills: 6, bases: 1, holes: 4, deck: 9, bots: 2 };
       const { state, localId, botIds } = startLevel(customLevel(set));
       expect(botIds.length).toBe(2);
@@ -1876,5 +1876,77 @@ describe('37. a dense, spinning planet', () => {
       return top;
     };
     expect(jump(0)).toBeGreaterThan(jump(Math.PI / 2 - 0.05) * 1.4);
+  });
+});
+
+describe('38. counter-rotating twin rings', () => {
+  const twin = () => {
+    const { state, localId } = startLevel(levelById('s-twin')!);
+    state.players = state.players.filter((p) => p.id === localId);
+    return { s: state, id: localId, p: state.players[0] };
+  };
+  /** Inertial position of a point in its own ring's frame (ring 0 at +theta, ring 1 at -theta). */
+  const inertial = (s: SimState, p: Vec3): Vec3 => {
+    const th = p[2] >= 0 ? -s.frameAngle : s.frameAngle;
+    const c = Math.cos(th), sn = Math.sin(th);
+    return [c * p[0] - sn * p[1], sn * p[0] + c * p[1], p[2]];
+  };
+  it('converting a body into the other ring and back is exact, and keeps its inertial velocity', () => {
+    const { s } = twin();
+    const w = omegaOf(s.config), th = 0.7;
+    const r: Vec3 = [40, 25, -3], v: Vec3 = [3, -2, 5];
+    const r2 = clone(r), v2 = clone(v);
+    convertBody(r2, v2, 0, 1, th, w);
+    // inertial velocity is the same either way
+    const vin = (rr: Vec3, vv: Vec3, wf: number, thf: number): Vec3 => { const x = [vv[0] - wf * rr[1], vv[1] + wf * rr[0], vv[2]]; const c = Math.cos(thf), sn = Math.sin(thf); return [c * x[0] - sn * x[1], sn * x[0] + c * x[1], x[2]]; };
+    const a = vin(r, v, w, th), b = vin(r2, v2, -w, -th);
+    for (let i = 0; i < 3; i++) expect(b[i]).toBeCloseTo(a[i], 12);
+    convertBody(r2, v2, 1, 0, th, w);
+    for (let i = 0; i < 3; i++) { expect(r2[i]).toBeCloseTo(r[i], 12); expect(v2[i]).toBeCloseTo(v[i], 12); }
+  });
+  it('a bolt fired across the seam flies one straight inertial line through both frames', () => {
+    const { s } = twin();
+    s.level.boxes = [];
+    const w = omegaOf(s.config), R = s.config.R;
+    // from ring 0, aimed across the seam and up, slowly enough to watch
+    const r: Vec3 = [R - 10, 0, -8];
+    const b = spawnBolt(s, -1, 'rifle', r, [0, w * 0 + 4, 9]);
+    b.expireTick = s.tick + 1e6;
+    run(s, 1);
+    const pts: Vec3[] = [];
+    let crossed = false;
+    for (let i = 0; i < 5; i++) { pts.push(inertial(s, b.pos)); run(s, 30); if (b.pos[2] > 0) crossed = true; }
+    expect(crossed).toBe(true);
+    expect(s.bolts).toContain(b);
+    const d0 = sub(pts[1], pts[0]);
+    for (let i = 2; i < pts.length; i++) {
+      const di = sub(pts[i], pts[i - 1]);
+      for (let k = 0; k < 3; k++) expect(Math.abs(di[k] - d0[k])).toBeLessThan(1e-6);
+    }
+  });
+  it('step over the seam at rest and the other floor takes you at 2 omega R', () => {
+    const { s, id, p } = twin();
+    s.level.boxes = [];
+    const w = omegaOf(s.config), R = s.config.R;
+    p.pos = [R - 0.9, 0, -0.3]; // right at the seam, over the gap, in ring 0's frame
+    p.vel = [0, 0, 2]; // drifting across
+    for (let i = 0; i < 40 && p.pos[2] < 0; i++) step(s, [cmdFor(s, id)], s.tick);
+    expect(p.pos[2]).toBeGreaterThan(0);
+    const b = localBasis(p.pos);
+    expect(Math.abs(dot(p.vel, b.spin))).toBeCloseTo(2 * w * (R - 0.9), 0);
+  });
+  it("the other ring's boxes turn past you", () => {
+    const { s } = twin();
+    const box = s.level.boxes.find((b) => b.ring === 1 && b.kind === 'cover' && b.half[0] < 3)!;
+    expect(box).toBeTruthy();
+    setSdfFrame(1, s.frameAngle);
+    expect(levelSdf(s.level, s.config, box.center).d).toBeLessThan(0); // from its own ring: right there
+    // from ring 0's frame, at frame angle theta it has turned by -2 theta
+    const th = 0.3;
+    setSdfFrame(0, th);
+    expect(levelSdf(s.level, s.config, box.center).d).toBeGreaterThan(0);
+    const c = Math.cos(-2 * th), sn = Math.sin(-2 * th);
+    const moved: Vec3 = [c * box.center[0] - sn * box.center[1], sn * box.center[0] + c * box.center[1], box.center[2]];
+    expect(levelSdf(s.level, s.config, moved).d).toBeLessThan(0);
   });
 });

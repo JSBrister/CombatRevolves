@@ -3,7 +3,7 @@
 
 import type { LevelDef, SimConfig } from '../sim';
 
-export type Shape = 'ring' | 'band' | 'sphere' | 'ridge' | 'torus' | 'halfpipe' | 'log' | 'planet';
+export type Shape = 'ring' | 'band' | 'sphere' | 'ridge' | 'torus' | 'halfpipe' | 'log' | 'planet' | 'twin';
 
 export interface CustomSettings {
   shape: Shape;
@@ -40,7 +40,7 @@ type Field =
 
 const FIELDS: Field[] = [
   { key: 'shape', label: 'Shape', options: [['ring', 'Ring (cylinder)'], ['band', 'Sphere band (bowl)'], ['sphere', 'Whole sphere'], ['ridge', 'Ridge (Lambda)'],
-    ['torus', 'Inside a torus'], ['halfpipe', 'Half-pipe (half torus)'], ['log', 'Outside a torus (the log)'], ['planet', 'Outside a planet']] },
+    ['torus', 'Inside a torus'], ['halfpipe', 'Half-pipe (half torus)'], ['log', 'Outside a torus (the log)'], ['planet', 'Outside a planet'], ['twin', 'Twin rings (counter-rotating)']] },
   { key: 'R', label: 'Radius (m)', min: 20, max: 3000, step: 5 },
   { key: 'width', label: 'Half-width / tube radius (m)', min: 6, max: 1500, step: 1 },
   { key: 'g', label: 'Gravity at the floor (m/s²)', min: 1, max: 30, step: 0.1 },
@@ -63,7 +63,7 @@ const FIELDS: Field[] = [
   { key: 'seed', label: 'Layout seed', min: 1, max: 9999, step: 1 },
 ];
 
-const isRingLike = (s: Shape) => s === 'ring' || s === 'band' || s === 'ridge';
+const isRingLike = (s: Shape) => s === 'ring' || s === 'band' || s === 'ridge' || s === 'twin';
 
 /** The level these settings describe. */
 export function customLevel(s: CustomSettings): LevelDef {
@@ -79,10 +79,12 @@ export function customLevel(s: CustomSettings): LevelDef {
     case 'torus': c.tube = 'inside'; c.tubeRadius = Math.min(s.width, 0.45 * R); c.halfWidth = c.tubeRadius; break;
     case 'halfpipe': c.tube = 'half'; c.tubeRadius = Math.min(s.width, 0.45 * R); c.halfWidth = c.tubeRadius; break;
     case 'planet': c.world = 'planet'; c.planetSpin = s.planetSpin; break;
+    case 'twin': c.twin = true; variedWalls = false; break;
     case 'log': c.tube = 'outside'; c.tubeRadius = Math.min(s.width, 0.45 * R); c.halfWidth = c.tubeRadius; break;
   }
   if (ring) {
-    Object.assign(c, { hills: s.hills, hillHeight: s.hillHeight, mountains: s.mountains, mountainHeight: s.mountainHeight, bases: s.bases });
+    Object.assign(c, { bases: s.bases });
+    if (s.shape !== 'twin') Object.assign(c, { hills: s.hills, hillHeight: s.hillHeight, mountains: s.mountains, mountainHeight: s.mountainHeight }); // (twin rings have flat floors)
     if (s.shape === 'ring') Object.assign(c, { floorHoles: s.holes, deckHeight: Math.min(s.deck, 0.4 * R), windows: s.windows });
   }
   if (s.spinChange > 0) Object.assign(c, { spinChange: s.spinChange, spinPeriod: s.spinPeriod });
@@ -123,7 +125,7 @@ export function decodeCustom(str: string): CustomSettings | null {
 /** A fun, sane random level. */
 export function randomCustom(): CustomSettings {
   const r = Math.random, pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
-  const shape = pick<Shape>(['ring', 'ring', 'ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet']);
+  const shape = pick<Shape>(['ring', 'ring', 'ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'twin']);
   const R = pick([60, 100, 150, 250, 400, 800]);
   const s: CustomSettings = { ...CUSTOM_DEFAULTS, shape, R, seed: 1 + Math.floor(r() * 9999), bots: 2 + Math.floor(r() * 5) };
   s.width = shape === 'log' ? 10 + Math.round(r() * 10) : shape === 'torus' || shape === 'halfpipe' ? 15 + Math.round(r() * 20) : Math.round(20 + r() * Math.min(R, 120));

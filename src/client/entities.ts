@@ -2,7 +2,7 @@
 // the previous and current tick.
 
 import * as THREE from 'three';
-import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_HAMMER, WEAPON_LACONIC, WEAPON_PISTOL } from '../sim';
+import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, convertPoint, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_HAMMER, WEAPON_LACONIC, WEAPON_PISTOL } from '../sim';
 import { makeBike, makeGun, makePickup } from './models';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
@@ -275,9 +275,11 @@ export class EntityViews {
       let v = this.projs.get(p.id);
       if (!v) v = this.createProj(p.id, p.kind, p.radius, p.color);
       if (state.tick % 2 === 0) {
-        v.trail.push(p.pos[0], p.pos[1], p.pos[2]);
-        // inertial coordinates: rotate by +frameAngle; the inertial group renders at -frameAngle
-        v.inTrail.push(c * p.pos[0] - s * p.pos[1], s * p.pos[0] + c * p.pos[1], p.pos[2]);
+        const tp = this.toView(p.pos, fa);
+        v.trail.push(tp[0], tp[1], tp[2]);
+        // inertial coordinates: rotate by its own frame's angle (twin rings: ring 1 turns the other way)
+        const own = this.twin && p.pos[2] >= 0 ? -1 : 1;
+        v.inTrail.push(c * p.pos[0] - own * s * p.pos[1], own * s * p.pos[0] + c * p.pos[1], p.pos[2]);
       }
     }
     for (const [id, v] of this.projs) {
@@ -357,10 +359,25 @@ export class EntityViews {
   }
 
   /** Per-frame: interpolate and place everything. */
+  /**
+   * Twin rings: everything is drawn in the frame of the local player's ring;
+   * things in the other ring are rotated into it (set every frame by main).
+   */
+  twin = false;
+  viewFrame: 0 | 1 = 0;
+  viewTheta = 0; // ring 0's (interpolated) frame angle
+  toView(p: Vec3, theta = this.viewTheta): Vec3 {
+    if (!this.twin) return p;
+    const f = p[2] >= 0 ? 1 : 0;
+    return f === this.viewFrame ? p : convertPoint(p, f, this.viewFrame, theta);
+  }
+
   render(state: SimState, prev: PosMap, alpha: number, dtReal: number) {
-    const lerpPos = (id: number, cur: Vec3): Vec3 => {
-      const p = prev.get(id);
-      if (!p) return cur;
+    const lerpPos = (id: number, cur0: Vec3): Vec3 => {
+      const cur = this.toView(cur0);
+      const p0 = prev.get(id);
+      if (!p0) return cur;
+      const p = this.toView(p0);
       return [p[0] + (cur[0] - p[0]) * alpha, p[1] + (cur[1] - p[1]) * alpha, p[2] + (cur[2] - p[2]) * alpha];
     };
     const m = new THREE.Matrix4();
@@ -504,11 +521,12 @@ export class EntityViews {
       const ending = it.expireTick >= 0 && it.expireTick - state.tick < 600;
       v.group.visible = active && (!ending || Math.sin(tNow * 12) > 0);
       if (!v.group.visible) continue;
-      const b = localBasis(it.pos);
+      const ip = this.toView(it.pos);
+      const b = localBasis(ip);
       m.makeBasis(new THREE.Vector3(...b.spin), new THREE.Vector3(...b.up), new THREE.Vector3(...b.axial));
       v.group.quaternion.setFromRotationMatrix(m);
       const bob = 0.12 * Math.sin(tNow * 2 + it.id);
-      v.group.position.set(it.pos[0] + b.up[0] * bob, it.pos[1] + b.up[1] * bob, it.pos[2] + b.up[2] * bob);
+      v.group.position.set(ip[0] + b.up[0] * bob, ip[1] + b.up[1] * bob, ip[2] + b.up[2] * bob);
       v.model.rotation.y = tNow * 1.5 + it.id;
     }
     for (const [id, v] of this.pickups) if (!seenK.has(id)) { v.group.removeFromParent(); this.pickups.delete(id); }
@@ -545,10 +563,10 @@ export class EntityViews {
       let mesh = this.explosions.get(e.id);
       if (!mesh) {
         mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshBasicMaterial({ color: 0x8fc6ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-        mesh.position.set(e.pos[0], e.pos[1], e.pos[2]);
         this.root.add(mesh);
         this.explosions.set(e.id, mesh);
       }
+      mesh.position.set(...this.toView(e.pos));
       const t = (state.tick - e.tick + alpha) / (e.endTick - e.tick);
       mesh.scale.setScalar(Math.max(0.1, e.radius * Math.sqrt(Math.min(1, t * 1.5))));
       (mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.8 * (1 - t));

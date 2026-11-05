@@ -1,7 +1,8 @@
 // Trajectory preview computed with the real sim physics (same launch rule,
 // same propagation, same level sweep). Pure: does not touch the state.
 
-import { sphereTrace } from './level';
+import { setSdfFrame, sphereTrace } from './level';
+import { frameOf, frameOmega } from './twin';
 import { advanceFree, planetPullAt, setSpinAlpha } from './physics';
 import { GRENADE_RADIUS, boltStats, launchVelocity, moveSphereBody, muzzlePoint, type SphereBody } from './step';
 import { DT, spinAt, type BoltKind, type SimState, type ThrownKind } from './types';
@@ -24,7 +25,9 @@ export function predictTrajectory(
   const v = launchVelocity(state.config, p, kind, from, yaw, pitch);
   const radius = thrown ? GRENADE_RADIUS : boltStats(state.config, kind as BoltKind).radius;
   const spin = spinAt(state.config, state.tick);
-  const omega = spin.omega;
+  const pf = frameOf(state.config, p.pos);
+  setSdfFrame(pf, state.frameAngle);
+  const omega = frameOmega(spin.omega, pf);
   setSpinAlpha(spin.alpha);
   const points: Vec3[] = [clone(r)];
   if (kind === 'bounceGrenade') {

@@ -3,7 +3,8 @@
 // is the only clock and the seeded RNG lives in the state.
 
 import { clamp, closestOnSeg, segSegClosest, segSphere } from './geom';
-import { levelSdf, liftOffset, sphereTrace, spawnPosition } from './level';
+import { levelSdf, liftOffset, setSdfFrame, sphereTrace, spawnPosition } from './level';
+import { apart, convertBody, convertDir, frameOf, frameOmega } from './twin';
 import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setPlanet, setSpinAlpha, viewVectors } from './physics';
 import { rngInt, rngNext } from './rng';
 import {
@@ -139,17 +140,17 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
 
   // 2. player motion (E gets on/off bikes; riders move with their bike)
   for (const p of state.players) handleUse(state, p);
-  for (const p of state.players) if (p.alive && p.vehicle < 0) movePlayer(state, p, omega);
+  for (const p of state.players) if (p.alive && p.vehicle < 0) inFrame(state, omega, p, (w) => movePlayer(state, p, w));
   updateVehicles(state, omega);
   collidePlayers(state);
 
   // 3. props
-  for (const pr of state.props) moveProp(state, pr, omega);
+  for (const pr of state.props) inFrame(state, omega, pr, (w) => moveProp(state, pr, w));
   collideProps(state);
 
   // 4. weapons (spawned projectiles start moving next tick; their state at the
   //    end of this tick is exactly the launch state)
-  for (const p of state.players) if (p.alive) updateWeapons(state, p, omega);
+  for (const p of state.players) if (p.alive) { setSdfFrame(frameOf(cfg, p.pos), state.frameAngle); updateWeapons(state, p, omega); }
 
   // 5. projectiles
   updateBolts(state, omega);
@@ -165,6 +166,26 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   state.tick++;
   state.frameAngle += omega * DT;
   return state;
+}
+
+/**
+ * Run a body's update in the frame of the ring it's over (twin rings: with
+ * that ring's spin and geometry), then, if it has crossed the seam, convert it
+ * into the other ring's frame. A no-op wrapper on ordinary levels.
+ */
+function inFrame(state: SimState, omega: number, b: { pos: Vec3; vel: Vec3; dir?: Vec3 | null }, update: (w: number) => void) {
+  const cfg = state.config;
+  if (!cfg.twin) { update(omega); return; }
+  const f = frameOf(cfg, b.pos);
+  setSdfFrame(f, state.frameAngle);
+  update(frameOmega(omega, f));
+  const g = frameOf(cfg, b.pos);
+  if (g !== f) {
+    // its new position is for the end of this tick, when ring 0 has turned on by omega DT
+    const th = state.frameAngle + omega * DT;
+    convertBody(b.pos, b.vel, f, g, th, omega);
+    if (b.dir) b.dir = convertDir(b.dir, f, g, th);
+  }
 }
 
 // =========================================================================== players
@@ -314,7 +335,7 @@ function collidePlayers(state: SimState) {
     for (let j = i + 1; j < ps.length; j++) {
       const b = ps[j];
       if (!b.alive || b.vehicle >= 0) continue;
-      if (dist(a.pos, b.pos) > 3) continue;
+      if (apart(state.config, a.pos, b.pos) || dist(a.pos, b.pos) > 3) continue;
       const [a0, a1] = capsuleEnds(a), [b0, b1] = capsuleEnds(b);
       const c = segSegClosest(a0, a1, b0, b1);
       const minD = capsuleRadius(a) + capsuleRadius(b);
@@ -662,7 +683,7 @@ function swing(state: SimState, p: Player, damage: number, knockback: number, re
   let nearest: Player | null = null;
   let bestD = Infinity;
   for (const q of state.players) {
-    if (q.id === p.id || !q.alive) continue;
+    if (q.id === p.id || !q.alive || apart(state.config, q.pos, p.pos)) continue;
     const [a, b] = capsuleEnds(q);
     const to = sub(closestOnSeg(eye, a, b).point, eye);
     const d = len(to) - capsuleRadius(q);
@@ -736,7 +757,7 @@ function sweep(state: SimState, p0: Vec3, p1: Vec3, radius: number, owner: numbe
   const segLen = dist(p0, p1);
   for (const pl of state.players) {
     if (!pl.alive || (pl.id === owner && !armed)) continue;
-    if (dist(pl.pos, p0) > segLen + 3) continue;
+    if (apart(state.config, pl.pos, p0) || dist(pl.pos, p0) > segLen + 3) continue;
     const [a, b] = capsuleEnds(pl);
     const c = segSegClosest(p0, p1, a, b);
     const rr = radius + capsuleRadius(pl);
@@ -778,9 +799,18 @@ function updateBolts(state: SimState, omega: number) {
       continue;
     }
     const p0 = clone(b.pos);
-    if (b.dir) moveRocket(state, b, ws, omega);
-    else advanceFree(b.pos, b.vel, DT, omega, cfg, pull);
+    const f = frameOf(cfg, b.pos);
+    setSdfFrame(f, state.frameAngle);
+    const w = frameOmega(omega, f);
+    if (b.dir) moveRocket(state, b, ws, w);
+    else advanceFree(b.pos, b.vel, DT, w, cfg, pull);
     const hit = sweep(state, p0, b.pos, b.radius, b.owner, b.armed);
+    if (!hit && cfg.twin && frameOf(cfg, b.pos) !== f) {
+      const th = state.frameAngle + omega * DT; // (its new position is for the end of the tick)
+      const g = frameOf(cfg, b.pos);
+      convertBody(b.pos, b.vel, f, g, th, omega);
+      if (b.dir) b.dir = convertDir(b.dir, f, g, th);
+    }
     if (hit) {
       if (hit.player) {
         // every hit gives a small kick along the bolt's path (relative to the target)
@@ -916,7 +946,7 @@ function seekTarget(state: SimState, b: Bolt, nose: Vec3, ws: WeaponStats): Play
   let best: Player | null = null;
   let bestD = ws.seekRange;
   for (const q of state.players) {
-    if (!q.alive || q.id === b.owner || q.kind === 'dummy') continue;
+    if (!q.alive || q.id === b.owner || q.kind === 'dummy' || apart(state.config, q.pos, b.pos)) continue;
     if (owner && q.team === owner.team && !state.config.friendlyFire) continue;
     const to = sub(q.pos, b.pos);
     const d = len(to);
@@ -963,7 +993,10 @@ function updateGrenades(state: SimState, omega: number) {
     } else if (g.variant === 'bounce') {
       if (g.spawnTick !== tick) {
         const p0 = clone(g.pos);
-        const impact = moveSphereBody(state.level, cfg, omega, g, cfg.bounceRestitution);
+        const gf = frameOf(cfg, g.pos);
+        setSdfFrame(gf, state.frameAngle);
+        const impact = moveSphereBody(state.level, cfg, frameOmega(omega, gf), g, cfg.bounceRestitution);
+        if (cfg.twin && frameOf(cfg, g.pos) !== gf) convertBody(g.pos, g.vel, gf, frameOf(cfg, g.pos), state.frameAngle + omega * DT, omega);
         if (impact > 1) state.events.push({ type: 'grenadeBounce', id: g.id, pos: clone(g.pos), speed: impact });
         // ...then bounce off players and props (relative to their motion)
         const hit = sweep(state, p0, g.pos, g.radius, g.owner, g.armed, false);
@@ -988,7 +1021,9 @@ function updateGrenades(state: SimState, omega: number) {
       }
     } else if (g.spawnTick !== tick) {
       const p0 = clone(g.pos);
-      advanceFree(g.pos, g.vel, DT, omega, cfg, pull);
+      const gf = frameOf(cfg, g.pos);
+      setSdfFrame(gf, state.frameAngle);
+      advanceFree(g.pos, g.vel, DT, frameOmega(omega, gf), cfg, pull);
       const hit = sweep(state, p0, g.pos, g.radius, g.owner, g.armed);
       if (hit) {
         g.pos = hit.pos;
@@ -1010,6 +1045,7 @@ function updateGrenades(state: SimState, omega: number) {
         if (g.fuseTick < 0) g.fuseTick = tick + secs(cfg.grenadeFuse);
         state.events.push({ type: 'stick', id: g.id, pos: clone(g.pos), target: hit.player?.id ?? hit.prop?.id ?? hit.vehicle?.id ?? -1 });
       } else {
+        if (cfg.twin && frameOf(cfg, g.pos) !== gf) convertBody(g.pos, g.vel, gf, frameOf(cfg, g.pos), state.frameAngle + omega * DT, omega);
         if (!g.armed && !stillInsideOwner(state, g.pos, g.radius, g.owner)) g.armed = true;
         if (tick - g.spawnTick > secs(cfg.grenadeMaxFlight)) explode = true;
         let dead = false;
@@ -1056,7 +1092,7 @@ export function detonate(state: SimState, c: Vec3, owner: number, sourceId: numb
   const kb = b.knockback * cfg.knockbackScale;
 
   for (const p of state.players) {
-    if (!p.alive) continue;
+    if (!p.alive || apart(cfg, p.pos, c)) continue; // (blasts don't reach across the seam between twin rings)
     const [e0, e1] = capsuleEnds(p);
     const q = closestOnSeg(c, e0, e1).point;
     const d = Math.max(0, dist(c, q) - capsuleRadius(p));
@@ -1233,7 +1269,7 @@ function updatePickups(state: SimState) {
     if (it.expireTick >= 0 && tick >= it.expireTick) continue;
     if (tick >= it.activeAt) {
       for (const p of state.players) {
-        if (!p.alive || p.kind === 'dummy' || p.enemyType !== '' || dist(p.pos, it.pos) > PICKUP_RANGE) continue;
+        if (!p.alive || p.kind === 'dummy' || p.enemyType !== '' || apart(cfg, p.pos, it.pos) || dist(p.pos, it.pos) > PICKUP_RANGE) continue;
         if (!applyItem(cfg, p, it.item, it.amount)) continue;
         state.events.push({ type: 'pickup', id: it.id, item: it.item, player: p.id, pos: clone(it.pos) });
         it.activeAt = it.respawnTicks > 0 ? tick + it.respawnTicks : Infinity;

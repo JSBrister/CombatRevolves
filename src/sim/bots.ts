@@ -4,7 +4,8 @@
 // a server can run bots without disturbing replays.
 
 import { advanceFree, localBasis, planetPullAt, setSpinAlpha, viewVectors } from './physics';
-import { levelSdf } from './level';
+import { levelSdf, setSdfFrame } from './level';
+import { convertBody, frameOf, frameOmega } from './twin';
 import { floorRadius, terrainAt } from './terrain';
 import { boltStats, launchVelocity, muzzlePoint } from './step';
 import { hash01 } from './rng';
@@ -30,7 +31,7 @@ export function aimAt(from: Vec3, to: Vec3): { yaw: number; pitch: number } {
 export function solveAim(state: SimState, me: Player, target: Player, kind: BoltKind): { yaw: number; pitch: number } {
   const cfg = state.config;
   const spin = spinAt(cfg, state.tick);
-  const omega = spin.omega;
+  const omega = frameOmega(spin.omega, frameOf(cfg, me.pos)); // (twin rings: our own ring's spin)
   setSpinAlpha(spin.alpha);
   const eye = addScaled(me.pos, localBasis(me.pos).up, eyeOffset(me));
   const los = sub(target.pos, eye);
@@ -172,9 +173,23 @@ function navigate(state: SimState, me: Player, target: Player): Nav | null {
   return null;
 }
 
+/**
+ * How `p` looks from `me`'s frame: on twin rings someone across the seam is in
+ * the other ring's frame, so convert their position and velocity into ours.
+ */
+function seenFrom(state: SimState, me: Player, p: Player): Player {
+  const cfg = state.config;
+  const f = frameOf(cfg, me.pos), g = frameOf(cfg, p.pos);
+  if (f === g) return p;
+  const pos = clone(p.pos), vel = clone(p.vel);
+  convertBody(pos, vel, g, f, state.frameAngle, spinAt(cfg, state.tick).omega);
+  return { ...p, pos, vel };
+}
+
 export function botInput(state: SimState, playerId: number): InputCmd {
   const tick = state.tick;
   const me = state.players.find((p) => p.id === playerId)!;
+  setSdfFrame(frameOf(state.config, me.pos), state.frameAngle);
   const cmd: InputCmd = { playerId, tick, moveX: 0, moveY: 0, yaw: me.yaw, pitch: me.pitch, buttons: 0, weapon: me.weapon };
   if (!me.alive) return cmd;
   const R = state.config.R;
@@ -209,8 +224,9 @@ export function botInput(state: SimState, playerId: number): InputCmd {
   // Target: nearest living opponent (other team, not a dummy) within range.
   let target = null as (typeof state.players)[number] | null;
   let best = range;
-  for (const p of state.players) {
-    if (p.id === playerId || !p.alive || p.kind === 'dummy' || p.team === me.team) continue;
+  for (const p0 of state.players) {
+    if (p0.id === playerId || !p0.alive || p0.kind === 'dummy' || p0.team === me.team) continue;
+    const p = seenFrom(state, me, p0);
     const d = len(sub(p.pos, me.pos));
     if (d < best) { best = d; target = p; }
   }
