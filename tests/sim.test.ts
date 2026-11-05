@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1750,5 +1750,45 @@ describe('34. bases and mountains', () => {
       inside = p.pos[2] - zc < 7 && p.pos[2] - zc > 2; // through the wall line (z = 9) and into the room
     }
     expect(inside).toBe(true);
+  });
+});
+
+describe('35. scattergun and Roulette Repeater', () => {
+  const armed = (item: 'scatter' | 'chaos', w: number) => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    applyItem(s.config, p, item, -1);
+    run(s, 60, () => [cmdFor(s, id, { weapon: w })]);
+    return { s, id, p };
+  };
+  it('the scattergun sprays its pellets within the cone round your aim', () => {
+    const { s, id, p } = armed('scatter', WEAPON_SCATTER);
+    step(s, [cmdFor(s, id, { weapon: WEAPON_SCATTER, buttons: BTN_FIRE })], s.tick);
+    const pellets = s.bolts.filter((b) => b.kind === 'pellet');
+    const ws = s.config.weapons.scatter;
+    expect(pellets.length).toBe(ws.pellets);
+    const aim = viewVectors(p.pos, p.yaw, p.pitch).aim;
+    const angles = pellets.map((b) => Math.acos(Math.min(1, dot(norm(sub(b.vel, p.vel)), aim))) * (180 / Math.PI));
+    for (const a of angles) expect(a).toBeLessThanOrEqual(ws.spread + 1e-6);
+    expect(Math.max(...angles) - Math.min(...angles)).toBeGreaterThan(1); // really spread out
+    expect(p.mag[WEAPON_SCATTER]).toBe(ws.magSize - 1); // one shell, many pellets
+  });
+  it('every Roulette Repeater shot has its own speed, within the range, and replays exactly', () => {
+    const shoot = () => {
+      const { s, id } = armed('chaos', WEAPON_CHAOS);
+      const seen = new Map<number, number>();
+      for (let i = 0; i < 90; i++) {
+        step(s, [cmdFor(s, id, { weapon: WEAPON_CHAOS, buttons: BTN_FIRE })], s.tick);
+        for (const b of s.bolts) if (b.kind === 'chaos') seen.set(b.id, b.speed);
+      }
+      return [...seen.values()];
+    };
+    const a = shoot(), b = shoot();
+    const ws = defaultWeapons().chaos;
+    expect(a.length).toBeGreaterThan(5);
+    for (const v of a) { expect(v).toBeGreaterThanOrEqual(ws.muzzleMin); expect(v).toBeLessThanOrEqual(ws.muzzle); }
+    expect(Math.max(...a) - Math.min(...a)).toBeGreaterThan(50);
+    expect(a).toEqual(b);
   });
 });

@@ -5,14 +5,14 @@
 import { clamp, closestOnSeg, segSegClosest, segSphere } from './geom';
 import { levelSdf, liftOffset, sphereTrace, spawnPosition } from './level';
 import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setSpinAlpha, viewVectors } from './physics';
-import { rngInt } from './rng';
+import { rngInt, rngNext } from './rng';
 import {
   BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
   omegaOf, spinAt,
   type Bolt, type BoltKind, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
   type Outcome, type Player, type Prop, type SimConfig, type SimState, type Vehicle, type WeaponId, type WeaponStats,
 } from './types';
-import { type Vec3, add, addScaled, clone, dist, dot, len, norm, rhoOf, scale, sub } from './vec';
+import { type Vec3, add, addScaled, clone, cross, dist, dot, len, norm, rhoOf, scale, sub } from './vec';
 import {
   MAX_GRENADES, PLAYER_MASS, addPickup, allocId, capsuleHalfSeg, capsuleRadius, dummyHome, eyeOffset, standHeight,
 } from './world';
@@ -33,10 +33,10 @@ const PISTOL_CHARGE_DELAY = 30; // ticks of holding before the overcharge starts
 /** Which weapon's stats a bolt kind uses. */
 export const BOLT_WEAPON: Record<BoltKind, WeaponId> = {
   rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', overcharge: 'pistol', fuelRod: 'launcher', cannon: 'cannon', laconic: 'laconic',
-  rocket: 'rocket', seeker: 'seeker', hover: 'hover',
+  rocket: 'rocket', seeker: 'seeker', pellet: 'scatter', chaos: 'chaos', hover: 'hover',
 };
 const WEAPON_BOLT: Record<Exclude<WeaponId, 'hammer'>, BoltKind> = {
-  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', cannon: 'cannon', laconic: 'laconic', rocket: 'rocket', seeker: 'seeker', hover: 'hover',
+  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', cannon: 'cannon', laconic: 'laconic', rocket: 'rocket', seeker: 'seeker', scatter: 'pellet', chaos: 'chaos', hover: 'hover',
 };
 /** Bolts that carry their own motor. */
 export const isRocket = (kind: BoltKind) => kind === 'rocket' || kind === 'seeker';
@@ -86,6 +86,7 @@ export function spawnBolt(state: SimState, owner: number, kind: BoltKind, pos: V
     dir: rocket ? norm(dir ?? vel) : null,
     burnUntil: rocket ? state.tick + 1 + secs(state.config.weapons[BOLT_WEAPON[kind]].burnTime) : 0, // (it first moves next tick)
     target: -1,
+    speed: spec.muzzle,
   };
   state.bolts.push(b);
   return b;
@@ -563,11 +564,13 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
     case 'rifle':
     case 'redRifle':
     case 'seeker': // hold for a stream of homing rockets
+    case 'chaos':
       if (held && ready) shoot(WEAPON_BOLT[id], st.heatPerShot, st.interval);
       break;
     case 'launcher':
     case 'cannon':
     case 'rocket':
+    case 'scatter':
     case 'hover':
       if (pressed & BTN_FIRE && ready) shoot(WEAPON_BOLT[id], st.heatPerShot, st.interval);
       break;
@@ -700,6 +703,8 @@ function swing(state: SimState, p: Player, damage: number, knockback: number, re
 }
 
 function fireBolt(state: SimState, p: Player, kind: BoltKind) {
+  const ws = state.config.weapons[BOLT_WEAPON[kind]];
+  if (ws.spread > 0 || ws.muzzleMin > 0) return fireSpread(state, p, kind, ws);
   const from = muzzlePoint(p);
   // a rocket's nose points where you aim, whatever your own motion adds to its launch velocity
   spawnBolt(state, p.id, kind, from, launchVelocity(state.config, p, kind, from), viewVectors(p.pos, p.yaw, p.pitch).aim);
@@ -797,6 +802,26 @@ function updateBolts(state: SimState, omega: number) {
     if (!dead) keep.push(b);
   }
   state.bolts = keep;
+}
+
+/**
+ * Shots with a spread (each pellet somewhere in a cone round your aim) and/or
+ * a random speed. Uses the sim's own seeded RNG, so replays are exact.
+ */
+function fireSpread(state: SimState, p: Player, kind: BoltKind, ws: WeaponStats) {
+  const v = viewVectors(p.pos, p.yaw, p.pitch);
+  const from = muzzlePoint(p);
+  const upA = cross(v.right, v.aim); // perpendicular to the aim, roughly "up"
+  const maxT = (ws.spread * Math.PI) / 180;
+  for (let i = 0; i < Math.max(1, ws.pellets); i++) {
+    const t = maxT * Math.sqrt(rngNext(state)), phi = 2 * Math.PI * rngNext(state); // uniform over the cone's disc
+    const off = add(scale(v.right, Math.cos(phi)), scale(upA, Math.sin(phi)));
+    const dir = norm(add(scale(v.aim, Math.cos(t)), scale(off, Math.sin(t))));
+    const speed = ws.muzzleMin > 0 ? ws.muzzleMin + (ws.muzzle - ws.muzzleMin) * rngNext(state) : ws.muzzle;
+    const b = spawnBolt(state, p.id, kind, from, addScaled(p.vel, dir, speed));
+    b.speed = speed;
+  }
+  state.events.push({ type: 'fire', owner: p.id, kind, pos: from });
 }
 
 /**

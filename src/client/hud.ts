@@ -1,4 +1,4 @@
-import { DT, PLAYER_WEAPON_SLOTS, WEAPON_IDS, WEAPON_NAMES, omegaOf, spinAt, type Player, type SimEvent, type SimState } from '../sim';
+import { DT, PLAYER_WEAPON_SLOTS, slotKey, WEAPON_IDS, WEAPON_NAMES, omegaOf, spinAt, type Player, type SimEvent, type SimState } from '../sim';
 import { ITEM_NAMES } from './models';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -67,7 +67,7 @@ export class Hud {
     $('heat-fill').style.width = `${me.heat[wi] * 100}%`;
     $('ammo').textContent = st.magSize > 0 ? `${me.mag[wi]} | ${me.infiniteAmmo ? '∞' : me.ammo[wi]}` : '';
     $('weapons').innerHTML = WEAPON_IDS.slice(0, PLAYER_WEAPON_SLOTS)
-      .map((_, i) => (me.owned.includes(i) ? `<span class="${i === wi ? 'cur' : ''}">${i + 1}</span>` : `<span class="no">${i + 1}</span>`))
+      .map((_, i) => (me.owned.includes(i) ? `<span class="${i === wi ? 'cur' : ''}">${slotKey(i)}</span>` : `<span class="no">${slotKey(i)}</span>`))
       .join('');
     const jet = $('jet');
     jet.style.display = me.hasJetpack ? '' : 'none';

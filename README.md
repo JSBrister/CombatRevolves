@@ -17,7 +17,7 @@ npx tsc -p src/sim # proves the sim compiles without DOM types
 *Deathmatch* (free-for-all with bots and respawns; the debug panel is in the pause menu). Levels are rings of different sizes and widths (some with rolling hills, a bowl-shaped *sphere band*, or a planet's pull), plus *Earth* (flat ground, normal gravity, no spin: the reference for what everything should do) and *Shore Leave*, the last campaign level, also on Earth. (They come last in each list on purpose: the spin is the point.)
 
 **Controls:** WASD move · Shift toggle sprint (on by default) · Space jump (hold in the air with a jetpack) · mouse look ·
-left click fire · right click show trajectory · 1–9 weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
+left click fire · right click show trajectory · 1–9, 0 and − weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
 (hold to aim, release to throw) · R reload · Q melee · E get on/off a hover-bike · walk over items to pick them up · Tab scores · Esc pause.
 The debug panel (ring size 10–5000 m, forces, movement, every weapon's stats, time scale, inertial-frame overlay, free-fly camera,
 hover gun, bots) only appears while paused.
@@ -35,6 +35,8 @@ hover gun, bots) only appears while paused.
 | 7 | Grav Mallet | Melee weapon: a wide swing (3.2 m reach) that hits everything in the arc in front of you (shown briefly): 90 damage and a 28 m/s shove to people, a knock to bikes, and loose grenades get batted away (they're yours now). |
 | 8 | Torch Rocket | A real rocket: leaves at 20 m/s, then its motor pushes it along its nose at 70 m/s² for 1.5 s. The nose starts where you aimed and keeps its direction relative to the stars, so in the ring's frame it slowly turns against the spin. Big blast. 2-round magazine. |
 | 9 | Seeker Swarm | Hold for a stream of little homing rockets. Each locks onto an enemy within 20° of its nose in its first moments, and its motor burns for only 0.8 s. It steers by what it sees and knows nothing about the spin. So it corrects a near miss, but you still have to lead the shot and allow for the spin, and lobbing it high does nothing. Six hits in quick succession *supercombine*. |
+| 0 | Scattergun | Ten slow pellets (55 m/s) sprayed within 7° of your aim. Brutal up close; further out the spin bends the spray apart. 6-round magazine. |
+| − | Roulette Repeater | Fires fast, but every shot leaves at a random speed from 15 to 220 m/s, coloured from red (slow) to blue-white (fast). Watch the slow ones curve. |
 | — | Hover gun | Debug only: fires a bolt at rest in the inertial frame. |
 
 Every hit gives a small kick along the bolt's path (tunable per weapon). A reload carries on if you switch weapons. **Q** is a melee shove with any weapon: short

@@ -168,7 +168,7 @@ export const BTN_MELEE = 128;
 export const BTN_USE = 256; // get on / off a vehicle
 
 // Weapons are addressed by a fixed slot index (also the number keys).
-export const WEAPON_IDS = ['rifle', 'pistol', 'redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'rocket', 'seeker', 'hover'] as const;
+export const WEAPON_IDS = ['rifle', 'pistol', 'redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'rocket', 'seeker', 'scatter', 'chaos', 'hover'] as const;
 export type WeaponId = (typeof WEAPON_IDS)[number];
 export const WEAPON_RIFLE = 0;
 export const WEAPON_PISTOL = 1;
@@ -179,13 +179,17 @@ export const WEAPON_LACONIC = 5;
 export const WEAPON_HAMMER = 6;
 export const WEAPON_ROCKET = 7;
 export const WEAPON_SEEKER = 8;
-export const WEAPON_HOVER = 9;
+export const WEAPON_SCATTER = 9;
+export const WEAPON_CHAOS = 10;
+export const WEAPON_HOVER = 11;
 export const WEAPON_NAMES = [
   'Plasma Rifle', 'Plasma Pistol', 'Overclocked Plasma Rifle', 'Fuel Rod Launcher', 'Plasma Bolt Cannon', 'Laconic Laser', 'Grav Mallet',
-  'Torch Rocket', 'Seeker Swarm', 'Hover Gun (debug)',
+  'Torch Rocket', 'Seeker Swarm', 'Scattergun', 'Roulette Repeater', 'Hover Gun (debug)',
 ];
-/** Number keys 1..N select the first N weapons; the hover gun is debug-panel only. */
-export const PLAYER_WEAPON_SLOTS = 9;
+/** Number keys select the first N weapons (1-9, then 0 and -); the hover gun is debug-panel only. */
+export const PLAYER_WEAPON_SLOTS = 11;
+/** The key label for a weapon slot. */
+export const slotKey = (i: number) => (i < 9 ? String(i + 1) : i === 9 ? '0' : '-');
 export const STARTING_WEAPONS = [WEAPON_RIFLE, WEAPON_PISTOL];
 
 /** Tunable stats for one weapon. Fields a weapon doesn't use stay 0. */
@@ -224,6 +228,10 @@ export interface WeaponStats {
   turnRate: number; // rad/s the rocket can steer toward a target (0 = no homing)
   seekRange: number; // m: how far it looks for a target
   seekAngle: number; // degrees either side of its nose it can see
+  // spreads and random speeds
+  pellets: number; // shots per trigger pull (scattergun)
+  spread: number; // degrees: pellets fly anywhere within this cone around your aim
+  muzzleMin: number; // >0: each shot's speed is random between this and `muzzle` (Roulette Repeater)
 }
 
 /** One tick of player intent. The ONLY way gameplay is driven. */
@@ -305,9 +313,9 @@ export interface Player {
   deaths: number;
 }
 
-export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'rocket' | 'seeker' | 'hover';
+export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'rocket' | 'seeker' | 'pellet' | 'chaos' | 'hover';
 
-export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rocket' | 'seeker' | 'rifle' | 'pistol' | 'jetpack';
+export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rocket' | 'seeker' | 'scatter' | 'chaos' | 'rifle' | 'pistol' | 'jetpack';
 
 /** Floating item pickup (not a physics object). */
 export interface Pickup {
@@ -339,6 +347,8 @@ export interface Bolt {
   dir: Vec3 | null;
   burnUntil: number;
   target: number;
+  /** Launch speed relative to the shooter (the Roulette Repeater colours its bolts by it). */
+  speed: number;
 }
 
 export type GrenadeKind = 'sticky' | 'bounce';

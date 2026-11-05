@@ -148,6 +148,7 @@ const STAT_UI: Partial<Record<StatKey, [string, number, number, number]>> = {
   chargeMoveScale: ['move speed while charging/firing', 0, 1, 0.05], chargeLookScale: ['look speed while charging/firing', 0.02, 1, 0.02],
   lifetime: ['bolt lifetime (s)', 0.1, 120, 0.1],
   thrust: ['rocket thrust (m/s²)', 0, 400, 1], burnTime: ['motor burn (s)', 0, 10, 0.1],
+  pellets: ['pellets per shot', 1, 40, 1], spread: ['spread (° from your aim)', 0, 45, 0.1], muzzleMin: ['slowest shot (m/s)', 0, 500, 1],
   turnRate: ['homing turn rate (rad/s)', 0, 20, 0.1], seekRange: ['seeker range (m)', 0, 300, 1], seekAngle: ['seeker cone (° either side)', 0, 180, 1],
 };
 const WEAPON_UI: Record<string, StatKey[]> = {
@@ -159,6 +160,8 @@ const WEAPON_UI: Record<string, StatKey[]> = {
   laconic: ['muzzle', 'damage', 'knockback', 'chargeTime', 'burstTime', 'interval', 'overheatLock', 'chargeMoveScale', 'chargeLookScale'],
   hammer: ['damage', 'knockback', 'blastRadius', 'interval'],
   rocket: ['muzzle', 'thrust', 'burnTime', 'damage', 'knockback', 'interval', 'magSize', 'ammoMax', 'reloadTime', 'blastRadius', 'blastDamage', 'blastKnockback'],
+  scatter: ['muzzle', 'pellets', 'spread', 'damage', 'knockback', 'interval', 'magSize', 'ammoMax', 'reloadTime', 'lifetime'],
+  chaos: ['muzzleMin', 'muzzle', 'spread', 'damage', 'interval', 'heatPerShot', 'coolRate', 'overheatLock'],
   seeker: ['muzzle', 'thrust', 'burnTime', 'turnRate', 'seekRange', 'seekAngle', 'damage', 'interval', 'magSize', 'ammoMax', 'reloadTime', 'blastRadius', 'blastDamage'],
   hover: ['damage', 'interval'],
 };
@@ -218,7 +221,7 @@ fV.add({ reset: () => newWorld() }, 'reset').name('restart level');
 const fGive = gui.addFolder('Give');
 const me_ = () => state.players.find((p) => p.id === localId);
 const give = (item: ItemKind) => () => { const p = me_(); if (p && p.alive) applyItem(cfg, p, item, -1); };
-for (const item of ['redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'rocket', 'seeker', 'rifle', 'pistol'] as ItemKind[]) fGive.add({ f: give(item) }, 'f').name(WEAPON_NAMES[WEAPON_IDS.indexOf(item as never)]);
+for (const item of ['redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'rocket', 'seeker', 'scatter', 'chaos', 'rifle', 'pistol'] as ItemKind[]) fGive.add({ f: give(item) }, 'f').name(WEAPON_NAMES[WEAPON_IDS.indexOf(item as never)]);
 fGive.add({ f: () => { cfg.allowHoverGun = true; input.weapon = WEAPON_HOVER; } }, 'f').name('Hover Gun (debug)');
 fGive.add({ f: give('jetpack') }, 'f').name('Jetpack (full)');
 fGive.add({ f: () => {
@@ -326,7 +329,8 @@ function previewKind(): BoltKind | ThrownKind | null {
   if (input.bounceHeld && me.bounceGrenades > 0) return 'bounceGrenade';
   if (!input.aiming) return null;
   const id = WEAPON_IDS[me.weapon];
-  if (id === 'hammer' || id === 'rocket' || id === 'seeker') return null; // rockets: no preview (they steer and burn)
+  if (id === 'hammer' || id === 'rocket' || id === 'seeker' || id === 'chaos') return null; // rockets steer and burn; the repeater's speed is a lottery
+  if (id === 'scatter') return 'pellet'; // the middle of the spray
   if (id === 'pistol') return me.charge >= 1 ? 'overcharge' : 'pistol';
   if (id === 'launcher') return 'fuelRod';
   return id;

@@ -133,7 +133,7 @@ const w = (o: Partial<WeaponStats>): WeaponStats => ({
   radius: 0.12, lifetime: 60, ammoMax: 0, magSize: 0, reloadTime: 0, knockback: 0.5, chargeTime: 0, burstTime: 0,
   ocMuzzle: 0, ocDamage: 0, ocShieldDamage: 0, ocHeat: 0,
   blastRadius: 0, blastDamage: 0, blastKnockback: 0, chargeMoveScale: 1, chargeLookScale: 1,
-  thrust: 0, burnTime: 0, turnRate: 0, seekRange: 0, seekAngle: 0, ...o,
+  thrust: 0, burnTime: 0, turnRate: 0, seekRange: 0, seekAngle: 0, pellets: 1, spread: 0, muzzleMin: 0, ...o,
 });
 
 /**
@@ -163,6 +163,8 @@ const w = (o: Partial<WeaponStats>): WeaponStats => ({
  *                 relative to the stars, so in the ring's frame it slowly turns against the spin.
  *   turnRate, seekRange, seekAngle  homing: how fast the nose can turn (rad/s) toward the nearest
  *                 enemy within seekRange and seekAngle degrees of the nose
+ *   pellets, spread  scattergun: shots per pull, scattered within `spread` degrees of your aim
+ *   muzzleMin     >0: every shot's speed is random between muzzleMin and muzzle
  */
 export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
   rifle: w({ muzzle: 80, damage: 7, shieldDamage: 7, interval: 0.075, heatPerShot: 0.045, coolRate: 0.45, overheatLock: 2.5,
@@ -190,6 +192,12 @@ export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
   seeker: w({ muzzle: 20, damage: 9, shieldDamage: 12, interval: 0.13, radius: 0.12, knockback: 0.8, lifetime: 5,
     magSize: 16, ammoMax: 48, reloadTime: 2.2, thrust: 40, burnTime: 0.8, turnRate: 3, seekRange: 40, seekAngle: 20,
     blastRadius: 1.2, blastDamage: 6, blastKnockback: 1.5 }),
+  // a spray of slow pellets: brutal up close; further out the spin pulls the spray apart
+  scatter: w({ muzzle: 55, damage: 8, shieldDamage: 9, interval: 0.75, radius: 0.08, knockback: 0.7, lifetime: 1.5,
+    magSize: 6, ammoMax: 24, reloadTime: 2.4, pellets: 10, spread: 7 }),
+  // novelty: fast fire, but every shot leaves at a random speed (coloured by it), so each one curves differently
+  chaos: w({ muzzle: 220, muzzleMin: 15, damage: 6, shieldDamage: 6, interval: 0.06, heatPerShot: 0.035, coolRate: 0.45,
+    overheatLock: 2.5, radius: 0.11, knockback: 0.4, spread: 0.6 }),
   hover: w({ muzzle: 0, damage: 10, shieldDamage: 10, interval: 0.125, radius: 0.25, knockback: 1 }),
 });
 

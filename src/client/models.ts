@@ -89,6 +89,26 @@ export function makeGun(weapon: number): THREE.Group {
       }
       break;
     }
+    case 9: { // Scattergun: a stubby, wide double barrel
+      const body = mat(0x6a5a48, 0x140e08, 0.5);
+      const glow = mat(0xffc070, 0xff8a20, 0.3);
+      g.add(box(0.5, 0.14, 0.16, body, 0.05), tube(0.05, 0.22, glow, 0.38, 0.03, -0.04), tube(0.05, 0.22, glow, 0.38, 0.03, 0.04),
+        box(0.16, 0.16, 0.07, dark, -0.12, -0.12), box(0.14, 0.05, 0.14, mat(0x8a7a60), 0.18, -0.09));
+      break;
+    }
+    case 10: { // Roulette Repeater: a drum of mismatched coloured cells
+      const body = mat(0x2a2f3a, 0x0a0a10, 0.7);
+      g.add(box(0.5, 0.11, 0.1, body, 0.05), tube(0.03, 0.3, mat(0xffffff, 0x8888ff), 0.4), box(0.14, 0.16, 0.06, dark, -0.1, -0.1));
+      const cols = [0xff3a3a, 0xffa03a, 0xffe03a, 0x5aff5a, 0x3ab0ff, 0xb05aff];
+      cols.forEach((c, i) => {
+        const a = (i / cols.length) * Math.PI * 2;
+        const cell = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.14, 8), mat(c, c, 0.3));
+        cell.rotation.z = -Math.PI / 2;
+        cell.position.set(0.08, 0.02 + 0.075 * Math.cos(a), 0.075 * Math.sin(a));
+        g.add(cell);
+      });
+      break;
+    }
     default: { // hover gun (debug)
       g.add(box(0.3, 0.12, 0.1, mat(0xb03aa0, 0x400a3a)), tube(0.05, 0.1, mat(0xffa8f0, 0xff5ee8), 0.2));
     }
@@ -124,7 +144,7 @@ export function makeBike(): THREE.Group {
   return g;
 }
 
-const ITEM_WEAPON: Partial<Record<ItemKind, number>> = { rifle: 0, pistol: 1, redRifle: 2, launcher: 3, cannon: 4, laconic: 5, hammer: 6, rocket: 7, seeker: 8 };
+const ITEM_WEAPON: Partial<Record<ItemKind, number>> = { rifle: 0, pistol: 1, redRifle: 2, launcher: 3, cannon: 4, laconic: 5, hammer: 6, rocket: 7, seeker: 8, scatter: 9, chaos: 10 };
 
 /** Floating pickup model (about 0.6 m across). */
 export function makePickup(item: ItemKind): THREE.Group {
@@ -175,5 +195,5 @@ export function makePickup(item: ItemKind): THREE.Group {
 
 export const ITEM_NAMES: Record<ItemKind, string> = {
   health: 'Health', sticky: 'Sticky grenades', bounce: 'Bouncing grenades', redRifle: 'Overclocked Plasma Rifle',
-  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', hammer: 'Grav Mallet', rocket: 'Torch Rocket', seeker: 'Seeker Swarm', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack',
+  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', hammer: 'Grav Mallet', rocket: 'Torch Rocket', seeker: 'Seeker Swarm', scatter: 'Scattergun', chaos: 'Roulette Repeater', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack',
 };

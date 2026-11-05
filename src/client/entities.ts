@@ -8,18 +8,24 @@ import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } fro
 
 const PICKUP_GLOW: Record<string, number> = {
   health: 0xff6060, sticky: 0x7fb6ff, bounce: 0xffd23a, redRifle: 0xff4a3a, launcher: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a, hammer: 0x9ad0ff, jetpack: 0xffa040,
-  rocket: 0xffa03a, seeker: 0xff6ad8,
+  rocket: 0xffa03a, seeker: 0xff6ad8, scatter: 0xffc070, chaos: 0xb0b0ff,
   rifle: 0x55c8ff, pistol: 0x8dff5a,
 };
 
 export type PosMap = Map<number, Vec3>;
+
+/** Roulette Repeater bolts: red when slow, through yellow and green, to blue-white when fast. */
+function speedColor(speed: number): number {
+  const u = Math.max(0, Math.min(1, (speed - 15) / (220 - 15)));
+  return new THREE.Color().setHSL(0.66 * u, 1, 0.55 + 0.15 * u).getHex();
+}
 
 /** How far along a gun model (+X) its muzzle is. */
 const MUZZLE_TIP: Record<number, number> = { 1: 0.27, 5: 1.08 };
 
 const BOLT_COLORS: Record<string, number> = {
   rifle: 0x55c8ff, redRifle: 0xff4a3a, pistol: 0x8dff5a, overcharge: 0x5dff7a, fuelRod: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a,
-  hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a, rocket: 0xffa03a, seeker: 0xff6ad8,
+  hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a, rocket: 0xffa03a, seeker: 0xff6ad8, pellet: 0xffb050, chaos: 0xffffff,
 };
 
 /** Fading polyline trail stored as a ring buffer. */
@@ -260,14 +266,14 @@ export class EntityViews {
     const fa = state.frameAngle;
     const c = Math.cos(fa), s = Math.sin(fa);
     const seen = new Set<number>();
-    const projs: { id: number; pos: Vec3; kind: string; radius: number }[] = [
-      ...state.bolts.map((b) => ({ id: b.id, pos: b.pos, kind: b.kind, radius: b.radius })),
+    const projs: { id: number; pos: Vec3; kind: string; radius: number; color?: number }[] = [
+      ...state.bolts.map((b) => ({ id: b.id, pos: b.pos, kind: b.kind, radius: b.radius, color: b.kind === 'chaos' ? speedColor(b.speed) : undefined })),
       ...state.grenades.map((g) => ({ id: g.id, pos: g.pos, kind: g.variant === 'bounce' ? 'bounceGrenade' : 'grenade', radius: g.radius })),
     ];
     for (const p of projs) {
       seen.add(p.id);
       let v = this.projs.get(p.id);
-      if (!v) v = this.createProj(p.id, p.kind, p.radius);
+      if (!v) v = this.createProj(p.id, p.kind, p.radius, p.color);
       if (state.tick % 2 === 0) {
         v.trail.push(p.pos[0], p.pos[1], p.pos[2]);
         // inertial coordinates: rotate by +frameAngle; the inertial group renders at -frameAngle
@@ -283,8 +289,8 @@ export class EntityViews {
     }
   }
 
-  private createProj(id: number, kind: string, radius: number): ProjView {
-    const color = BOLT_COLORS[kind] ?? 0xffffff;
+  private createProj(id: number, kind: string, radius: number, tint?: number): ProjView {
+    const color = tint ?? BOLT_COLORS[kind] ?? 0xffffff;
     const sprite = this.makeGlow(color, radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 7 : kind === 'cannon' || kind === 'laconic' ? 9 : 6));
     const rocket = kind === 'rocket' || kind === 'seeker';
     const core = rocket

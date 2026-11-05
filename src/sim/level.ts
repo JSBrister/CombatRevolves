@@ -513,7 +513,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     }
     // Bases: a room with doorways and chamfered (45 degree) corners, a roof you
     // reach by ramps, and low walls up there for partial cover.
-    const baseItems: ItemKind[] = ['health', 'redRifle', 'rocket', 'sticky', 'cannon', 'seeker', 'bounce', 'launcher'];
+    const baseItems: ItemKind[] = ['health', 'scatter', 'rocket', 'chaos', 'cannon', 'seeker', 'redRifle', 'launcher'];
     baseSites.forEach((site, bi) => {
       const a0 = site.angle, zc = site.z;
       if (spawns.some((sp) => Math.abs(wrapAngle(sp.angle - a0)) * R < BASE_REACH + 4 && Math.abs(sp.z - zc) < BASE_HALF + 6)) return;
@@ -640,7 +640,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       stairs.push({ angle: a, halfArc: hw + 3 });
     }
     // a few skylights, cover and prizes up top
-    const items: ItemKind[] = ['cannon', 'health', 'seeker', 'jetpack', 'rocket', 'sticky'];
+    const items: ItemKind[] = ['cannon', 'health', 'scatter', 'jetpack', 'rocket', 'chaos'];
     const nTop = Math.max(4, Math.round(playSpan(cfg) / 60));
     for (let i = 0; i < nTop; i++) {
       const a = arcAngle(cfg, (i + 0.7) / nTop);

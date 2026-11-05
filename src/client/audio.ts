@@ -65,6 +65,8 @@ export class Sfx {
     else if (kind === 'overcharge') { this.tone('sawtooth', 300, 1200, 0.35, 0.3 * a); this.tone('sine', 120, 60, 0.4, 0.3 * a); }
     else if (kind === 'rocket') { this.noise(0.6, 0.25 * a, 600); this.tone('sawtooth', 90, 140, 0.5, 0.2 * a); }
     else if (kind === 'seeker') { this.tone('triangle', 1600, 2400, 0.06, 0.08 * a); this.noise(0.08, 0.06 * a, 4000); }
+    else if (kind === 'pellet') { this.noise(0.18, 0.35 * a, 1800); this.tone('square', 220, 80, 0.12, 0.2 * a); }
+    else if (kind === 'chaos') this.tone('square', 400 + Math.random() * 1600, 200 + Math.random() * 400, 0.05, 0.1 * a);
     else if (kind === 'hover') this.tone('sine', 400, 1600, 0.25, 0.2 * a);
     else if (kind === 'grenade') this.tone('triangle', 300, 500, 0.15, 0.15 * a);
   }
