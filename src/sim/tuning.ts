@@ -36,6 +36,7 @@ export const defaultConfig = (): SimConfig => ({
   tube: 'none', // 'inside' / 'half' / 'outside' a torus whose tube has radius tubeRadius
   tubeRadius: 20,
   floorHoles: 0, // holes in the floor you can fall out of
+  floorTexture: 'auto', // 'auto' (deck plating; grass on hills), 'deck', 'grass', 'sand', 'snow' or 'rock'
   windows: 0, // O'Neill-style glass strips along the ring (you can walk on them)
   spinChange: 0, // >0: every spinPeriod s the spin winds down by this fraction (1 = to a stop) and back up
   spinPeriod: 120,

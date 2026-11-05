@@ -77,12 +77,18 @@ export function makeHills(
   for (let i = 0; i < count; i++) {
     const radius = 6 + rand() * 16;
     const zr = Math.max(0, cfg.halfWidth - radius * 0.8 - 4);
-    const angle = arc((i + 0.2 + rand() * 0.6) / count);
-    const z = (rand() * 2 - 1) * zr;
+    let angle = arc((i + 0.2 + rand() * 0.6) / count);
+    let z = (rand() * 2 - 1) * zr;
     const height = maxHeight * (0.3 + 0.7 * rand());
-    // ramps and lookouts need flat ground: no hill within 2.5 sigma of one
-    if (keepClear.some((k) => blocks(cfg, k, angle, z, margin * radius))) continue;
-    hills.push({ angle, z, height, radius });
+    // ramps and lookouts need flat ground: no hill within 2.5 sigma of one.
+    // If this spot is taken, try a few others rather than dropping the hill.
+    let ok = !keepClear.some((k) => blocks(cfg, k, angle, z, margin * radius));
+    for (let tryN = 0; !ok && tryN < 12; tryN++) {
+      angle = arc(rand());
+      z = (rand() * 2 - 1) * zr;
+      ok = !keepClear.some((k) => blocks(cfg, k, angle, z, margin * radius));
+    }
+    if (ok) hills.push({ angle, z, height, radius });
   }
   return hills;
 }
@@ -107,7 +113,7 @@ export function makeMountains(
       const z = (rand() * 2 - 1) * zr;
       if (keepClear.some((k) => blocks(cfg, k, angle, z, 3 * radius))) continue;
       if (out.some((m) => Math.abs(wrap(angle - m.angle)) * cfg.R < 1.5 * (radius + m.radius) && Math.abs(z - m.z) < 1.5 * (radius + m.radius))) continue;
-      out.push({ angle, z, height: Math.min(height, radius), radius }); // never steeper than ~30 degrees
+      out.push({ angle, z, height: Math.min(height, 1.2 * radius), radius }); // never steeper than ~36 degrees
       break;
     }
   }

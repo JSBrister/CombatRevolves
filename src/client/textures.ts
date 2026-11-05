@@ -135,3 +135,31 @@ export function grassTexture(): THREE.Texture {
   t.anisotropy = 8;
   return t;
 }
+
+/** Speckled ground: a base colour with lots of small flecks (sand, snow, rock). */
+function speckle(base: string, flecks: string[], n: number, size: [number, number], cracks = 0): THREE.Texture {
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = base;
+  g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < n; i++) {
+    g.fillStyle = flecks[Math.floor(Math.random() * flecks.length)];
+    g.fillRect(Math.random() * 256, Math.random() * 256, size[0] * (0.5 + Math.random()), size[1] * (0.5 + Math.random()));
+  }
+  g.strokeStyle = 'rgba(30,30,35,0.35)';
+  g.lineWidth = 1.5;
+  for (let i = 0; i < cracks; i++) {
+    let x = Math.random() * 256, y = Math.random() * 256;
+    g.beginPath();
+    g.moveTo(x, y);
+    for (let k = 0; k < 6; k++) { x += (Math.random() - 0.5) * 50; y += (Math.random() - 0.5) * 50; g.lineTo(x, y); }
+    g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+export const sandTexture = () => speckle('#c9a86a', ['rgba(220,190,130,0.5)', 'rgba(170,135,80,0.5)', 'rgba(235,210,160,0.4)'], 7000, [2, 2]);
+export const snowTexture = () => speckle('#e6edf5', ['rgba(255,255,255,0.6)', 'rgba(200,215,235,0.5)', 'rgba(180,195,220,0.4)'], 4000, [3, 2]);
+export const rockTexture = () => speckle('#6b6a68', ['rgba(90,88,85,0.6)', 'rgba(120,118,112,0.5)', 'rgba(60,58,56,0.6)'], 5000, [3, 3], 18);

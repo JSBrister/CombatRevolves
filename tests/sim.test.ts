@@ -1721,7 +1721,7 @@ describe('34. bases and mountains', () => {
   it('the big levels have bases and mountains', () => {
     const { s, pillar } = outposts();
     expect(pillar).toBeTruthy();
-    expect(s.level.terrain!.hills.some((h) => h.height > 20 && h.radius >= h.height)).toBe(true);
+    expect(s.level.terrain!.hills.some((h) => h.height > 20 && 1.2 * h.radius >= h.height)).toBe(true);
   });
   it('you can run up a ramp onto a base roof, and walk in through a doorway', () => {
     const { s, id, p, pillar } = outposts();

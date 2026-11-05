@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { floorRadius, type Hole, type Level, type SimConfig } from '../sim';
-import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, wallTexture } from './textures';
+import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, rockTexture, sandTexture, snowTexture, wallTexture } from './textures';
 
 export const LAYER_ROT_TRAILS = 1;
 export const LAYER_INERTIAL_ONLY = 2;
@@ -16,7 +16,18 @@ export class RingScene {
   inertial = new THREE.Group(); // fixed in the inertial frame
   level = new THREE.Group();
   glow = glowTexture();
-  textures = { deck: deckTexture(), wall: wallTexture(), crate: crateTexture(), ball: ballTexture(), planet: planetTexture(), grass: grassTexture() };
+  textures = {
+    deck: deckTexture(), wall: wallTexture(), crate: crateTexture(), ball: ballTexture(), planet: planetTexture(), grass: grassTexture(),
+    sand: sandTexture(), snow: snowTexture(), rock: rockTexture(),
+  };
+  /** The level's chosen floor texture ('auto' = whatever suits the floor: deck plating, grass on hills). */
+  private floorChoice: SimConfig['floorTexture'] = 'auto';
+  private floorTex(fallback: 'deck' | 'grass'): THREE.Texture {
+    const k = this.floorChoice === 'auto' ? fallback : this.floorChoice;
+    const t = this.textures[k].clone();
+    t.needsUpdate = true;
+    return t;
+  }
   starRadius = 4000;
   sky: 'space' | 'earth' = 'space';
   ambient = new THREE.AmbientLight(0x9aa8c0, 0.6);
@@ -54,6 +65,7 @@ export class RingScene {
     this.level.clear();
     this.inertial.clear();
     this.sky = sky;
+    this.floorChoice = cfg.floorTexture;
     if (sky === 'earth') return this.buildEarth(cfg, level);
     if (level.shape === 'planet') return this.buildPlanet(cfg, level);
     this.scene.background = new THREE.Color(0x02030a);
@@ -76,8 +88,7 @@ export class RingScene {
     this.scene.fog = new THREE.Fog(0x0b1020, Math.max(R * 1.5, 80), Math.max(R * 7, 400));
 
     // Floor: inside of a cylinder about Z.
-    const deck = this.textures.deck.clone();
-    deck.needsUpdate = true;
+    const deck = this.floorTex('deck');
     deck.repeat.set((2 * Math.PI * R) / 5, (2 * W) / 5);
     this.twinGroups = [];
     if (cfg.twin) return this.buildTwin(cfg, level, segs);
@@ -165,8 +176,7 @@ export class RingScene {
       const sg = k ? 1 : -1;
       const len = W + T - g, zc = (sg * (W + T + g)) / 2;
       const tint = k ? 0xffe2c8 : 0xc8e2ff; // the two rings in slightly different light
-      const tex = this.textures.deck.clone();
-      tex.needsUpdate = true;
+      const tex = this.floorTex('deck');
       tex.repeat.set((2 * Math.PI * R) / 5, len / 5);
       const fg = new THREE.CylinderGeometry(R, R, len, segs, 1, true);
       fg.rotateX(Math.PI / 2);
@@ -380,11 +390,10 @@ export class RingScene {
     this.sunDir.set(Math.sin(0.5), 0, Math.cos(0.5));
     this.starRadius = Math.max(4000, R * 20);
     this.scene.fog = new THREE.Fog(0x0b1020, R * 2, R * 12);
-    const tex = this.textures.grass.clone();
-    tex.needsUpdate = true;
+    const tex = this.floorTex('grass');
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.repeat.set((2 * Math.PI * R) / 6, (Math.PI * R) / 6);
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(R, 384, 192), new THREE.MeshStandardMaterial({ map: tex, color: 0xb8c8a0, roughness: 0.95, metalness: 0 }));
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(R, 384, 192), new THREE.MeshStandardMaterial({ map: tex, color: this.floorChoice === 'auto' ? 0xb8c8a0 : 0xffffff, roughness: 0.95, metalness: 0 }));
     ball.rotation.x = Math.PI / 2; // the sphere's poles on the spin axis (z)
     ball.receiveShadow = true;
     this.level.add(ball);
@@ -427,8 +436,7 @@ export class RingScene {
     const tubular = Math.min(1440, Math.max(192, Math.round((2 * Math.PI * R) / 1.5)));
     const radial = Math.max(48, Math.round((2 * Math.PI * a) / 1.2));
     const g = new THREE.TorusGeometry(rc, a, radial, tubular);
-    const tex = this.textures.deck.clone();
-    tex.needsUpdate = true;
+    const tex = this.floorTex('deck');
     tex.repeat.set((2 * Math.PI * R) / 5, (2 * Math.PI * a) / 5);
     const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, side: kind === 'inside' ? THREE.BackSide : THREE.FrontSide, roughness: 0.85, metalness: 0.2 }));
     mesh.receiveShadow = true;
@@ -495,8 +503,7 @@ export class RingScene {
       m.castShadow = kind === 'deck';
       return m;
     };
-    const tex = this.textures.deck.clone();
-    tex.needsUpdate = true;
+    const tex = this.floorTex('deck');
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.repeat.set(1, 1);
     group.add(surface(r, THREE.DoubleSide, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0.2 })));
@@ -569,8 +576,7 @@ export class RingScene {
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const tex = (level.terrain!.hills.length ? this.textures.grass : this.textures.deck).clone();
-    tex.needsUpdate = true;
+    const tex = this.floorTex(level.terrain!.hills.length ? 'grass' : 'deck');
     const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.9, metalness: 0.05 }));
     mesh.receiveShadow = true;
     // O'Neill windows: faintly tinted glass with mullions, flush with the floor

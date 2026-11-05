@@ -11,6 +11,7 @@ export interface CustomSettings {
   width: number; // half-width of the floor (or the tube's radius)
   g: number;
   walls: 'varied' | 'full' | 'low';
+  floor: SimConfig['floorTexture'];
   hills: number;
   hillHeight: number;
   mountains: number;
@@ -30,7 +31,7 @@ export interface CustomSettings {
 }
 
 export const CUSTOM_DEFAULTS: CustomSettings = {
-  shape: 'ring', R: 150, width: 25, g: 9.81, walls: 'varied', hills: 0, hillHeight: 8, mountains: 0, mountainHeight: 40,
+  shape: 'ring', R: 150, width: 25, g: 9.81, walls: 'varied', floor: 'auto', hills: 0, hillHeight: 8, mountains: 0, mountainHeight: 40,
   bases: 0, holes: 0, deck: 0, windows: 0, spinChange: 0, spinPeriod: 90, planetSpin: 0.4, planet: 0, air: 'none', bots: 3, bikes: -1, seed: 1,
 };
 
@@ -45,6 +46,7 @@ const FIELDS: Field[] = [
   { key: 'width', label: 'Half-width / tube radius (m)', min: 6, max: 1500, step: 1 },
   { key: 'g', label: 'Gravity at the floor (m/s²)', min: 1, max: 30, step: 0.1 },
   { key: 'walls', label: 'Rim walls', options: [['varied', 'Varied (some low)'], ['full', 'Full height'], ['low', 'Low curbs (fall off!)']] },
+  { key: 'floor', label: 'Floor', options: [['auto', 'Automatic'], ['deck', 'Deck plating'], ['grass', 'Grass'], ['sand', 'Sand'], ['snow', 'Snow'], ['rock', 'Rock']] },
   { key: 'hills', label: 'Hills', min: 0, max: 120, step: 1, ringOnly: true },
   { key: 'hillHeight', label: 'Hill height (m)', min: 1, max: 60, step: 1, ringOnly: true },
   { key: 'mountains', label: 'Mountains', min: 0, max: 30, step: 1, ringOnly: true },
@@ -68,7 +70,7 @@ const isRingLike = (s: Shape) => s === 'ring' || s === 'band' || s === 'ridge' |
 /** The level these settings describe. */
 export function customLevel(s: CustomSettings): LevelDef {
   const R = s.R;
-  const c: Partial<SimConfig> = { R, g: s.g, halfWidth: s.width };
+  const c: Partial<SimConfig> = { R, g: s.g, halfWidth: s.width, floorTexture: s.floor };
   const ring = isRingLike(s.shape);
   let variedWalls = s.walls === 'varied';
   c.wallHeight = s.walls === 'low' ? 1 : 15;

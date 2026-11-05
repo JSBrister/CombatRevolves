@@ -50,7 +50,7 @@ nothing, it stays put. When a player dies they drop their special weapons, jetpa
 
 *Build a level* on the title screen gives you the level generator as a form:
 - The shape: ring, sphere band, whole sphere, ridge, inside a torus, half-pipe, or the log.
-- Size, width and gravity, and the rim walls.
+- Size, width and gravity, the rim walls, and the floor (deck plating, grass, sand, snow or rock).
 - What's on the floor: hills, mountains, bases, holes, an upper deck and O'Neill windows.
 - The world: a changing spin, a planet's pull, air.
 - Bots, bikes and a layout seed.

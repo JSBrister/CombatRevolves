@@ -489,7 +489,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const R = cfg.R;
   // where the lookout ramps will go (same formula as below), so hills keep clear of them
   const span0 = playSpan(cfg);
-  const nRamps0 = withObstacles && !(cfg.bases > 0) ? Math.max(2, Math.min(12, Math.round(span0 / 150))) : 0;
+  const nRamps0 = withObstacles && !(cfg.bases > 0) && !(cfg.mountains > 0) ? Math.max(2, Math.min(12, Math.round(span0 / 150))) : 0;
   const H0 = Math.max(2, Math.min(LOOKOUT_HEIGHT, 0.3 * R));
   const rampClear = Array.from({ length: nRamps0 }, (_, s) => ({
     angle: arcAngle(cfg, (s + 0.5) / nRamps0 + (cfg.arena > 0 ? 0 : 1 / 16)),
@@ -596,8 +596,8 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     const circ = playSpan(cfg);
     // Ramps up to lookout platforms, midway between spawn points, alternating
     // which way they climb (climbing spinward vs antispinward feels different!).
-    // (no lookouts where bases bring their own heights)
-    const nStairs = steep || deck || cfg.bases > 0 ? 0 : Math.max(2, Math.min(12, Math.round(circ / 150)));
+    // (no lookouts where bases or mountains bring their own heights)
+    const nStairs = steep || deck || cfg.bases > 0 || cfg.mountains > 0 ? 0 : Math.max(2, Math.min(12, Math.round(circ / 150)));
     const H = Math.max(2, Math.min(LOOKOUT_HEIGHT, 0.3 * R)); // lookout height
     const rampLen = H / RAMP_SLOPE;
     const topItems: ItemKind[] = ['cannon', 'jetpack', 'hammer'];
