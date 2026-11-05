@@ -172,29 +172,35 @@ export const BTN_RELOAD = 64;
 export const BTN_MELEE = 128;
 export const BTN_USE = 256; // get on / off a vehicle
 
-// Weapons are addressed by a fixed slot index (also the number keys).
-export const WEAPON_IDS = ['rifle', 'pistol', 'redRifle', 'launcher', 'cannon', 'laconic', 'hammer', 'rocket', 'seeker', 'scatter', 'chaos', 'hover'] as const;
+// Weapons are addressed by a fixed slot index (also the number keys), in a
+// sensible order: rifles and sidearms, then the specialists, the explosives,
+// the superweapon and the melee weapon. The hover gun is debug-only.
+export const WEAPON_IDS = ['rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer', 'hover'] as const;
 export type WeaponId = (typeof WEAPON_IDS)[number];
-export const WEAPON_RIFLE = 0;
-export const WEAPON_PISTOL = 1;
-export const WEAPON_RED = 2;
-export const WEAPON_LAUNCHER = 3;
-export const WEAPON_CANNON = 4;
-export const WEAPON_LACONIC = 5;
-export const WEAPON_HAMMER = 6;
-export const WEAPON_ROCKET = 7;
-export const WEAPON_SEEKER = 8;
-export const WEAPON_SCATTER = 9;
-export const WEAPON_CHAOS = 10;
-export const WEAPON_HOVER = 11;
-export const WEAPON_NAMES = [
-  'Plasma Rifle', 'Plasma Pistol', 'Overclocked Plasma Rifle', 'Fuel Rod Launcher', 'Plasma Bolt Cannon', 'Laconic Laser', 'Grav Mallet',
-  'Torch Rocket', 'Seeker Swarm', 'Scattergun', 'Roulette Repeater', 'Hover Gun (debug)',
-];
-/** Number keys select the first N weapons (1-9, then 0 and -); the hover gun is debug-panel only. */
-export const PLAYER_WEAPON_SLOTS = 11;
+const wi = (id: WeaponId) => WEAPON_IDS.indexOf(id);
+export const WEAPON_RIFLE = wi('rifle');
+export const WEAPON_PISTOL = wi('pistol');
+export const WEAPON_REVOLVER = wi('revolver');
+export const WEAPON_RED = wi('redRifle');
+export const WEAPON_CHAOS = wi('chaos');
+export const WEAPON_SCATTER = wi('scatter');
+export const WEAPON_CANNON = wi('cannon');
+export const WEAPON_LAUNCHER = wi('launcher');
+export const WEAPON_ROCKET = wi('rocket');
+export const WEAPON_SEEKER = wi('seeker');
+export const WEAPON_LACONIC = wi('laconic');
+export const WEAPON_HAMMER = wi('hammer');
+export const WEAPON_HOVER = wi('hover');
+const NAMES: Record<WeaponId, string> = {
+  rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', revolver: 'Revolver', redRifle: 'Overclocked Plasma Rifle', chaos: 'Roulette Repeater',
+  scatter: 'Scattergun', cannon: 'Plasma Bolt Cannon', launcher: 'Fuel Rod Launcher', rocket: 'Torch Rocket', seeker: 'Seeker Swarm',
+  laconic: 'Laconic Laser', hammer: 'Grav Mallet', hover: 'Hover Gun (debug)',
+};
+export const WEAPON_NAMES = WEAPON_IDS.map((id) => NAMES[id]);
+/** Keys 1-9, 0, - and = select the first N weapons; the hover gun is debug-panel only. */
+export const PLAYER_WEAPON_SLOTS = 12;
 /** The key label for a weapon slot. */
-export const slotKey = (i: number) => (i < 9 ? String(i + 1) : i === 9 ? '0' : '-');
+export const slotKey = (i: number) => (i < 9 ? String(i + 1) : ['0', '-', '='][i - 9]);
 export const STARTING_WEAPONS = [WEAPON_RIFLE, WEAPON_PISTOL];
 
 /** Tunable stats for one weapon. Fields a weapon doesn't use stay 0. */
@@ -318,9 +324,9 @@ export interface Player {
   deaths: number;
 }
 
-export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'rocket' | 'seeker' | 'pellet' | 'chaos' | 'hover';
+export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'rocket' | 'seeker' | 'pellet' | 'chaos' | 'bullet' | 'hover';
 
-export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rocket' | 'seeker' | 'scatter' | 'chaos' | 'rifle' | 'pistol' | 'jetpack';
+export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rocket' | 'seeker' | 'scatter' | 'chaos' | 'revolver' | 'rifle' | 'pistol' | 'jetpack';
 
 /** Floating item pickup (not a physics object). */
 export interface Pickup {

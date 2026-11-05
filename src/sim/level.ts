@@ -333,7 +333,7 @@ export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacl
       else stand(lon, lat, heading, 1.6, rngRange(rng, 4, 8) * k, 1.6, 'struct'); // tower
     }
     // pickups on a spiral round the planet (evenly spread)
-    const items: ItemKind[] = ['health', 'sticky', 'redRifle', 'bounce', 'launcher', 'scatter', 'jetpack', 'cannon', 'rocket', 'health', 'chaos', 'sticky', 'seeker', 'laconic'];
+    const items: ItemKind[] = ['health', 'sticky', 'redRifle', 'bounce', 'launcher', 'scatter', 'jetpack', 'cannon', 'rocket', 'health', 'chaos', 'revolver', 'seeker', 'laconic'];
     const m = items.length;
     for (let i = 0; i < m; i++) {
       const lat = Math.asin(-0.85 + (1.7 * (i + 0.5)) / m), lon = i * 2.39996; // golden angle
@@ -617,7 +617,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       pickupSpots.push({ pos: at(topAngle, H + 1, z), item: topItems[s % topItems.length] });
     }
     // Floor pickups at the midpoints between spawns that have no staircase.
-    const floorItems: ItemKind[] = ['launcher', 'health', 'redRifle', 'sticky', 'rocket', 'laconic', 'bounce', 'seeker', 'health', 'sticky'];
+    const floorItems: ItemKind[] = ['launcher', 'health', 'redRifle', 'sticky', 'rocket', 'laconic', 'bounce', 'seeker', 'health', 'sticky', 'revolver', 'scatter'];
     let fi = 0;
     for (let i = 0; i < spawns.length - (arena ? 1 : 0); i++) {
       const a = arcAngle(cfg, (i + (arena ? 1 : 0.5)) / spawns.length);
@@ -634,7 +634,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     }
     // Bases: a room with doorways and chamfered (45 degree) corners, a roof you
     // reach by ramps, and low walls up there for partial cover.
-    const baseItems: ItemKind[] = ['health', 'scatter', 'rocket', 'chaos', 'cannon', 'seeker', 'redRifle', 'launcher'];
+    const baseItems: ItemKind[] = ['health', 'scatter', 'rocket', 'revolver', 'chaos', 'cannon', 'seeker', 'redRifle', 'launcher'];
     baseSites.forEach((site, bi) => {
       const a0 = site.angle, zc = site.z;
       if (spawns.some((sp) => Math.abs(wrapAngle(sp.angle - a0)) * R < BASE_REACH + 4 && Math.abs(sp.z - zc) < BASE_HALF + 6)) return;

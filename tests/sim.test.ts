@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, convertBody, setSdfFrame, clone, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1948,5 +1948,51 @@ describe('38. counter-rotating twin rings', () => {
     const c = Math.cos(-2 * th), sn = Math.sin(-2 * th);
     const moved: Vec3 = [c * box.center[0] - sn * box.center[1], sn * box.center[0] + c * box.center[1], box.center[2]];
     expect(levelSdf(s.level, s.config, moved).d).toBeLessThan(0);
+  });
+});
+
+describe('39. revolver and the homing overcharge', () => {
+  it('the revolver: six very fast rounds, then a reload', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players[0];
+    applyItem(s.config, p, 'revolver', -1);
+    run(s, 60, () => [cmdFor(s, id, { weapon: WEAPON_REVOLVER })]);
+    let shots = 0;
+    for (let i = 0; i < 600; i++) {
+      step(s, [cmdFor(s, id, { weapon: WEAPON_REVOLVER, pitch: 0.3, buttons: i % 2 ? BTN_FIRE : 0 })], s.tick);
+      shots += s.events.filter((e) => e.type === 'fire' && e.kind === 'bullet').length;
+      if (p.reloadUntil > s.tick) break;
+    }
+    expect(shots).toBe(6);
+    expect(s.config.weapons.revolver.muzzle).toBeGreaterThan(5 * s.config.weapons.rifle.muzzle);
+  });
+  it('the overcharged pistol shot is at least as fast as a tap and bends onto a target near your aim', () => {
+    const cfg = defaultWeapons().pistol;
+    expect(cfg.ocMuzzle).toBeGreaterThanOrEqual(cfg.muzzle);
+    const shoot = (homing: boolean) => {
+      const s = empty({ R: 1000, halfWidth: 40 });
+      const a = addPlayer(s, 'human', 'A'), t = addPlayer(s, 'human', 'T');
+      if (!homing) s.config.weapons.pistol.turnRate = 0;
+      run(s, 10);
+      const A = s.players.find((q) => q.id === a)!, T = s.players.find((q) => q.id === t)!;
+      const R = s.config.R;
+      A.pos = [(R - 0.9), 0, 0]; T.pos = [(R - 0.9) * Math.cos(30 / R), (R - 0.9) * Math.sin(30 / R), 2.2];
+      A.vel = [0, 0, 0]; T.vel = [0, 0, 0];
+      T.maxHealth = T.health = 1e6;
+      // aimed straight down the ring: 2.2 m to the side of the target at 30 m (inside the 25-degree cone)
+      run(s, 20, () => [cmdFor(s, a, { weapon: WEAPON_PISTOL, pitch: 0.012 })]);
+      for (let i = 0; i < 200; i++) step(s, [cmdFor(s, a, { weapon: WEAPON_PISTOL, pitch: 0.012, buttons: BTN_FIRE })], s.tick);
+      expect(A.charge).toBe(1);
+      let hit = false;
+      step(s, [cmdFor(s, a, { weapon: WEAPON_PISTOL, pitch: 0.012 })], s.tick); // release: the overcharged shot
+      for (let i = 0; i < 120 && !hit; i++) {
+        step(s, [cmdFor(s, a, { weapon: WEAPON_PISTOL, pitch: 0.012 })], s.tick);
+        hit = s.events.some((e) => e.type === 'hit' && e.target === t);
+      }
+      return hit;
+    };
+    expect(shoot(false)).toBe(false);
+    expect(shoot(true)).toBe(true);
   });
 });

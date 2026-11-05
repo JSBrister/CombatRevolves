@@ -8,7 +8,7 @@ import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } fro
 
 const PICKUP_GLOW: Record<string, number> = {
   health: 0xff6060, sticky: 0x7fb6ff, bounce: 0xffd23a, redRifle: 0xff4a3a, launcher: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a, hammer: 0x9ad0ff, jetpack: 0xffa040,
-  rocket: 0xffa03a, seeker: 0xff6ad8, scatter: 0xffc070, chaos: 0xb0b0ff,
+  rocket: 0xffa03a, seeker: 0xff6ad8, scatter: 0xffc070, chaos: 0xb0b0ff, revolver: 0xfff2b0,
   rifle: 0x55c8ff, pistol: 0x8dff5a,
 };
 
@@ -21,11 +21,11 @@ function speedColor(speed: number): number {
 }
 
 /** How far along a gun model (+X) its muzzle is. */
-const MUZZLE_TIP: Record<number, number> = { 1: 0.27, 5: 1.08 };
+const MUZZLE_TIP: Record<number, number> = { [WEAPON_PISTOL]: 0.27, [WEAPON_LACONIC]: 1.08 };
 
 const BOLT_COLORS: Record<string, number> = {
   rifle: 0x55c8ff, redRifle: 0xff4a3a, pistol: 0x8dff5a, overcharge: 0x5dff7a, fuelRod: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a,
-  hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a, rocket: 0xffa03a, seeker: 0xff6ad8, pellet: 0xffb050, chaos: 0xffffff,
+  hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a, rocket: 0xffa03a, seeker: 0xff6ad8, pellet: 0xffb050, chaos: 0xffffff, bullet: 0xfff2b0,
 };
 
 /** Fading polyline trail stored as a ring buffer. */

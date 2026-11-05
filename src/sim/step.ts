@@ -34,10 +34,10 @@ const PISTOL_CHARGE_DELAY = 30; // ticks of holding before the overcharge starts
 /** Which weapon's stats a bolt kind uses. */
 export const BOLT_WEAPON: Record<BoltKind, WeaponId> = {
   rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', overcharge: 'pistol', fuelRod: 'launcher', cannon: 'cannon', laconic: 'laconic',
-  rocket: 'rocket', seeker: 'seeker', pellet: 'scatter', chaos: 'chaos', hover: 'hover',
+  rocket: 'rocket', seeker: 'seeker', pellet: 'scatter', chaos: 'chaos', bullet: 'revolver', hover: 'hover',
 };
 const WEAPON_BOLT: Record<Exclude<WeaponId, 'hammer'>, BoltKind> = {
-  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', cannon: 'cannon', laconic: 'laconic', rocket: 'rocket', seeker: 'seeker', scatter: 'pellet', chaos: 'chaos', hover: 'hover',
+  rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', cannon: 'cannon', laconic: 'laconic', rocket: 'rocket', seeker: 'seeker', scatter: 'pellet', chaos: 'chaos', revolver: 'bullet', hover: 'hover',
 };
 /** Bolts that carry their own motor. */
 export const isRocket = (kind: BoltKind) => kind === 'rocket' || kind === 'seeker';
@@ -599,6 +599,7 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
     case 'cannon':
     case 'rocket':
     case 'scatter':
+    case 'revolver':
     case 'hover':
       if (pressed & BTN_FIRE && ready) shoot(WEAPON_BOLT[id], st.heatPerShot, st.interval);
       break;
@@ -735,7 +736,9 @@ function fireBolt(state: SimState, p: Player, kind: BoltKind) {
   if (ws.spread > 0 || ws.muzzleMin > 0) return fireSpread(state, p, kind, ws);
   const from = muzzlePoint(p);
   // a rocket's nose points where you aim, whatever your own motion adds to its launch velocity
-  spawnBolt(state, p.id, kind, from, launchVelocity(state.config, p, kind, from), viewVectors(p.pos, p.yaw, p.pitch).aim);
+  const b = spawnBolt(state, p.id, kind, from, launchVelocity(state.config, p, kind, from), viewVectors(p.pos, p.yaw, p.pitch).aim);
+  // the pistol's overcharged shot picks a target at launch (someone near where you aimed)
+  if (kind === 'overcharge') b.target = seekTarget(state, b, viewVectors(p.pos, p.yaw, p.pitch).aim, ws)?.id ?? -1;
   state.events.push({ type: 'fire', owner: p.id, kind, pos: from });
 }
 
@@ -803,7 +806,10 @@ function updateBolts(state: SimState, omega: number) {
     setSdfFrame(f, state.frameAngle);
     const w = frameOmega(omega, f);
     if (b.dir) moveRocket(state, b, ws, w);
-    else advanceFree(b.pos, b.vel, DT, w, cfg, pull);
+    else {
+      advanceFree(b.pos, b.vel, DT, w, cfg, pull);
+      if (b.kind === 'overcharge' && b.target >= 0) steerBolt(state, b, ws);
+    }
     const hit = sweep(state, p0, b.pos, b.radius, b.owner, b.armed);
     if (!hit && cfg.twin && frameOf(cfg, b.pos) !== f) {
       const th = state.frameAngle + omega * DT; // (its new position is for the end of the tick)
@@ -937,6 +943,22 @@ function moveRocket(state: SimState, b: Bolt, ws: WeaponStats, omega: number) {
   const push: Vec3 | null = burning ? scale(d, ws.thrust) : null;
   const extra = push ? (pull ? add(push, pull) : push) : pull;
   integrate(b.pos, b.vel, DT, omega, state.config, null, extra);
+}
+
+/**
+ * A gently homing bolt (the pistol's overcharge): no motor, so it turns its
+ * velocity toward the target (relative to the target's motion) at up to
+ * turnRate, keeping its speed. It gives up once the target is behind it.
+ */
+function steerBolt(state: SimState, b: Bolt, ws: WeaponStats) {
+  const q = state.players.find((x) => x.id === b.target);
+  if (!q || !q.alive || apart(state.config, q.pos, b.pos)) { b.target = -1; return; }
+  const rel = sub(b.vel, q.vel);
+  const to = sub(q.pos, b.pos);
+  const speed = len(rel);
+  if (speed < 1e-6 || dot(to, rel) <= 0) { b.target = -1; return; }
+  const turned = turnToward(scale(rel, 1 / speed), norm(to), ws.turnRate * DT);
+  b.vel = add(q.vel, scale(turned, speed));
 }
 
 /** Nearest enemy of the rocket's owner within its seeker cone. */

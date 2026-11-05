@@ -33,10 +33,9 @@ export class InputSampler {
       if (e.code === 'KeyQ') this.latched |= BTN_MELEE;
       if (e.code === 'KeyE') this.latched |= BTN_USE;
       if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && this.enabled) this.sprintOn = !this.sprintOn;
-      if (e.code.startsWith('Digit') || e.code === 'Minus') {
-        // 1-9, then 0 and - for slots 10 and 11
-        const d = e.code === 'Minus' ? 11 : Number(e.code.slice(5));
-        const n = d === 0 ? 9 : d - 1;
+      if (e.code.startsWith('Digit') || e.code === 'Minus' || e.code === 'Equal') {
+        // 1-9, then 0, - and = for slots 10-12
+        const n = e.code === 'Minus' ? 10 : e.code === 'Equal' ? 11 : Number(e.code.slice(5)) === 0 ? 9 : Number(e.code.slice(5)) - 1;
         if (n >= 0 && n < PLAYER_WEAPON_SLOTS) this.weapon = n; // the hover gun is debug-panel only
       }
       this.onKey(e.code);

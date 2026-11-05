@@ -174,8 +174,13 @@ const w = (o: Partial<WeaponStats>): WeaponStats => ({
 export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
   rifle: w({ muzzle: 80, damage: 7, shieldDamage: 7, interval: 0.075, heatPerShot: 0.045, coolRate: 0.45, overheatLock: 2.5,
     radius: 0.12, knockback: 0.6 }),
+  // the overcharged shot (hold, release) is a little faster than a tap, and homes in a little (turnRate / seek*)
   pistol: w({ muzzle: 90, damage: 13, shieldDamage: 13, interval: 0.15, heatPerShot: 0.08, coolRate: 0.3, overheatLock: 2,
-    radius: 0.15, knockback: 1.5, chargeTime: 0.9, ocMuzzle: 40, ocDamage: 20, ocShieldDamage: 120, ocHeat: 0.35 }),
+    radius: 0.15, knockback: 1.5, chargeTime: 0.9, ocMuzzle: 95, ocDamage: 20, ocShieldDamage: 120, ocHeat: 0.35,
+    turnRate: 1.6, seekRange: 45, seekAngle: 25 }),
+  // a normal gun, for comparison: tiny, very fast bullets barely curve at all
+  revolver: w({ muzzle: 900, damage: 34, shieldDamage: 30, interval: 0.32, radius: 0.05, knockback: 1.5, lifetime: 1.5,
+    magSize: 6, ammoMax: 36, reloadTime: 2.2 }),
   redRifle: w({ muzzle: 110, damage: 7, shieldDamage: 7, interval: 0.06, heatPerShot: 0.075, coolRate: 0.5, overheatLock: 3,
     radius: 0.1, knockback: 0.5 }),
   launcher: w({ muzzle: 45, damage: 30, shieldDamage: 30, interval: 0.6, radius: 0.3, knockback: 4,
