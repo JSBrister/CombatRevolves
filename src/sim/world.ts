@@ -1,8 +1,9 @@
-import { BIKE_RADIUS, generateLevel, levelSdf, spawnPosition } from './level';
+import { BIKE_RADIUS, generateLevel, generatePlanet, levelSdf, spawnPosition } from './level';
+import { setPlanet } from './physics';
 import { localBasis } from './physics';
 import { rngRange } from './rng';
 import { defaultConfig } from './tuning';
-import { DT, STARTING_WEAPONS, WEAPON_IDS, neutralInput, type GameMode, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
+import { DT, STARTING_WEAPONS, WEAPON_IDS, neutralInput, omegaOf, type GameMode, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
 import type { Vec3 } from './vec';
 
 export const PLAYER_RADIUS = 0.4;
@@ -57,7 +58,10 @@ export function createState(opts: WorldOptions = {}): SimState {
     vehicles: [],
     events: [],
   };
-  state.level = generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true, opts.vehicles ?? -1);
+  setPlanet(config.world === 'planet' ? config.g * config.R * config.R : 0, omegaOf(config));
+  state.level = config.world === 'planet'
+    ? generatePlanet(config, state, opts.obstacles ?? true, () => allocId(state))
+    : generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true, opts.vehicles ?? -1);
   for (const spot of state.level.vehicleSpots) addVehicle(state, spot.pos, spot.yaw);
   if (opts.pickups ?? opts.obstacles ?? true) {
     for (const spot of state.level.pickupSpots) addPickup(state, spot.item, spot.pos, -1, Math.round(config.pickupRespawn / DT), -1);

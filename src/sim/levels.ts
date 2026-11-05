@@ -184,6 +184,8 @@ export const LEVELS: LevelDef[] = [
     blurb: 'Every 90 s the ring spins down to a dead stop, floats weightless for 13 s, then spins back up. While it changes, the Euler force pushes everything along the floor.' },
   { id: 's-outposts', mode: 'sandbox', name: 'Outposts (bases and mountains)', seed: 44, config: { R: 300, halfWidth: 80, bases: 6, mountains: 5, mountainHeight: 45, hills: 12, hillHeight: 6 }, bots: 5,
     blurb: 'Six grey two-storey bases between the mountains: doorways into the lower rooms, ramps up to roofs with low walls to hide behind.' },
+  { id: 's-world', mode: 'sandbox', name: 'Dense Planet (outside a spinning ball)', seed: 45, config: { world: 'planet', R: 150, g: 9.81, planetSpin: 0.4 }, props: false, bots: 4,
+    blurb: 'A 150 m ball with full gravity, spinning fast: you weigh 60% at the equator and 100% at the poles. Orbit is 38 m/s; throw a grenade east hard enough and it comes back round behind you.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
     blurb: '140 m across: room to flank, and to watch your shots curve sideways.' },
   { id: 's-planet', mode: 'sandbox', name: 'Skyhook (planet below)', seed: 34, config: { R: 100, planetPull: 8.8, planetAngle: Math.PI }, bots: 2,
@@ -197,7 +199,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 

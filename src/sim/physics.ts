@@ -16,11 +16,44 @@ export interface Basis {
   axial: Vec3;
 }
 
+/**
+ * A planet world: gravity GM/r^2 toward the centre, on top of the spin. Set
+ * from the state's config by step() (and createState); 0 = a ring world.
+ */
+let planetGM = 0, planetOmega = 0;
+export function setPlanet(GM: number, omega: number) { planetGM = GM; planetOmega = omega; }
+export const isPlanetWorld = () => planetGM > 0;
+
 export function localBasis(r: Vec3): Basis {
+  if (planetGM > 0) return planetBasis(r);
   const rho = rhoOf(r);
   if (rho < 1e-9) return { up: [-1, 0, 0], spin: [0, 1, 0], axial: [0, 0, 1] };
   const cx = r[0] / rho, cy = r[1] / rho;
   return { up: [-cx, -cy, 0], spin: [-cy, cx, 0], axial: [0, 0, 1] };
+}
+
+/**
+ * On a planet "up" is against the effective gravity (gravity plus the spin's
+ * centrifugal push), so at mid latitudes it leans a little toward the equator
+ * from straight out of the ground. "Spinward" is east (round the axis the way
+ * it turns), made level; axial completes the frame (= spin x up, as on a ring).
+ */
+function planetBasis(r: Vec3): Basis {
+  const d = Math.hypot(r[0], r[1], r[2]) || 1;
+  const k = planetGM / (d * d * d), w2 = planetOmega * planetOmega;
+  // up = -(g_eff) = GM r / d^3 - omega^2 (x, y, 0)
+  let ux = k * r[0] - w2 * r[0], uy = k * r[1] - w2 * r[1], uz = k * r[2];
+  const ul = Math.hypot(ux, uy, uz) || 1;
+  ux /= ul; uy /= ul; uz /= ul;
+  const rho = Math.hypot(r[0], r[1]);
+  let ex = rho > 1e-6 ? -r[1] / rho : 0, ey = rho > 1e-6 ? r[0] / rho : 1, ez = 0; // east
+  const eu = ex * ux + ey * uy + ez * uz;
+  ex -= eu * ux; ey -= eu * uy; ez -= eu * uz;
+  const el = Math.hypot(ex, ey, ez) || 1;
+  ex /= el; ey /= el; ez /= el;
+  // axial = spin x up
+  const ax = ey * uz - ez * uy, ay = ez * ux - ex * uz, az = ex * uy - ey * ux;
+  return { up: [ux, uy, uz], spin: [ex, ey, ez], axial: [ax, ay, az] };
 }
 
 /** forward/right/aim directions for a local-frame yaw/pitch at position r. */
@@ -63,7 +96,14 @@ export function centrifugalAccel(r: Vec3, omega: number, cfg: SimConfig): Vec3 {
     if (rho > 1e-9) { gx = (cfg.gravity * r[0]) / rho; gy = (cfg.gravity * r[1]) / rho; }
   }
   // Euler: -alpha z_hat x r = (alpha y, -alpha x, 0)
-  return [w2 * r[0] + gx + spinAlpha * r[1], w2 * r[1] + gy - spinAlpha * r[0], 0];
+  const a: Vec3 = [w2 * r[0] + gx + spinAlpha * r[1], w2 * r[1] + gy - spinAlpha * r[0], 0];
+  if (planetGM > 0) {
+    // a planet: real gravity toward its centre, falling off as 1/r^2
+    const d2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+    const k = -planetGM / (d2 * Math.sqrt(d2) || 1);
+    a[0] += k * r[0]; a[1] += k * r[1]; a[2] += k * r[2];
+  }
+  return a;
 }
 
 /**
@@ -95,7 +135,7 @@ export function jacobi(r: Vec3, v: Vec3, omega: number): number {
 
 /** True when free flight is exactly a straight inertial line (analytic path is valid). */
 export function analyticValid(cfg: SimConfig): boolean {
-  return cfg.centrifugal && cfg.coriolis && !cfg.gravity && !cfg.planetPull && spinAlpha === 0 && (cfg.dragType === 'none' || cfg.dragCoeff === 0);
+  return cfg.centrifugal && cfg.coriolis && !cfg.gravity && !cfg.planetPull && spinAlpha === 0 && planetGM === 0 && (cfg.dragType === 'none' || cfg.dragCoeff === 0);
 }
 
 /**
@@ -129,7 +169,7 @@ function applyDrag(v: Vec3, h: number, cfg: SimConfig) {
 
 function kick(r: Vec3, v: Vec3, h: number, omega: number, cfg: SimConfig, support: Vec3 | null, extra: Vec3 | null) {
   const a0 = centrifugalAccel(r, omega, cfg);
-  let ax = a0[0], ay = a0[1], az = 0;
+  let ax = a0[0], ay = a0[1], az = a0[2];
   if (extra) { ax += extra[0]; ay += extra[1]; az += extra[2]; }
   if (support) {
     // Contact constraint: a surface we rest on supplies a normal force that

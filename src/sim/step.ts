@@ -4,7 +4,7 @@
 
 import { clamp, closestOnSeg, segSegClosest, segSphere } from './geom';
 import { levelSdf, liftOffset, sphereTrace, spawnPosition } from './level';
-import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setSpinAlpha, viewVectors } from './physics';
+import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setPlanet, setSpinAlpha, viewVectors } from './physics';
 import { rngInt, rngNext } from './rng';
 import {
   BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
@@ -123,6 +123,7 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   const spin = spinAt(cfg, state.tick);
   const omega = spin.omega;
   setSpinAlpha(spin.alpha);
+  setPlanet(cfg.world === 'planet' ? cfg.g * cfg.R * cfg.R : 0, omega);
   pull = planetPullAt(cfg, state.frameAngle);
   state.events = [];
   moveLifts(state);
@@ -466,12 +467,18 @@ function collideProps(state: SimState) {
 /** Bodies that leave the ring band moving away never come back (straight inertial lines). */
 function despawnIfSpaced(state: SimState, pos: Vec3, vel: Vec3, kill: () => void, margin = 4) {
   const cfg = state.config;
+  if (cfg.world === 'planet') {
+    // gone for good: well out and still climbing (escape speed is only sqrt(2gR))
+    if (Math.hypot(pos[0], pos[1], pos[2]) > 4 * cfg.R && dot(pos, vel) > 0) kill();
+    return;
+  }
   const zLim = cfg.halfWidth + cfg.wallThickness + margin;
   if ((Math.abs(pos[2]) > zLim && pos[2] * vel[2] > 0) || rhoOf(pos) > cfg.R + cfg.hullThickness + margin) kill();
 }
 
 /** Distance by which a point lies outside the ring band (0 if inside it). */
 export function distanceOffRing(cfg: SimConfig, pos: Vec3): number {
+  if (cfg.world === 'planet') return Math.max(0, Math.hypot(pos[0], pos[1], pos[2]) - 3 * cfg.R); // flung off into space
   if (cfg.tube === 'outside') {
     // how far off the log's surface
     return Math.max(0, Math.hypot(rhoOf(pos) - (cfg.R + cfg.tubeRadius), pos[2]) - cfg.tubeRadius);

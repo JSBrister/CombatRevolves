@@ -3,7 +3,7 @@
 
 import type { LevelDef, SimConfig } from '../sim';
 
-export type Shape = 'ring' | 'band' | 'sphere' | 'ridge' | 'torus' | 'halfpipe' | 'log';
+export type Shape = 'ring' | 'band' | 'sphere' | 'ridge' | 'torus' | 'halfpipe' | 'log' | 'planet';
 
 export interface CustomSettings {
   shape: Shape;
@@ -21,6 +21,7 @@ export interface CustomSettings {
   windows: number;
   spinChange: number;
   spinPeriod: number;
+  planetSpin: number; // planet worlds: how much of g the spin cancels at the equator
   planet: number; // planet pull, as a fraction of g
   air: 'none' | 'hazy' | 'thick';
   bots: number;
@@ -30,7 +31,7 @@ export interface CustomSettings {
 
 export const CUSTOM_DEFAULTS: CustomSettings = {
   shape: 'ring', R: 150, width: 25, g: 9.81, walls: 'varied', hills: 0, hillHeight: 8, mountains: 0, mountainHeight: 40,
-  bases: 0, holes: 0, deck: 0, windows: 0, spinChange: 0, spinPeriod: 90, planet: 0, air: 'none', bots: 3, bikes: -1, seed: 1,
+  bases: 0, holes: 0, deck: 0, windows: 0, spinChange: 0, spinPeriod: 90, planetSpin: 0.4, planet: 0, air: 'none', bots: 3, bikes: -1, seed: 1,
 };
 
 type Field =
@@ -39,7 +40,7 @@ type Field =
 
 const FIELDS: Field[] = [
   { key: 'shape', label: 'Shape', options: [['ring', 'Ring (cylinder)'], ['band', 'Sphere band (bowl)'], ['sphere', 'Whole sphere'], ['ridge', 'Ridge (Lambda)'],
-    ['torus', 'Inside a torus'], ['halfpipe', 'Half-pipe (half torus)'], ['log', 'Outside a torus (the log)']] },
+    ['torus', 'Inside a torus'], ['halfpipe', 'Half-pipe (half torus)'], ['log', 'Outside a torus (the log)'], ['planet', 'Outside a planet']] },
   { key: 'R', label: 'Radius (m)', min: 20, max: 3000, step: 5 },
   { key: 'width', label: 'Half-width / tube radius (m)', min: 6, max: 1500, step: 1 },
   { key: 'g', label: 'Gravity at the floor (m/s²)', min: 1, max: 30, step: 0.1 },
@@ -54,6 +55,7 @@ const FIELDS: Field[] = [
   { key: 'windows', label: "O'Neill windows", min: 0, max: 6, step: 1, ringOnly: true },
   { key: 'spinChange', label: 'Spin loss per cycle (1 = stops)', min: 0, max: 1, step: 0.05 },
   { key: 'spinPeriod', label: 'Spin cycle (s)', min: 10, max: 600, step: 5 },
+  { key: 'planetSpin', label: 'Planet: spin (fraction of g at equator)', min: 0, max: 0.95, step: 0.05 },
   { key: 'planet', label: 'Planet pull (fraction of g)', min: 0, max: 0.95, step: 0.05 },
   { key: 'air', label: 'Atmosphere', options: [['none', 'Vacuum'], ['hazy', 'Hazy'], ['thick', 'Thick']] },
   { key: 'bots', label: 'Bots', min: 0, max: 12, step: 1 },
@@ -76,6 +78,7 @@ export function customLevel(s: CustomSettings): LevelDef {
     case 'ridge': c.ridgeHeight = 0.5 * R; c.ridgePlateau = Math.min(12, s.width / 4); break;
     case 'torus': c.tube = 'inside'; c.tubeRadius = Math.min(s.width, 0.45 * R); c.halfWidth = c.tubeRadius; break;
     case 'halfpipe': c.tube = 'half'; c.tubeRadius = Math.min(s.width, 0.45 * R); c.halfWidth = c.tubeRadius; break;
+    case 'planet': c.world = 'planet'; c.planetSpin = s.planetSpin; break;
     case 'log': c.tube = 'outside'; c.tubeRadius = Math.min(s.width, 0.45 * R); c.halfWidth = c.tubeRadius; break;
   }
   if (ring) {
@@ -87,6 +90,7 @@ export function customLevel(s: CustomSettings): LevelDef {
   if (s.air !== 'none') Object.assign(c, { dragType: 'quadratic', dragCoeff: s.air === 'hazy' ? 0.004 : 0.015 });
   return {
     id: 'custom', mode: 'sandbox', name: 'Custom level', seed: s.seed, config: c, bots: s.bots, variedWalls,
+    ...(s.shape === 'planet' ? { props: false } : {}),
     ...(s.bikes >= 0 ? { vehicles: s.bikes } : {}),
     blurb: 'Your own level.',
   };
@@ -119,7 +123,7 @@ export function decodeCustom(str: string): CustomSettings | null {
 /** A fun, sane random level. */
 export function randomCustom(): CustomSettings {
   const r = Math.random, pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
-  const shape = pick<Shape>(['ring', 'ring', 'ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log']);
+  const shape = pick<Shape>(['ring', 'ring', 'ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet']);
   const R = pick([60, 100, 150, 250, 400, 800]);
   const s: CustomSettings = { ...CUSTOM_DEFAULTS, shape, R, seed: 1 + Math.floor(r() * 9999), bots: 2 + Math.floor(r() * 5) };
   s.width = shape === 'log' ? 10 + Math.round(r() * 10) : shape === 'torus' || shape === 'halfpipe' ? 15 + Math.round(r() * 20) : Math.round(20 + r() * Math.min(R, 120));

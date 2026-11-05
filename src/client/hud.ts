@@ -18,7 +18,12 @@ export class Hud {
         (sp.alpha ? ` · SPINNING ${sp.alpha < 0 ? 'DOWN' : 'UP'} · Euler ${(Math.abs(sp.alpha) * cfg.R).toFixed(1)} m/s² ${sp.alpha < 0 ? 'spinward' : 'antispinward'}` : '') +
         '</span><br/>'
       : '';
-    $('ringinfo').innerHTML =
+    const planet = cfg.world === 'planet'
+      ? `Planet R ${cfg.R.toFixed(0)} m · surface g ${cfg.g.toFixed(2)}<br/>` +
+        `spin period ${((2 * Math.PI) / w).toFixed(1)} s · equator weighs ${(100 * (1 - (w * w * cfg.R) / cfg.g)).toFixed(0)}%<br/>` +
+        `orbit ${Math.sqrt(cfg.g * cfg.R).toFixed(1)} m/s · escape ${Math.sqrt(2 * cfg.g * cfg.R).toFixed(1)} m/s (ground moves east at ${(w * cfg.R).toFixed(1)})<br/>`
+      : '';
+    $('ringinfo').innerHTML = planet ? planet + change :
       (cfg.spin
         ? `R ${cfg.R.toFixed(0)} m · g ${cfg.g.toFixed(2)}<br/>` +
           `ω ${w.toFixed(4)} rad/s · period ${w > 1e-6 ? ((2 * Math.PI) / w).toFixed(1) + ' s' : '∞'}<br/>` +

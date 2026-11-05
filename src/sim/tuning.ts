@@ -20,6 +20,8 @@ export const defaultConfig = (): SimConfig => ({
   g: 9.81, // apparent gravity at the floor (m/s^2); spin rate omega = sqrt(g / R)
   halfWidth: 20, // half the ring's width along its axis (m)
   spin: true, // false = no rotation at all (Earth level)
+  world: 'ring', // 'planet' = stand on the outside of a spinning ball (radius R, surface gravity g)
+  planetSpin: 0.4, // planet: the spin cancels this much of g at the equator
   arena: 0, // 0 = whole ring; >0 = a walled stretch this long (m), used by the Earth level
   terrainSphere: false, // true = the floor is a band round the inside of a sphere (bowl-shaped across)
   hills: 0, // number of rolling hills on the floor

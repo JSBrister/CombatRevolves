@@ -75,6 +75,7 @@ export function solveAim(state: SimState, me: Player, target: Player, kind: Bolt
 
 /** How high a player is above the floor beneath them (0 when standing on the floor). */
 function heightAboveFloor(state: SimState, p: Player): number {
+  if (state.level.shape === 'planet') return Math.hypot(p.pos[0], p.pos[1], p.pos[2]) - state.config.R - standHeight(p.size);
   const ang = Math.atan2(p.pos[1], p.pos[0]);
   return floorRadius(state.level, state.config, ang, p.pos[2]) - Math.hypot(p.pos[0], p.pos[1]) - standHeight(p.size);
 }
@@ -110,6 +111,7 @@ interface Nav {
 
 /** Cover when shields are low; ramps up to a target on a lookout. */
 function navigate(state: SimState, me: Player, target: Player): Nav | null {
+  if (state.level.shape === 'planet') return null; // (no ramps or lookouts out there)
   const cfg = state.config;
   const R = cfg.R;
   // --- cover: get a box between you and the target until shields recover past half
@@ -184,7 +186,15 @@ export function botInput(state: SimState, playerId: number): InputCmd {
 
   // Idle: sandbox bots wander (a new waypoint every ~5 s); enemies wait where placed.
   const epoch = Math.floor(tick / 600);
-  if (behaviour === 'wander') {
+  if (behaviour === 'wander' && state.level.shape === 'planet') {
+    // wander: a new heading every ~5 s, over the curve of the planet
+    const b = localBasis(me.pos);
+    const h = hash01(playerId, epoch, 1) * 2 * Math.PI;
+    const wp = addScaled(addScaled(me.pos, b.spin, 30 * Math.cos(h)), b.axial, 30 * Math.sin(h));
+    cmd.yaw = aimAt(me.pos, wp).yaw;
+    cmd.pitch = 0;
+    cmd.moveY = 1;
+  } else if (behaviour === 'wander') {
     const wpAng = Math.atan2(me.pos[1], me.pos[0]) + (hash01(playerId, epoch, 1) - 0.5) * (60 / R);
     const wpZ = (hash01(playerId, epoch, 2) - 0.5) * 30;
     const wp: Vec3 = [R * Math.cos(wpAng), R * Math.sin(wpAng), wpZ];

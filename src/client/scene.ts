@@ -55,6 +55,7 @@ export class RingScene {
     this.inertial.clear();
     this.sky = sky;
     if (sky === 'earth') return this.buildEarth(cfg, level);
+    if (level.shape === 'planet') return this.buildPlanet(cfg, level);
     this.scene.background = new THREE.Color(0x02030a);
     this.ambient.intensity = 0.6;
     this.axisLight.intensity = 0.85;
@@ -175,7 +176,8 @@ export class RingScene {
       if (b.lift) this.liftMeshes.set(b.id, mesh);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      basisMatrix(m, b.angle, 0, 0);
+      if (b.axes) m.makeBasis(new THREE.Vector3(...b.axes[0]), new THREE.Vector3(...b.axes[1]), new THREE.Vector3(...b.axes[2]));
+      else basisMatrix(m, b.angle, 0, 0);
       mesh.quaternion.setFromRotationMatrix(m);
       if (b.yaw) mesh.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -b.yaw));
       if (b.tilt) mesh.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), b.tilt));
@@ -185,7 +187,7 @@ export class RingScene {
     }
 
     // Spawn pads.
-    for (const s of level.spawns) {
+    for (const s of level.shape === 'planet' ? [] : level.spawns) {
       const pad = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), new THREE.MeshBasicMaterial({ color: 0x3fa7ff, transparent: true, opacity: 0.35 }));
       pad.rotateX(-Math.PI / 2);
       const holder = new THREE.Object3D();
@@ -286,6 +288,61 @@ export class RingScene {
     for (let deg = -75; deg <= 75; deg += 15) ring((deg * Math.PI) / 180, deg === 0 ? 0xc9a43a : 0x8a96a8);
     const steep = Math.acos(0.6); // the walkable limit (ground normal within ~53 degrees of "up")
     for (const sg of [-1, 1]) ring(sg * steep, 0xff5a2a);
+  }
+
+  /**
+   * A dense little planet seen from its surface: a textured ball with the
+   * equator and latitude lines painted on (so the curve and the spin read), the
+   * usual sky turning overhead, and the sun.
+   */
+  private buildPlanet(cfg: SimConfig, level: Level) {
+    const R = cfg.R;
+    this.scene.background = new THREE.Color(0x02030a);
+    this.ambient.intensity = 0.55;
+    this.axisLight.intensity = 0;
+    this.sunLight.intensity = 2.8;
+    this.sunLight.castShadow = true;
+    this.sunDir.set(Math.sin(0.5), 0, Math.cos(0.5));
+    this.starRadius = Math.max(4000, R * 20);
+    this.scene.fog = new THREE.Fog(0x0b1020, R * 2, R * 12);
+    const tex = this.textures.grass.clone();
+    tex.needsUpdate = true;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set((2 * Math.PI * R) / 6, (Math.PI * R) / 6);
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(R, 384, 192), new THREE.MeshStandardMaterial({ map: tex, color: 0xb8c8a0, roughness: 0.95, metalness: 0 }));
+    ball.rotation.x = Math.PI / 2; // the sphere's poles on the spin axis (z)
+    ball.receiveShadow = true;
+    this.level.add(ball);
+    const ring = (lat: number, color: number) => {
+      const pts: THREE.Vector3[] = [];
+      const r = (R + 0.04) * Math.cos(lat), z = (R + 0.04) * Math.sin(lat);
+      for (let i = 0; i <= 256; i++) { const a = (i / 256) * Math.PI * 2; pts.push(new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), z)); }
+      this.level.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color })));
+    };
+    for (let deg = -75; deg <= 75; deg += 15) ring((deg * Math.PI) / 180, deg === 0 ? 0xc9a43a : 0x6a7a68);
+    // meridians every 30 degrees, so you can see which way is east
+    for (let k = 0; k < 12; k++) {
+      const lon = (k / 12) * Math.PI * 2, pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= 128; i++) { const lat = -Math.PI / 2 + (i / 128) * Math.PI; pts.push(new THREE.Vector3((R + 0.04) * Math.cos(lat) * Math.cos(lon), (R + 0.04) * Math.cos(lat) * Math.sin(lon), (R + 0.04) * Math.sin(lat))); }
+      this.level.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x6a7a68 })));
+    }
+    // a beacon at each pole
+    for (const sg of [-1, 1]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 1.2, 14, 12), new THREE.MeshStandardMaterial({ color: 0x9aa3ae, emissive: 0x0c1218, metalness: 0.55, roughness: 0.32 }));
+      pole.rotation.x = Math.PI / 2;
+      pole.position.set(0, 0, sg * (R + 7));
+      const lamp = this.makeGlowSprite(0x7fd8ff, 6);
+      lamp.position.set(0, 0, sg * (R + 15));
+      this.level.add(pole, lamp);
+    }
+    this.buildBoxes(cfg, level);
+    this.buildSky(cfg);
+  }
+
+  private makeGlowSprite(color: number, size: number) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glow, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false }));
+    sp.scale.setScalar(size);
+    return sp;
   }
 
   /** A torus: seen from inside (Stanford torus) or outside (the log). */

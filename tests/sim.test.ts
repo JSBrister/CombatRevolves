@@ -1796,7 +1796,7 @@ describe('35. scattergun and Roulette Repeater', () => {
 describe('36. custom levels', () => {
   it('every shape the builder offers makes a working level; links round-trip', async () => {
     const { CUSTOM_DEFAULTS, customLevel, encodeCustom, decodeCustom } = await import('../src/client/custom');
-    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log'] as const) {
+    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet'] as const) {
       const set = { ...CUSTOM_DEFAULTS, shape, R: 200, width: shape === 'log' ? 12 : 30, hills: 6, bases: 1, holes: 4, deck: 9, bots: 2 };
       const { state, localId, botIds } = startLevel(customLevel(set));
       expect(botIds.length).toBe(2);
@@ -1806,5 +1806,75 @@ describe('36. custom levels', () => {
       expect(decodeCustom(encodeCustom(set))).toEqual(set);
     }
     expect(decodeCustom('not base64 at all!')).toBeNull();
+  });
+});
+
+describe('37. a dense, spinning planet', () => {
+  const planet = () => {
+    const { state, localId } = startLevel(levelById('s-world')!);
+    state.players = state.players.filter((p) => p.id === localId);
+    state.level.boxes = [];
+    return { s: state, id: localId, p: state.players[0] };
+  };
+  const toIn = (s: SimState, v: Vec3): Vec3 => { const c = Math.cos(s.frameAngle), sn = Math.sin(s.frameAngle); return [c * v[0] - sn * v[1], sn * v[0] + c * v[1], v[2]]; };
+  it('you weigh g - omega^2 R at the equator and the full g at the poles', () => {
+    const { s, id, p } = planet();
+    const R = s.config.R, w = omegaOf(s.config);
+    const standAt = (lat: number) => {
+      p.pos = [(R + 0.95) * Math.cos(lat), 0, (R + 0.95) * Math.sin(lat)];
+      p.vel = [0, 0, 0];
+      run(s, 240, () => [cmdFor(s, id)]);
+      expect(p.grounded).toBe(true);
+      return p.apparentG;
+    };
+    expect(standAt(0)).toBeCloseTo((s.config.g - w * w * R) / s.config.g, 1); // 0.6
+    expect(standAt(Math.PI / 2 - 0.02)).toBeCloseTo(1, 1);
+    // at 45 degrees "up" leans toward the equator: the spin pushes you off-vertical
+    p.pos = [(R + 0.95) * Math.SQRT1_2, 0, (R + 0.95) * Math.SQRT1_2];
+    const up = localBasis(p.pos).up;
+    const tilt = Math.acos(dot(up, [Math.SQRT1_2, 0, Math.SQRT1_2])) * (180 / Math.PI);
+    expect(tilt).toBeGreaterThan(5);
+    expect(tilt).toBeLessThan(20);
+  });
+  it('fired east at orbital speed, a bolt goes once round the planet and comes back', () => {
+    const { s } = planet();
+    const R = s.config.R, g = s.config.g, w = omegaOf(s.config), r0 = R + 6;
+    const vOrbit = Math.sqrt((g * R * R) / r0);
+    // at the equator, x axis: east is +y; the ground there already moves at w r0
+    const b = spawnBolt(s, -1, 'rifle', [r0, 0, 0], [0, vOrbit - w * r0, 0]);
+    b.expireTick = s.tick + 1e6;
+    const start = toIn(s, b.pos);
+    const T = (2 * Math.PI * r0) / vOrbit;
+    let minAlt = Infinity, maxAlt = 0;
+    for (let i = 0; i < Math.round(T / DT); i++) {
+      step(s, [], s.tick);
+      const d = Math.hypot(...b.pos);
+      minAlt = Math.min(minAlt, d - R); maxAlt = Math.max(maxAlt, d - R);
+    }
+    expect(s.bolts).toContain(b);
+    expect(minAlt).toBeGreaterThan(5.9); // a circle: it never comes down
+    expect(maxAlt).toBeLessThan(6.1);
+    const end = toIn(s, b.pos);
+    expect(Math.hypot(end[0] - start[0], end[1] - start[1], end[2] - start[2])).toBeLessThan(0.5);
+  });
+  it('faster than escape speed and it is gone; a jump at the equator goes higher than at a pole', () => {
+    const { s, id, p } = planet();
+    const R = s.config.R, g = s.config.g, w = omegaOf(s.config);
+    const b = spawnBolt(s, -1, 'rifle', [R + 2, 0, 0], [5, 1.1 * Math.sqrt(2 * g * R) - w * (R + 2), 0]);
+    b.expireTick = s.tick + 1e6;
+    run(s, 120 * 60);
+    expect(s.bolts).not.toContain(b);
+    expect(Math.hypot(...b.pos)).toBeGreaterThan(4 * R);
+    const jump = (lat: number) => {
+      p.pos = [(R + 0.95) * Math.cos(lat), 0, (R + 0.95) * Math.sin(lat)];
+      p.vel = [0, 0, 0];
+      run(s, 120, () => [cmdFor(s, id)]);
+      const r0 = Math.hypot(...p.pos);
+      step(s, [cmdFor(s, id, { buttons: BTN_JUMP })], s.tick);
+      let top = 0;
+      for (let i = 0; i < 360; i++) { step(s, [cmdFor(s, id)], s.tick); top = Math.max(top, Math.hypot(...p.pos) - r0); }
+      return top;
+    };
+    expect(jump(0)).toBeGreaterThan(jump(Math.PI / 2 - 0.05) * 1.4);
   });
 });
