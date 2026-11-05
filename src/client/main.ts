@@ -300,6 +300,7 @@ function handleEvent(e0: SimEvent) {
     case 'stick': sfx.stick(d(e.pos)); break;
     case 'explode': sfx.explode(d(e.pos)); views.explosionFlash(e.pos); break;
     case 'supercombine': views.burst(e.pos, 0xff6ad8, 4); sfx.explode(d(e.pos)); break;
+    case 'pad': views.burst(e.pos, 0x3affc0, 2.5); sfx.shot('hover', d(e.pos)); break;
     case 'hit':
       views.flashHit(e.target);
       if (e.attacker === localId && e.target !== localId) sfx.hit();

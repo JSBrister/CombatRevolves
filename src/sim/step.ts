@@ -197,6 +197,18 @@ function movePlayer(state: SimState, p: Player, omega: number) {
   p.yaw = inp.yaw;
   p.pitch = clamp(inp.pitch, -1.55, 1.55);
   const pressed = inp.buttons & ~p.prevButtons;
+  // launch pads: standing on one throws you (relative to the ground under it)
+  if (p.grounded && state.level.pads) {
+    for (const pad of state.level.pads) {
+      if (dist(p.pos, pad.pos) > 1.2 + standHeight(p.size)) continue;
+      p.vel = addScaled(sub(p.vel, scale(pad.up, dot(p.vel, pad.up))), pad.up, pad.speed);
+      p.grounded = false;
+      p.groundNormal = null;
+      p.lastJumpTick = tick;
+      state.events.push({ type: 'pad', id: p.id, pos: clone(pad.pos) });
+      break;
+    }
+  }
   const vv = viewVectors(p.pos, p.yaw, 0);
   let mx = clamp(inp.moveX, -1, 1), my = clamp(inp.moveY, -1, 1);
   const ml = Math.hypot(mx, my);
@@ -489,6 +501,7 @@ function collideProps(state: SimState) {
 function despawnIfSpaced(state: SimState, pos: Vec3, vel: Vec3, kill: () => void, margin = 4) {
   const cfg = state.config;
   if (cfg.world === 'planet') {
+    if (cfg.outerShell > 0) return; // shut in by the shell: nothing gets away
     // gone for good: well out and still climbing (escape speed is only sqrt(2gR))
     if (Math.hypot(pos[0], pos[1], pos[2]) > 4 * cfg.R && dot(pos, vel) > 0) kill();
     return;
@@ -499,7 +512,7 @@ function despawnIfSpaced(state: SimState, pos: Vec3, vel: Vec3, kill: () => void
 
 /** Distance by which a point lies outside the ring band (0 if inside it). */
 export function distanceOffRing(cfg: SimConfig, pos: Vec3): number {
-  if (cfg.world === 'planet') return Math.max(0, Math.hypot(pos[0], pos[1], pos[2]) - 3 * cfg.R); // flung off into space
+  if (cfg.world === 'planet') return cfg.outerShell > 0 ? 0 : Math.max(0, Math.hypot(pos[0], pos[1], pos[2]) - 3 * cfg.R); // flung off into space
   if (cfg.tube === 'outside') {
     // how far off the log's surface
     return Math.max(0, Math.hypot(rhoOf(pos) - (cfg.R + cfg.tubeRadius), pos[2]) - cfg.tubeRadius);

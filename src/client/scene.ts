@@ -419,8 +419,59 @@ export class RingScene {
       lamp.position.set(0, 0, sg * (R + 15));
       this.level.add(pole, lamp);
     }
+    if (cfg.outerShell > 0) this.buildShell(cfg, level);
     this.buildBoxes(cfg, level);
     this.buildSky(cfg);
+  }
+
+  /**
+   * Nested spheres: the shell round the ball, seen from inside, with latitude
+   * rings and an orange one where it stops being walkable (beyond it gravity
+   * beats the spin and you fall off, down to the ball). No sunlight gets in;
+   * it's lit from within. Plus the launch pads on both surfaces.
+   */
+  private buildShell(cfg: SimConfig, level: Level) {
+    const R2 = cfg.outerShell;
+    this.sunLight.intensity = 0;
+    this.sunLight.castShadow = false;
+    this.ambient.intensity = 1.0;
+    this.scene.fog = new THREE.Fog(0x0b1020, R2 * 1.5, R2 * 6);
+    const tex = this.floorTex('deck');
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set((2 * Math.PI * R2) / 5, (Math.PI * R2) / 5);
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(R2, 256, 128), new THREE.MeshStandardMaterial({ map: tex, color: 0xc8d0dc, side: THREE.BackSide, roughness: 0.85, metalness: 0.2 }));
+    shell.rotation.x = Math.PI / 2;
+    this.level.add(shell);
+    // where the shell stops being walkable: the spin's outward push (w^2 r cos^2 lat) falls below gravity (GM / r^2)
+    const w2 = (cfg.planetSpin * cfg.g) / cfg.R, GM = cfg.g * cfg.R * cfg.R;
+    const c2 = GM / (R2 * R2) / (w2 * R2);
+    const limit = c2 < 1 ? Math.acos(Math.sqrt(c2)) : 0;
+    const ring = (lat: number, color: number) => {
+      const pts: THREE.Vector3[] = [];
+      const r = (R2 - 0.05) * Math.cos(lat), z = (R2 - 0.05) * Math.sin(lat);
+      for (let i = 0; i <= 256; i++) { const a = (i / 256) * Math.PI * 2; pts.push(new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), z)); }
+      this.level.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color })));
+    };
+    for (let deg = -60; deg <= 60; deg += 15) ring((deg * Math.PI) / 180, deg === 0 ? 0xc9a43a : 0x8a96a8);
+    for (const sg of [-1, 1]) ring(sg * limit, 0xff5a2a);
+    // a soft glow from the ball lights the inside
+    const glow = new THREE.PointLight(0xfff2dd, 1.4, 0, 0);
+    this.level.add(glow);
+    // launch pads: a glowing disc and an arrow the way it throws you
+    const padMat = new THREE.MeshBasicMaterial({ color: 0x3affc0, transparent: true, opacity: 0.75, side: THREE.DoubleSide });
+    const arrowMat = new THREE.MeshBasicMaterial({ color: 0xbfffe8 });
+    for (const pad of level.pads ?? []) {
+      const r = Math.hypot(...pad.pos);
+      const n = new THREE.Vector3(...pad.pos).divideScalar(r).multiplyScalar(r > cfg.R + 1 ? -1 : 1); // out of the ground
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), padMat);
+      disc.position.set(...pad.pos).addScaledVector(n, 0.05);
+      disc.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.2, 12), arrowMat);
+      const up = new THREE.Vector3(...pad.up);
+      arrow.position.copy(disc.position).addScaledVector(up, 1.2);
+      arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+      this.level.add(disc, arrow);
+    }
   }
 
   private makeGlowSprite(color: number, size: number) {

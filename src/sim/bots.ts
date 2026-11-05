@@ -76,7 +76,10 @@ export function solveAim(state: SimState, me: Player, target: Player, kind: Bolt
 
 /** How high a player is above the floor beneath them (0 when standing on the floor). */
 function heightAboveFloor(state: SimState, p: Player): number {
-  if (state.level.shape === 'planet') return Math.hypot(p.pos[0], p.pos[1], p.pos[2]) - state.config.R - standHeight(p.size);
+  if (state.level.shape === 'planet') {
+    const r = Math.hypot(p.pos[0], p.pos[1], p.pos[2]), c = state.config;
+    return Math.min(r - c.R, c.outerShell > 0 ? c.outerShell - r : Infinity) - standHeight(p.size);
+  }
   const ang = Math.atan2(p.pos[1], p.pos[0]);
   return floorRadius(state.level, state.config, ang, p.pos[2]) - Math.hypot(p.pos[0], p.pos[1]) - standHeight(p.size);
 }

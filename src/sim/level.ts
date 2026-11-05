@@ -3,7 +3,7 @@
 // are axis-aligned in the local frame of their ring angle.
 
 import { rngNext, rngRange } from './rng';
-import type { Box, Deck, Hole, ItemKind, Level, SimConfig, SpawnPoint } from './types';
+import type { Box, Deck, Hole, ItemKind, Level, Pad, SimConfig, SpawnPoint } from './types';
 import { type Vec3, rhoOf } from './vec';
 import { type ClearZone, edgeHeight, floorRadius, makeHills, makeMountains, terrainAt } from './terrain';
 
@@ -283,6 +283,8 @@ export function levelSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
 function planetSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   const r = Math.hypot(p[0], p[1], p[2]) || 1e-9;
   const out: SdfHit = { d: r - cfg.R, n: [p[0] / r, p[1] / r, p[2] / r] };
+  // the outer shell: solid beyond radius outerShell
+  if (cfg.outerShell > 0 && cfg.outerShell - r < out.d) { out.d = cfg.outerShell - r; out.n = [-p[0] / r, -p[1] / r, -p[2] / r]; }
   for (const b of level.boxes) boxSdf(p, b, out);
   return out;
 }
@@ -296,13 +298,29 @@ export const planetDir = (lon: number, lat: number): Vec3 => [Math.cos(lat) * Ma
  * Spawn points and pickups use (angle = longitude, z = metres north).
  */
 export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacles: boolean, nextId: () => number): Level {
-  const R = cfg.R;
+  const R = cfg.R, R2 = cfg.outerShell;
   const spawns: SpawnPoint[] = [];
-  for (let i = 0; i < 8; i++) spawns.push({ angle: (i / 8) * 2 * Math.PI, z: (i % 2 ? 1 : -1) * 0.12 * R });
+  if (R2 > 0) {
+    // half on the ball, half on the inside of the shell near its equator
+    for (let i = 0; i < 8; i++) spawns.push(i % 2 ? { angle: (i / 8) * 2 * Math.PI, z: 0.08 * R2 * (i % 4 === 1 ? 1 : -1), outer: true } : { angle: (i / 8) * 2 * Math.PI, z: 0.3 * R * (i % 4 === 0 ? 1 : -1) });
+  } else for (let i = 0; i < 8; i++) spawns.push({ angle: (i / 8) * 2 * Math.PI, z: (i % 2 ? 1 : -1) * 0.12 * R });
+  const pads: Pad[] = [];
   const boxes: Box[] = [];
   const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
-  /** A box standing on the ground at (lon, lat), turned `heading` from east; `lift` raises it off the ground. */
-  const stand = (lon: number, lat: number, heading: number, hx: number, hy: number, hz: number, kind: Box['kind'] = 'cover', lift = 0) => {
+  /** A box standing on the ground at (lon, lat), turned `heading` from east; `lift` raises it off the ground. On the shell, it stands on the inside. */
+  const stand = (lon: number, lat: number, heading: number, hx: number, hy: number, hz: number, kind: Box['kind'] = 'cover', lift = 0, outer = false) => {
+    if (outer) {
+      const d = planetDir(lon, lat);
+      const up: Vec3 = [-d[0], -d[1], -d[2]];
+      const east: Vec3 = [-Math.sin(lon), Math.cos(lon), 0];
+      const ch = Math.cos(heading), sh = Math.sin(heading);
+      const north: Vec3 = [-Math.sin(lat) * Math.cos(lon), -Math.sin(lat) * Math.sin(lon), Math.cos(lat)];
+      const X: Vec3 = [ch * east[0] + sh * north[0], ch * east[1] + sh * north[1], ch * east[2] + sh * north[2]];
+      const Z: Vec3 = [X[1] * up[2] - X[2] * up[1], X[2] * up[0] - X[0] * up[2], X[0] * up[1] - X[1] * up[0]];
+      const rc = R2 - lift - hy + 0.2; // (the shell curves up round it: just bury the bottom a little)
+      boxes.push({ id: nextId(), type: 'box', kind, angle: lon, tilt: 0, center: [d[0] * rc, d[1] * rc, d[2] * rc], half: [hx, hy + 0.2, hz], axes: [X, up, Z] });
+      return;
+    }
     const up = planetDir(lon, lat);
     const east: Vec3 = [-Math.sin(lon), Math.cos(lon), 0];
     const north: Vec3 = [-Math.sin(lat) * Math.cos(lon), -Math.sin(lat) * Math.sin(lon), Math.cos(lat)];
@@ -313,11 +331,30 @@ export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacl
     const rc = R + lift + hy - sag;
     boxes.push({ id: nextId(), type: 'box', kind, angle: lon, tilt: 0, center: [up[0] * rc, up[1] * rc, up[2] * rc], half: [hx, hy + sag, hz], axes: [X, up, Z] });
   };
-  const near = (lon: number, lat: number, m: number) =>
+  const near = (lon: number, lat: number, m: number, outer = false) =>
     spawns.some((sp) => {
-      const a = planetDir(sp.angle, sp.z / R), b = planetDir(lon, lat);
-      return Math.acos(Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])) * R < m;
+      if (!!sp.outer !== outer) return false;
+      const rr = outer ? R2 : R;
+      const a = planetDir(sp.angle, sp.z / rr), b = planetDir(lon, lat);
+      return Math.acos(Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])) * rr < m;
+    }) || pads.some((pd) => {
+      const b = planetDir(lon, lat), r = Math.hypot(...pd.pos);
+      return (r > (R + R2) / 2) === outer && Math.acos(Math.min(1, (pd.pos[0] * b[0] + pd.pos[1] * b[1] + pd.pos[2] * b[2]) / r)) * r < m;
     });
+  if (R2 > 0) {
+    // Launch pads round both equators: up from the ball, down from the shell.
+    // Straight up doesn't work: Coriolis turns the climb into an antispinward
+    // slide, and arriving at the shell moving against the spin you're too light
+    // to stay on it. So they throw you about 29 degrees spinward (from the ball)
+    // or antispinward (from the shell). 22 m/s gets you across either way.
+    const tilt = 0.5, speed = 22;
+    for (let i = 0; i < 6; i++) {
+      const lon = ((i + 0.5) / 6) * 2 * Math.PI, d = planetDir(lon, 0), east: Vec3 = [-Math.sin(lon), Math.cos(lon), 0];
+      pads.push({ pos: [d[0] * R, d[1] * R, d[2] * R], up: [d[0] * Math.cos(tilt) + east[0] * Math.sin(tilt), d[1] * Math.cos(tilt) + east[1] * Math.sin(tilt), 0], speed });
+      const lo = lon + Math.PI / 6, e = planetDir(lo, 0), ee: Vec3 = [-Math.sin(lo), Math.cos(lo), 0];
+      pads.push({ pos: [e[0] * R2, e[1] * R2, e[2] * R2], up: [-e[0] * Math.cos(tilt) - ee[0] * Math.sin(tilt), -e[1] * Math.cos(tilt) - ee[1] * Math.sin(tilt), 0], speed });
+    }
+  }
   if (withObstacles) {
     const area = 4 * Math.PI * R * R;
     const n = Math.max(20, Math.min(260, Math.round(area / 900)));
@@ -332,6 +369,18 @@ export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacl
       else if (kind < 0.9) stand(lon, lat, heading, rngRange(rng, 1, 2), rngRange(rng, 0.4, 0.8) * k, rngRange(rng, 1, 2)); // crate
       else stand(lon, lat, heading, 1.6, rngRange(rng, 4, 8) * k, 1.6, 'struct'); // tower
     }
+    if (R2 > 0) {
+      // cover on the inside of the shell, in the band you can stand on (within ~45 degrees of its equator)
+      const n2 = Math.round((4 * Math.PI * R2 * R2 * 0.7) / 1400);
+      for (let i = 0; i < n2; i++) {
+        const lon = rngNext(rng) * 2 * Math.PI, lat = Math.asin(rngRange(rng, -0.68, 0.68));
+        if (near(lon, lat, 6, true)) continue;
+        const kind = rngNext(rng), heading = rngNext(rng) * Math.PI;
+        if (kind < 0.5) stand(lon, lat, heading, rngRange(rng, 1, 2.5), rngRange(rng, 0.5, 0.9), rngRange(rng, 0.3, 0.6), 'struct', 0, true);
+        else if (kind < 0.8) stand(lon, lat, Math.PI / 4, 1.1, rngRange(rng, 1.5, 3), 1.1, 'struct', 0, true);
+        else stand(lon, lat, heading, rngRange(rng, 1, 2), rngRange(rng, 0.4, 0.8), rngRange(rng, 1, 2), 'cover', 0, true);
+      }
+    }
     // pickups on a spiral round the planet (evenly spread)
     const items: ItemKind[] = ['health', 'sticky', 'redRifle', 'bounce', 'launcher', 'scatter', 'jetpack', 'cannon', 'rocket', 'health', 'chaos', 'revolver', 'seeker', 'laconic'];
     const m = items.length;
@@ -340,9 +389,13 @@ export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacl
       if (near(lon, lat, 4)) continue;
       const d = planetDir(lon, lat);
       pickupSpots.push({ pos: [d[0] * (R + 1), d[1] * (R + 1), d[2] * (R + 1)], item: items[i] });
+      if (R2 > 0 && Math.abs(lat) < 0.7 && !near(lon + 1, lat, 4, true)) {
+        const e = planetDir(lon + 1, lat);
+        pickupSpots.push({ pos: [e[0] * (R2 - 1), e[1] * (R2 - 1), e[2] * (R2 - 1)], item: items[(i + 5) % m] });
+      }
     }
   }
-  return { shape: 'planet', terrain: null, boxes, stairTops: [], spawns, pickupSpots, vehicleSpots: [], wallPos: [], wallNeg: [] };
+  return { shape: 'planet', terrain: null, boxes, stairTops: [], spawns, pickupSpots, vehicleSpots: [], wallPos: [], wallNeg: [], ...(pads.length ? { pads } : {}) };
 }
 
 function ringSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
@@ -822,6 +875,10 @@ export const STAIR_TOP = 6; // lookout platform length
 
 export function spawnPosition(cfg: SimConfig, s: SpawnPoint, heightAboveFloor: number, level?: Level): Vec3 {
   if (cfg.world === 'planet') {
+    if (s.outer && cfg.outerShell > 0) {
+      const d = planetDir(s.angle, s.z / cfg.outerShell), r = cfg.outerShell - heightAboveFloor;
+      return [d[0] * r, d[1] * r, d[2] * r];
+    }
     const d = planetDir(s.angle, s.z / cfg.R);
     const r = cfg.R + heightAboveFloor;
     return [d[0] * r, d[1] * r, d[2] * r];

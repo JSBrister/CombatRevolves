@@ -191,6 +191,8 @@ export const LEVELS: LevelDef[] = [
     blurb: 'A 150 m ball with full gravity, spinning fast: you weigh 60% at the equator and 100% at the poles. Orbit is 38 m/s; throw a grenade east hard enough and it comes back round behind you.' },
   { id: 's-twin', mode: 'sandbox', name: 'Twin Rings (counter-rotating)', seed: 46, config: { R: 60, halfWidth: 30, twin: true }, variedWalls: false, bots: 4,
     blurb: 'Two rings side by side spinning opposite ways. The other ring\'s floor goes past at 49 m/s: shots across the seam swerve, and stepping over is a ride. Near the axis the speeds match.' },
+  { id: 's-spheres', mode: 'sandbox', name: 'Nested Spheres (ball inside a shell)', seed: 48, config: { world: 'planet', R: 60, g: 9.81, planetSpin: 0.3, outerShell: 120 }, props: false, bots: 4,
+    blurb: 'A dense ball inside a spinning shell. On the ball, gravity wins: 1 g at the poles, 0.7 g at its equator. On the inside of the shell, the spin wins near its equator (0.35 g, outward). Halfway up you weigh nothing. Launch pads throw you across.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
     blurb: '140 m across: room to flank, and to watch your shots curve sideways.' },
   { id: 's-planet', mode: 'sandbox', name: 'Skyhook (planet below)', seed: 34, config: { R: 100, planetPull: 8.8, planetAngle: Math.PI }, bots: 2,
@@ -204,7 +206,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 

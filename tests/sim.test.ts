@@ -1796,7 +1796,7 @@ describe('35. scattergun and Roulette Repeater', () => {
 describe('36. custom levels', () => {
   it('every shape the builder offers makes a working level; links round-trip', async () => {
     const { CUSTOM_DEFAULTS, customLevel, encodeCustom, decodeCustom } = await import('../src/client/custom');
-    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'twin'] as const) {
+    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'nested', 'twin'] as const) {
       const set = { ...CUSTOM_DEFAULTS, shape, R: 200, width: shape === 'log' ? 12 : 30, hills: 6, bases: 1, holes: 4, deck: 9, bots: 2 };
       const { state, localId, botIds } = startLevel(customLevel(set));
       expect(botIds.length).toBe(2);
@@ -1994,5 +1994,55 @@ describe('39. revolver and the homing overcharge', () => {
     };
     expect(shoot(false)).toBe(false);
     expect(shoot(true)).toBe(true);
+  });
+});
+
+describe('40. nested spheres', () => {
+  const nested = () => {
+    const { state, localId } = startLevel(levelById('s-spheres')!);
+    state.players = state.players.filter((p) => p.id === localId);
+    state.level.boxes = [];
+    return { s: state, id: localId, p: state.players[0] };
+  };
+  const put = (p: { pos: Vec3; vel: Vec3 }, r: number, lat: number, lon = 0.4) => { // (lon 0.4: clear of the launch pads)
+    p.pos = [r * Math.cos(lat) * Math.cos(lon), r * Math.cos(lat) * Math.sin(lon), r * Math.sin(lat)];
+    p.vel = [0, 0, 0];
+  };
+  it('gravity wins on the ball, the spin wins on the inside of the shell (near its equator)', () => {
+    const { s, id, p } = nested();
+    const R = s.config.R, R2 = s.config.outerShell, g = s.config.g, w = omegaOf(s.config), GM = g * R * R;
+    const weigh = (r: number, lat: number) => { put(p, r, lat); run(s, 240, () => [cmdFor(s, id)]); expect(p.grounded).toBe(true); return p.apparentG; };
+    expect(weigh(R + 0.95, Math.PI / 2 - 0.05)).toBeCloseTo(1, 1);
+    expect(weigh(R + 0.95, 0)).toBeCloseTo((g - w * w * R) / g, 1); // ~0.7
+    expect(weigh(R2 - 0.95, 0)).toBeCloseTo((w * w * R2 - GM / (R2 * R2)) / g, 1); // ~0.35, outward
+    // between them is the synchronous radius, where you'd weigh nothing
+    const rs = Math.cbrt(GM / (w * w));
+    expect(rs).toBeGreaterThan(R + 20);
+    expect(rs).toBeLessThan(R2 - 20);
+  });
+  it("too far from the shell's equator and you fall off it, down to the ball", () => {
+    const { s, id, p } = nested();
+    put(p, s.config.outerShell - 0.95, (65 * Math.PI) / 180);
+    let minR = Infinity;
+    for (let i = 0; i < 120 * 20; i++) { step(s, [cmdFor(s, id)], s.tick); minR = Math.min(minR, Math.hypot(...p.pos)); }
+    expect(minR).toBeLessThan(s.config.R + 2);
+  });
+  it('the launch pads throw you from the ball to the shell, and from the shell back down to the ball', () => {
+    for (const fromBall of [true, false]) {
+      const { s, id, p } = nested();
+      const R = s.config.R, R2 = s.config.outerShell;
+      const pad = s.level.pads!.find((pd) => (Math.hypot(...pd.pos) < (R + R2) / 2) === fromBall)!;
+      const rr = Math.hypot(...pad.pos);
+      p.pos = addScaled(pad.pos, scale(pad.pos, fromBall ? 1 / rr : -1 / rr), 0.95); // standing on it
+      p.vel = [0, 0, 0];
+      let landed = false;
+      for (let i = 0; i < 120 * 30 && !landed; i++) {
+        step(s, [cmdFor(s, id)], s.tick);
+        const r = Math.hypot(...p.pos);
+        landed = p.grounded && (fromBall ? r > (R + R2) / 2 : r < (R + R2) / 2);
+      }
+      expect(landed).toBe(true);
+      expect(p.alive).toBe(true);
+    }
   });
 });

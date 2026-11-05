@@ -21,7 +21,9 @@ export class Hud {
     const planet = cfg.world === 'planet'
       ? `Planet R ${cfg.R.toFixed(0)} m · surface g ${cfg.g.toFixed(2)}<br/>` +
         `spin period ${((2 * Math.PI) / w).toFixed(1)} s · equator weighs ${(100 * (1 - (w * w * cfg.R) / cfg.g)).toFixed(0)}%<br/>` +
-        `orbit ${Math.sqrt(cfg.g * cfg.R).toFixed(1)} m/s · escape ${Math.sqrt(2 * cfg.g * cfg.R).toFixed(1)} m/s (ground moves east at ${(w * cfg.R).toFixed(1)})<br/>`
+        (cfg.outerShell > 0
+          ? `shell r ${cfg.outerShell.toFixed(0)} m · weightless at r ${Math.cbrt((cfg.g * cfg.R * cfg.R) / (w * w)).toFixed(0)} m · shell equator ${(100 * (w * w * cfg.outerShell - (cfg.g * cfg.R * cfg.R) / cfg.outerShell ** 2) / cfg.g).toFixed(0)}%<br/>`
+          : `orbit ${Math.sqrt(cfg.g * cfg.R).toFixed(1)} m/s · escape ${Math.sqrt(2 * cfg.g * cfg.R).toFixed(1)} m/s (ground moves east at ${(w * cfg.R).toFixed(1)})<br/>`)
       : '';
     const twin = cfg.twin && me
       ? `<span style="color:${me.pos[2] >= 0 ? '#ff9a3a' : '#3ac8ff'}">TWIN RINGS · you're on ring ${me.pos[2] >= 0 ? 'B (orange)' : 'A (blue)'}; the other one's floor passes at ${(2 * w * cfg.R).toFixed(0)} m/s</span><br/>`

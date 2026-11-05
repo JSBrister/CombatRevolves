@@ -14,6 +14,7 @@ export interface SimConfig {
   spin: boolean; // false: the world doesn't rotate at all (Earth)
   world: 'ring' | 'planet'; // 'planet': you stand on the OUTSIDE of a spinning ball of radius R, with gravity g toward its centre
   planetSpin: number; // planet: how much of g the spin cancels at the equator (0..1); sets the spin rate
+  outerShell: number; // planet: >0 = a hollow shell of this radius round the ball, walkable on its inside near its equator
   twin: boolean; // two rings side by side spinning opposite ways (z < 0 at +omega, z > 0 at -omega), a gap at the seam
   twinGap: number; // width of the gap between them (m)
   arena: number; // 0 = the whole ring is playable; >0 = only this many metres of it (end walls), e.g. Earth
@@ -454,6 +455,14 @@ export interface Box {
 export interface SpawnPoint {
   angle: number;
   z: number;
+  outer?: boolean; // planet with an outer shell: on the inside of the shell rather than on the ball
+}
+
+/** A launch pad: step on it and it throws you along `up` at `speed` (relative to the ground). */
+export interface Pad {
+  pos: Vec3; // centre, on the ground
+  up: Vec3;
+  speed: number;
 }
 
 /**
@@ -497,6 +506,8 @@ export interface Level {
   windows?: { angle: number; halfArc: number }[];
   /** Upper decks: a thin floor at radius r (its walking surface), with openings. */
   decks?: Deck[];
+  /** Launch pads. */
+  pads?: Pad[];
   boxes: Box[];
   stairTops: Vec3[]; // a floor point on each staircase's lookout (add stand height to place a player)
   spawns: SpawnPoint[];
@@ -522,6 +533,7 @@ export type SimEvent =
   | { type: 'vehicleHit'; id: number; damage: number; pos: Vec3 }
   | { type: 'vehicleDestroyed'; id: number; pos: Vec3 }
   | { type: 'supercombine'; id: number; pos: Vec3 }
+  | { type: 'pad'; id: number; pos: Vec3 }
   | { type: 'melee'; id: number; target: number; pos: Vec3; mallet: boolean; from: Vec3; aim: Vec3; up: Vec3; reach: number; cone: number }
   | { type: 'pickup'; id: number; item: ItemKind; player: number; pos: Vec3 }
   | { type: 'overheat'; id: number }

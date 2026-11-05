@@ -22,6 +22,7 @@ export const defaultConfig = (): SimConfig => ({
   spin: true, // false = no rotation at all (Earth level)
   world: 'ring', // 'planet' = stand on the outside of a spinning ball (radius R, surface gravity g)
   planetSpin: 0.4, // planet: the spin cancels this much of g at the equator
+  outerShell: 0, // planet: radius of a hollow shell round it (0 = none)
   twin: false, // two counter-rotating rings side by side
   twinGap: 1.2, // the gap at the seam between them (m)
   arena: 0, // 0 = whole ring; >0 = a walled stretch this long (m), used by the Earth level
