@@ -240,7 +240,8 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
     pickups: def.pickups ?? true,
     mode: def.mode,
     levelId: def.id,
-    vehicles: def.vehicles,
+    // campaign levels keep a few bikes (the deathmatch swarm is for free-for-alls)
+    vehicles: def.vehicles ?? (campaign ? ((def.config.R ?? 0) >= (baseConfig.vehicleMinRadius ?? defaults.vehicleMinRadius) ? 4 : 0) : undefined),
   });
   const cfg = state.config;
   // default start: angle 0, or near one end of an arena (so the enemies are ahead of you)

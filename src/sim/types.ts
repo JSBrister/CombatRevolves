@@ -115,9 +115,15 @@ export interface SimConfig {
   bikeDamping: number; // fraction of speed lost per second while ridden
   bikeHop: number; // m/s
   bikeBounce: number; // restitution of the bike's collisions
-  bikeCrashSpeed: number; // wall/box impacts faster than this damage the bike
+  bikeCrashSpeed: number; // wall/box impacts faster than this damage the bike (landings never do)
   bikeCrashDamage: number; // per m/s above that
-  bikeLandingSpeed: number; // floor-like impacts only damage it above this
+  bikeGrip: number; // sideways grip (1/s)
+  bikeHoverHeight: number;
+  bikeHoverStiffness: number;
+  bikeHoverDamping: number;
+  bikeHoverReach: number;
+  bikeRamThrow: number;
+  bikeRamLift: number;
   bikeRamSpeed: number; // closing speed above which a bike hurts whoever it hits
   bikeRamDamage: number; // per m/s above that
   bikeRespawn: number; // s

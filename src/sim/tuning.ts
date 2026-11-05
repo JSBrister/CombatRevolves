@@ -109,20 +109,26 @@ export const defaultConfig = (): SimConfig => ({
   respawnTime: 3, // (s) sandbox only; campaign has no respawns
   // --- hover-bikes (E to ride) -----------------------------------------------------
   vehicleMinRadius: 150, // only rings at least this big get bikes
-  vehicleSpacing: 400, // one bike per this many metres of ring (max 10)
+  vehicleSpacing: 120, // one bike per this many metres of ring (max 60), plus one by each spawn point
   bikeHealth: 450,
-  bikeThrust: 18, // m/s^2 (W/S)
+  bikeThrust: 20, // m/s^2 (W/S)
   bikeStrafe: 8, // m/s^2 (A/D)
   bikeMaxSpeed: 40, // m/s: throttle stops adding speed beyond this (the spin can add more!)
-  bikeDamping: 0.08, // fraction of speed lost per second while ridden (it's frictionless otherwise)
-  bikeHop: 6, // Space while riding (m/s)
-  bikeBounce: 0.55, // restitution: how much of an impact it bounces back (0 = dead stop, 1 = perfect bounce)
-  bikeCrashSpeed: 14, // hitting a wall or box faster than this damages the bike...
+  bikeDamping: 0.08, // /s: how fast rolling forward dies away while ridden
+  bikeGrip: 3.5, // /s: how fast sliding sideways dies away (so it carves round corners)
+  bikeHop: 7, // Space while riding (m/s)
+  bikeHoverHeight: 1.1, // m from the bike's centre to the ground it floats over
+  bikeHoverStiffness: 150, // spring (1/s^2) holding it there (stiff enough for Coriolis-heavy turns)...
+  bikeHoverDamping: 20, // ...and its damping (1/s): soaks up bumps and landings
+  bikeHoverReach: 2.4, // m: within this of the ground it hovers (and you can steer); further up it's flying
+  bikeBounce: 0.4, // restitution off walls and boxes
+  bikeCrashSpeed: 40, // only crashes into walls or boxes faster than this hurt the bike (landings never do)...
   bikeCrashDamage: 6, // ...this much per m/s above it
-  bikeLandingSpeed: 30, // landings (floor, ramps, hills) only hurt it above this: jump away
   // The rider never takes crash or landing damage: only the explosion if the bike is destroyed.
-  bikeRamSpeed: 6, // running someone over faster than this hurts them
-  bikeRamDamage: 6, // per m/s of closing speed above it
+  bikeRamSpeed: 3, // running someone over faster than this hurts them...
+  bikeRamDamage: 9, // ...this much per m/s of closing speed above it
+  bikeRamThrow: 0.6, // and throws them along the bike's path (x closing speed)...
+  bikeRamLift: 0.35, // ...and up (3 m/s + this x closing speed)
   bikeRespawn: 20, // s before a destroyed bike reappears at its spot
   bikeBlastRadius: 6, // when a bike blows up
   bikeBlastDamage: 70,

@@ -175,7 +175,7 @@ export function addVehicle(state: SimState, pos: Vec3, yaw: number): number {
   state.vehicles.push({
     id, type: 'vehicle', kind: 'bike', pos: [...pos] as Vec3, vel: [0, 0, 0], yaw, radius: BIKE_RADIUS,
     health: hp, maxHealth: hp, driver: -1, alive: true, respawnTick: 0, home: [...pos] as Vec3, homeYaw: yaw,
-    contactNormal: null, lastAttacker: -1, lastDamageTick: -1e9,
+    contactNormal: localBasis(pos).up, lastAttacker: -1, lastDamageTick: -1e9, // (parked: asleep until disturbed)
   });
   return id;
 }

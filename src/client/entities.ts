@@ -119,7 +119,7 @@ export class EntityViews {
   props = new Map<number, THREE.Mesh>();
   explosions = new Map<number, THREE.Group>();
   pickups = new Map<number, PickupView>();
-  vehicles = new Map<number, { group: THREE.Group; glow: THREE.Sprite }>();
+  vehicles = new Map<number, { group: THREE.Group; glow: THREE.Sprite; prevYaw: number; lean: number }>();
   /** First-person gun, attached to the camera (main view only). */
   viewModel = new THREE.Group();
   private viewWeapon = -1;
@@ -594,7 +594,7 @@ export class EntityViews {
         glow.material.opacity = 0.5;
         group.add(makeBike(), glow);
         this.root.add(group);
-        vw = { group, glow };
+        vw = { group, glow, prevYaw: veh.yaw, lean: 0 };
         this.vehicles.set(veh.id, vw);
       }
       vw.group.visible = veh.alive;
@@ -604,7 +604,17 @@ export class EntityViews {
       m.makeBasis(new THREE.Vector3(...b.spin), new THREE.Vector3(...b.up), new THREE.Vector3(...b.axial));
       q.setFromRotationMatrix(m);
       qy.setFromAxisAngle(Y, -veh.yaw);
-      vw.group.quaternion.copy(q).multiply(qy);
+      // tilt with the ground it's hovering over, and lean into turns
+      const ground = veh.contactNormal ? this.toView(veh.contactNormal as Vec3, this.viewTheta) : null;
+      const tiltQ = new THREE.Quaternion();
+      if (ground) tiltQ.setFromUnitVectors(new THREE.Vector3(...b.up), new THREE.Vector3(...ground).normalize());
+      let dyaw = veh.yaw - vw.prevYaw;
+      dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+      vw.prevYaw = veh.yaw;
+      const speed = Math.hypot(...veh.vel);
+      const leanTarget = dtReal > 0 ? Math.max(-0.6, Math.min(0.6, (dyaw / dtReal) * speed * 0.035)) : 0;
+      vw.lean += (leanTarget - vw.lean) * Math.min(1, dtReal * 6);
+      vw.group.quaternion.copy(tiltQ).multiply(q).multiply(qy).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), vw.lean));
       vw.group.position.set(pos[0], pos[1], pos[2]);
       vw.glow.material.opacity = veh.driver >= 0 ? 0.65 + 0.2 * Math.sin(performance.now() * 0.03) : 0.35;
     }

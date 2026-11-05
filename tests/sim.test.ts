@@ -1205,19 +1205,51 @@ describe('26. hover-bikes', () => {
   it('slamming into a wall hurts the bike (not the rider), and it bounces', () => {
     const { s, id, p, v } = bikeWorld();
     step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
-    // hurl it across the ring at the rim wall at 35 m/s
-    v.vel = [0, 0, 35 * Math.sign(-v.pos[2] || 1) * -1];
-    v.vel = [0, 0, v.pos[2] > 0 ? 35 : -35];
-    const hp0 = v.health, me0 = p.health + p.shield;
-    let bounced = false;
-    for (let i = 0; i < 240; i++) {
-      step(s, [cmdFor(s, id)], s.tick);
-      if (v.vel[2] * (v.pos[2] > 0 ? 1 : -1) < -10) bounced = true;
-    }
-    expect(v.health).toBeLessThan(hp0);
+    // ride it straight at the rim wall (facing it, so it's all forward speed)
+    const sgn = v.pos[2] > 0 ? 1 : -1;
+    const yaw = sgn * Math.PI / 2;
+    const crash = (speed: number) => {
+      v.pos = addScaled(v.home, localBasis(v.home).up, 0.2);
+      v.vel = [0, 0, sgn * speed];
+      v.health = v.maxHealth;
+      let bounced = false;
+      for (let i = 0; i < 120; i++) {
+        step(s, [cmdFor(s, id, { yaw })], s.tick);
+        if (v.vel[2] * sgn < -5) bounced = true;
+      }
+      return { lost: v.maxHealth - v.health, bounced };
+    };
+    const me0 = p.health + p.shield;
+    const gentle = crash(30);
+    expect(gentle.lost).toBe(0); // only *very* fast crashes hurt it
+    expect(gentle.bounced).toBe(true);
+    const hard = crash(70);
+    expect(hard.lost).toBeGreaterThan(0);
     expect(v.alive).toBe(true); // tough enough to survive one big crash
     expect(p.health + p.shield).toBe(me0);
-    expect(bounced).toBe(true);
+  });
+  it('it hovers: driving over flat floor it never touches the ground', () => {
+    const { s, id, v } = bikeWorld();
+    step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
+    const R = s.config.R;
+    let lowest = Infinity;
+    for (let i = 0; i < 120 * 4; i++) {
+      step(s, [cmdFor(s, id, { yaw: v.homeYaw, moveY: 1 })], s.tick);
+      if (i > 120) lowest = Math.min(lowest, R - Math.hypot(v.pos[0], v.pos[1]));
+    }
+    expect(lowest).toBeGreaterThan(v.radius + 0.05); // riding above its collision sphere's reach
+    expect(Math.hypot(...v.vel)).toBeGreaterThan(20);
+  });
+  it('sideways slides die away quickly; rolling forward barely slows', () => {
+    const { s, id, v } = bikeWorld();
+    step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
+    run(s, 60, () => [cmdFor(s, id, { yaw: 0 })]);
+    const b = localBasis(v.pos);
+    v.vel = add(scale(b.spin, 20), scale(b.axial, 10)); // facing spinward, sliding sideways at 10
+    run(s, 120, () => [cmdFor(s, id, { yaw: 0 })]);
+    const b2 = localBasis(v.pos);
+    expect(Math.abs(dot(v.vel, b2.axial))).toBeLessThan(1);
+    expect(dot(v.vel, b2.spin)).toBeGreaterThan(17);
   });
   it('landing a big jump does not hurt the bike or the rider', () => {
     const { s, id, p, v } = bikeWorld();
@@ -1246,6 +1278,33 @@ describe('26. hover-bikes', () => {
     expect(hurt).toBe(true);
     expect(Math.hypot(...ped.vel)).toBeGreaterThan(8);
   });
+  it('even a slow bike (6 m/s) hurts a pedestrian and throws them', () => {
+    const { s, id, v } = bikeWorld();
+    const pid = addPlayer(s, 'human', 'Pedestrian');
+    const ped = s.players.find((q) => q.id === pid)!;
+    step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
+    const b = localBasis(v.pos);
+    ped.pos = addScaled(add(v.pos, scale(b.spin, 3)), b.up, 0.1);
+    ped.vel = [0, 0, 0];
+    v.vel = scale(b.spin, 6);
+    let hurt = false;
+    for (let i = 0; i < 120 && !hurt; i++) {
+      step(s, [cmdFor(s, id, { yaw: 0 }), cmdFor(s, pid)], s.tick);
+      hurt = s.events.some((e) => e.type === 'hit' && e.target === pid);
+    }
+    expect(hurt).toBe(true);
+    expect(Math.hypot(...ped.vel)).toBeGreaterThan(6);
+    expect(Math.hypot(...v.vel)).toBeGreaterThan(4); // the bike barely notices
+  });
+  it('big levels have plenty of bikes, one by every spawn point', () => {
+    const { state } = startLevel(levelById('s-huge')!);
+    expect(state.vehicles.length).toBeGreaterThan(40);
+    for (const sp of state.level.spawns) {
+      const a = sp.angle, r = floorRadius(state.level, state.config, a, sp.z) - 1; // (spawns can be up a mountain)
+      const at: Vec3 = [r * Math.cos(a), r * Math.sin(a), sp.z];
+      expect(state.vehicles.some((v) => dist(v.pos, at) < 8)).toBe(true);
+    }
+  });
   it('a destroyed bike explodes, throws the rider off, and comes back later', () => {
     const { s, id, p, v } = bikeWorld();
     step(s, [cmdFor(s, id, { buttons: BTN_USE })], s.tick);
@@ -1264,10 +1323,11 @@ describe('26. hover-bikes', () => {
     const { s, v } = bikeWorld();
     const hp0 = v.health;
     const b = localBasis(v.pos);
-    spawnBolt(s, -1, 'cannon', add(v.pos, scale(b.axial, -6)), scale(b.axial, 200));
+    const c = v.pos[2] < 0 ? 1 : -1; // fire from the middle of the ring (bikes can park near a wall)
+    spawnBolt(s, -1, 'cannon', add(v.pos, scale(b.axial, 6 * c)), scale(b.axial, -200 * c));
     run(s, 10);
     expect(v.health).toBeLessThan(hp0);
-    const g = spawnGrenade(s, -1, add(v.pos, scale(b.axial, -4)), scale(b.axial, 30));
+    const g = spawnGrenade(s, -1, add(v.pos, scale(b.axial, 4 * c)), scale(b.axial, -30 * c));
     run(s, 20);
     expect(g.stuck?.kind).toBe('vehicle');
   });

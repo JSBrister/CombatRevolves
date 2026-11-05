@@ -680,12 +680,22 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       if (taken) continue;
       pickupSpots.push({ pos: at(a, 1, 0), item: floorItems[fi++ % floorItems.length] });
     }
-    // Hover-bikes on big rings, parked between spawn points.
-    const nBikes = vehicleCount >= 0 ? vehicleCount : cfg.R >= cfg.vehicleMinRadius ? Math.min(10, Math.floor(circ / cfg.vehicleSpacing)) : 0;
+    // Hover-bikes on big rings: plenty of them, spread round and across the
+    // floor, plus one parked beside every spawn point.
+    const bikesHere = vehicleCount >= 0 || cfg.R >= cfg.vehicleMinRadius;
+    const nBikes = vehicleCount >= 0 ? vehicleCount : bikesHere ? Math.min(60, Math.floor(circ / cfg.vehicleSpacing)) : 0;
+    const zSpread = Math.max(5, Math.min(cfg.halfWidth - 6, 400));
+    const parkHeight = Math.max(BIKE_RADIUS, cfg.bikeHoverHeight - cfg.g / cfg.bikeHoverStiffness); // where the hover spring holds it
     for (let i = 0; i < nBikes; i++) {
       const a = arcAngle(cfg, (i + 0.3) / nBikes);
-      const z = i % 2 ? 5 : -5;
-      vehicleSpots.push({ pos: at(a, BIKE_RADIUS, z), yaw: i % 2 ? Math.PI : 0 });
+      const z = nBikes > 10 ? (((i * 0.618034) % 1) * 2 - 1) * zSpread : i % 2 ? 5 : -5;
+      vehicleSpots.push({ pos: at(a, parkHeight, z), yaw: i % 2 ? Math.PI : 0 });
+    }
+    if (bikesHere && vehicleCount < 0) {
+      for (const sp of spawns) {
+        const a = sp.angle + 5 / R, z = sp.z + (sp.z > 0 ? -3 : 3);
+        vehicleSpots.push({ pos: at(a, parkHeight, z), yaw: 0 });
+      }
     }
     // Bases: a room with doorways and chamfered (45 degree) corners, a roof you
     // reach by ramps, and low walls up there for partial cover.
