@@ -260,8 +260,23 @@ export const ENEMY_TYPES: Record<string, EnemyType> = {
     grenades: 0, bounceGrenades: 2, behaviour: 'chase', range: 35, aimError: 0.08, aimSkill: 0.5,
   },
   heavy: {
-    name: 'Heavy', color: 0x3a8a4a, size: 1.5, health: 250, shield: 100, speedScale: 0.45, weapon: 'launcher',
+    name: 'Heavy', color: 0xe8e6dc, size: 1.5, health: 250, shield: 100, speedScale: 0.45, weapon: 'launcher',
     grenades: 0, bounceGrenades: 0, behaviour: 'chase', range: 45, aimError: 0.05, aimSkill: 0.85,
+  },
+  // a crack shot with a plain revolver: slow, deliberate, deadly at range
+  gunslinger: {
+    name: 'Gunslinger', color: 0xf0c830, size: 0.95, health: 80, shield: 40, speedScale: 0.9, weapon: 'revolver',
+    grenades: 0, bounceGrenades: 1, behaviour: 'strafe', range: 60, aimError: 0.03, aimSkill: 0.9,
+  },
+  // charges you with a Grav Mallet
+  brute: {
+    name: 'Brute', color: 0x26282e, size: 1.25, health: 160, shield: 60, speedScale: 1.1, weapon: 'hammer',
+    grenades: 0, bounceGrenades: 0, behaviour: 'chase', range: 40, aimError: 0.05, aimSkill: 0,
+  },
+  // fires Torch Rockets
+  rocketeer: {
+    name: 'Rocketeer', color: 0x2a4ab0, size: 1.05, health: 100, shield: 60, speedScale: 0.7, weapon: 'rocket',
+    grenades: 1, bounceGrenades: 0, behaviour: 'strafe', range: 55, aimError: 0.05, aimSkill: 0,
   },
   sniper: {
     name: 'Sniper', color: 0x3ad0d0, size: 0.95, health: 60, shield: 30, speedScale: 0, weapon: 'cannon',

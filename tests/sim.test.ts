@@ -856,8 +856,10 @@ describe('20. levels and campaign', () => {
         expect(p.pos.every(Number.isFinite)).toBe(true);
         expect(p.grounded).toBe(true);
       }
-      const snipers = state.players.filter((p) => p.enemyType === 'sniper');
-      for (const sn of snipers) expect(state.config.R - Math.hypot(sn.pos[0], sn.pos[1])).toBeGreaterThan(5);
+      // snipers placed on a lookout are up on it
+      const onLookouts = (def.enemies ?? []).filter((e) => e.type === 'sniper' && e.stair !== undefined).length;
+      const high = state.players.filter((p) => p.enemyType === 'sniper' && state.config.R - Math.hypot(p.pos[0], p.pos[1]) > 5).length;
+      expect(high).toBeGreaterThanOrEqual(onLookouts);
     }
   });
   it('campaign: enemies cannot hurt each other, only you', () => {
@@ -1062,12 +1064,12 @@ describe('22. Earth: the no-spin reference level', () => {
     for (let i = 0; i < 400; i++) { step(s, [cmdFor(s, id)], s.tick); apex = Math.max(apex, r0 - Math.hypot(p.pos[0], p.pos[1])); }
     expect(Math.abs(apex - s.config.jumpSpeed ** 2 / (2 * g))).toBeLessThan(0.05);
   });
-  it('the arena is walled in and the Boot Camp level plays', () => {
+  it('the arena is walled in and the Shore Leave level plays', () => {
     const { s } = earth();
     expect(s.level.boxes.filter((b) => b.kind === 'wall').length).toBe(2);
     for (const sp of s.level.spawns) expect(Math.abs(sp.angle * s.config.R)).toBeLessThan(s.config.arena / 2);
     const { state, localId, botIds } = startLevel(levelById('c0')!);
-    expect(botIds.length).toBe(3);
+    expect(botIds.length).toBe(levelById('c0')!.enemies!.length);
     run(state, 600, (st) => [cmdFor(st, localId), ...botIds.map((b) => botInput(st, b))]);
     for (const q of state.players) expect(q.pos.every(Number.isFinite)).toBe(true);
   });

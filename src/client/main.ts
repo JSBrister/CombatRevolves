@@ -459,6 +459,14 @@ function frame(now: number) {
   }
 
   checkOutcome(now);
+  // this level's tips, one after another (each stays up until the next, at most 9 s)
+  const tips = currentLevel.tips ?? [];
+  const tNow = state.tick * DT;
+  let tip = '';
+  for (let i = 0; i < tips.length; i++) if (tNow >= tips[i].at && tNow < Math.min(tips[i].at + 9, tips[i + 1]?.at ?? Infinity)) tip = tips[i].text;
+  const tipEl = $('tip');
+  if (tip && tipEl.textContent !== tip) tipEl.textContent = tip;
+  tipEl.classList.toggle('on', !!tip && screen === 'playing');
   // (on ring 1 of the twin rings, spinward is the other way round)
   hud.update(state, me, { yaw: input.yaw + (vf ? Math.PI : 0), timeScale: view.timeScale, paused: view.paused, freefly: view.freefly, sprintOn: input.sprintOn, showScores: input.keys.has('Tab') });
   requestAnimationFrame(frame);

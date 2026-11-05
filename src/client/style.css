@@ -93,3 +93,9 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 .custom-row output { font-family: ui-monospace, monospace; color: #f2c94c; text-align: right; }
 .custom-row.disabled { opacity: 0.35; }
 @media (max-width: 520px) { .custom-row { grid-template-columns: 1fr 96px 44px; } }
+
+/* level tips (the first campaign level teaches the game with these) */
+#tip { position: absolute; top: 108px; left: 50%; transform: translateX(-50%); width: min(640px, calc(100% - 32px)); text-align: center;
+  font-size: 15px; line-height: 1.45; color: #e8f6ff; background: rgba(8, 16, 32, 0.72); border: 1px solid var(--hud-dim);
+  padding: 8px 14px; opacity: 0; transition: opacity 0.4s; pointer-events: none; }
+#tip.on { opacity: 1; }

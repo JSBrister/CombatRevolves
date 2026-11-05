@@ -100,7 +100,20 @@ The deathmatch list groups the oversized levels (radius or half-width of 500 m o
 - **Shadows:** one shadow-casting sun that follows the camera. On rings the sun is fixed relative to the stars, 40° off the axis, so in the ring's frame it circles once per spin: each spot gets a day, with long shadows sweeping round, and a night.
 - **Atmosphere** is off everywhere except the *Hazy ring* sandbox level (quadratic drag relative to the air, which moves with the floor).
 - **Levels** are data (`levels.ts`): a ring size and seed fix the layout; enemies are placed by angle and z, or on a ramp's lookout platform; a placement that lands inside cover is nudged clear. `level.shape` is the seam for other kinds of world (only `'ring'` exists): the collision shape, force field and renderer switch on it.
-- **Campaign levels 7 and 8:** *Double Trouble* (Swarmers with seekers on an upper deck) and *Log Jam* (a fight on the outside of a tube, where enemies sometimes blow themselves off).
+- **Campaign:** fourteen levels.
+  - The first, *Basic Training*, teaches the game with timed tips: down is outward, shots curve (the preview shows it), running against the spin makes you lighter. It leaves a revolver about to compare with plasma.
+  - The rest are for fun, each with its own gimmick: a tiny fast ring, snipers on lookouts, heavies, hills, *Roadkill* (bases and hover-bikes), the double deck, the log, brawlers in a tube, the power cut, a dense planet, the twin rings, the nested spheres, and Earth to finish.
+  - Each level chooses its own pickups (`items`): no jetpack or superweapon where it would make no sense. Enemies drop their guns.
+  - Enemy types:
+    - Grunt (orange, pistol)
+    - Soldier (purple, rifle)
+    - Skirmisher (red, overclocked rifle)
+    - Heavy (white, fuel rod)
+    - Sniper (cyan, cannon)
+    - Swarmer (pink, seekers)
+    - Gunslinger (yellow, revolver)
+    - Brute (black, Grav Mallet)
+    - Rocketeer (blue, rockets)
 - **Campaign rules:** teams (you vs enemies) with friendly fire off, no respawns, won when every enemy is dead, lost when you die. Enemy types differ in size (their hitbox scales too), colour, health, speed, weapon, range, accuracy and behaviour (chase, strafe, hold).
 - **Ring size** scales the map: rim walls are capped at 40% of the radius, ramps and cover shrink on small rings.
 - **Obstacle boxes** are axis-aligned in the *local frame* of their ring angle, not in world XYZ. World-aligned boxes would sit crooked on a curved floor.

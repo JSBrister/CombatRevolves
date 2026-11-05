@@ -14,7 +14,7 @@
 import { localBasis } from './physics';
 import { spawnPosition } from './level';
 import { ENEMY_TYPES, defaultConfig } from './tuning';
-import { WEAPON_IDS, type GameMode, type SimConfig, type SimState } from './types';
+import { WEAPON_IDS, type GameMode, type ItemKind, type SimConfig, type SimState } from './types';
 import { type Vec3, addScaled } from './vec';
 import { addPlayer, createState, freeSpotNear, standHeight } from './world';
 
@@ -25,6 +25,7 @@ export interface EnemySpawn {
   z?: number; // metres across the ring
   stair?: number; // or: stand on this staircase's lookout
   deck?: boolean; // stand on the upper deck (at angle/along, z) instead of the floor
+  outer?: boolean; // nested spheres: on the inside of the shell (z = metres north of its equator)
 }
 
 export interface LevelDef {
@@ -42,6 +43,14 @@ export interface LevelDef {
   start?: { angle: number; z: number }; // degrees, metres (default 0, 0)
   sky?: 'space' | 'earth'; // what the client draws around the level (default space)
   enemies?: EnemySpawn[]; // campaign
+  /**
+   * Which pickups this level offers (the generated spots get these, in turn);
+   * [] = none. Default: whatever the layout generates. Enemies' weapons drop
+   * when they die whatever this says.
+   */
+  items?: ItemKind[];
+  /** Tips shown one after another at the start (seconds from the start, text). */
+  tips?: { at: number; text: string }[];
 }
 
 /**
@@ -53,10 +62,21 @@ const EARTH: Partial<SimConfig> = { R: 100000, spin: false, gravity: 9.81, arena
 
 export const LEVELS: LevelDef[] = [
   // ------------------------------------------------------------ campaign
+  // The first level teaches what the game is about; the rest are for fun, each
+  // with its own gimmick. Pickups are chosen per level (enemies drop their guns).
   {
-    id: 'c1', mode: 'campaign', name: 'First Contact', seed: 101,
-    blurb: 'A standard 100 m ring. Four grunts and a soldier. Mind the Coriolis drift on your shots.',
+    id: 'c1', mode: 'campaign', name: 'Basic Training', seed: 101,
+    blurb: 'A standard 100 m ring and a few grunts. Learn how a spinning world bends your shots, your jumps and your grenades.',
     config: { R: 100 },
+    items: ['health', 'revolver', 'sticky', 'health', 'bounce'],
+    tips: [
+      { at: 0.5, text: 'This ring spins. "Down" is outward, so the floor curves UP ahead of you and behind.' },
+      { at: 8, text: 'Hold RIGHT MOUSE to see where a shot will really go: shots curve (Coriolis). Spinward ones dip; antispinward ones climb.' },
+      { at: 17, text: 'Run against the spin (away from the arrow at the top) and you weigh less: jump! Run with it and you weigh more.' },
+      { at: 26, text: 'Grenades curve too: hold G (sticky) or F (bouncing) to aim, release to throw.' },
+      { at: 35, text: 'There is a revolver lying about: a normal, very fast gun. See how little its bullets curve compared with plasma.' },
+      { at: 44, text: 'Kill every enemy to clear the level. Up close, Q is a shove.' },
+    ],
     enemies: [
       { type: 'grunt', angle: 20, z: -6 }, { type: 'grunt', angle: 24, z: 6 },
       { type: 'grunt', angle: -25, z: 0 }, { type: 'grunt', angle: 60, z: 10 },
@@ -65,45 +85,39 @@ export const LEVELS: LevelDef[] = [
   },
   {
     id: 'c2', mode: 'campaign', name: 'Tight Spin', seed: 202,
-    blurb: 'A 40 m ring that turns every 12.7 s. Everything curves hard, including you.',
+    blurb: 'A 40 m ring that turns every 12.7 s. Everything curves hard, including you. Close quarters: grab the scattergun.',
     config: { R: 40 },
+    items: ['scatter', 'health', 'bounce'],
     enemies: [
       { type: 'grunt', angle: 45, z: -8 }, { type: 'grunt', angle: 90, z: 8 }, { type: 'grunt', angle: 180, z: 0 },
-      { type: 'grunt', angle: 270, z: -8 }, { type: 'skirmisher', angle: 135, z: 0 },
+      { type: 'grunt', angle: 270, z: -8 }, { type: 'skirmisher', angle: 135, z: 0 }, { type: 'brute', angle: 220, z: 4 },
     ],
   },
   {
     id: 'c3', mode: 'campaign', name: 'Overwatch', seed: 303,
-    blurb: 'A 150 m ring. Snipers hold two lookouts; soldiers patrol below. Lasers barely curve.',
+    blurb: 'A 150 m ring. Snipers hold two lookouts; a gunslinger and soldiers patrol below. A jetpack helps you get up there.',
     config: { R: 150 },
+    items: ['health', 'jetpack', 'sticky', 'health'],
     enemies: [
       { type: 'sniper', stair: 0 }, { type: 'sniper', stair: 1 },
-      { type: 'soldier', angle: 25, z: 8 }, { type: 'soldier', angle: 50, z: -8 }, { type: 'soldier', angle: -40, z: 0 },
+      { type: 'soldier', angle: 25, z: 8 }, { type: 'gunslinger', angle: 50, z: -8 }, { type: 'soldier', angle: -40, z: 0 },
     ],
   },
   {
     id: 'c4', mode: 'campaign', name: 'Heavy Rotation', seed: 404,
-    blurb: 'A 60 m ring with two fuel-rod heavies. Their blasts will knock you clean off the edge.',
+    blurb: 'A 60 m ring with two fuel-rod heavies. Their blasts will knock you clean off the edge. Take their launchers.',
     config: { R: 60 },
+    items: ['health', 'sticky', 'bounce'],
     enemies: [
       { type: 'heavy', angle: 90, z: -5 }, { type: 'heavy', angle: 200, z: 5 },
       { type: 'soldier', angle: 45, z: 8 }, { type: 'skirmisher', angle: 140, z: -8 },
     ],
   },
   {
-    id: 'c5', mode: 'campaign', name: 'The Big Wheel', seed: 505,
-    blurb: 'A 400 m ring: near-flat, slow spin, long sightlines. Everyone is here.',
-    config: { R: 400 },
-    enemies: [
-      { type: 'grunt', angle: 6, z: -8 }, { type: 'grunt', angle: 7, z: 8 }, { type: 'soldier', angle: 12, z: 0 },
-      { type: 'skirmisher', angle: -10, z: 5 }, { type: 'sniper', stair: 0 }, { type: 'sniper', stair: 3 },
-      { type: 'heavy', angle: 25, z: 0 }, { type: 'soldier', angle: 35, z: -10 }, { type: 'grunt', angle: -20, z: -5 },
-    ],
-  },
-  {
     id: 'c6', mode: 'campaign', name: 'Hill Country', seed: 606,
     blurb: 'A 200 m ring of rolling hills, 100 m wide. Hold the high ground; mind the grenades rolling down it.',
     config: { R: 200, halfWidth: 50, hills: 26, hillHeight: 9 },
+    items: ['health', 'bounce', 'cannon', 'sticky'],
     enemies: [
       { type: 'soldier', along: 40, z: -15 }, { type: 'soldier', along: 55, z: 20 }, { type: 'grunt', along: 35, z: 5 },
       { type: 'grunt', along: 38, z: -5 }, { type: 'heavy', along: 90, z: 0 }, { type: 'skirmisher', along: -45, z: 10 },
@@ -111,9 +125,22 @@ export const LEVELS: LevelDef[] = [
     ],
   },
   {
+    id: 'c10', mode: 'campaign', name: 'Roadkill', seed: 1010,
+    blurb: 'A wide 300 m ring of bases, with hover-bikes parked about. Bikes shrug off crashes; pedestrians do not.',
+    config: { R: 300, halfWidth: 50, bases: 3, hills: 8, hillHeight: 5 }, vehicles: 10,
+    items: ['health', 'rocket', 'revolver', 'health'],
+    tips: [{ at: 1, text: 'E gets on a hover-bike (W to go, Space to hop). Running enemies over is very effective.' }],
+    enemies: [
+      { type: 'grunt', along: 50, z: -10 }, { type: 'grunt', along: 55, z: 12 }, { type: 'soldier', along: 90, z: 0 },
+      { type: 'rocketeer', along: 140, z: -15 }, { type: 'grunt', along: -60, z: 8 }, { type: 'soldier', along: -100, z: -12 },
+      { type: 'gunslinger', along: 200, z: 20 }, { type: 'heavy', along: 260, z: 0 },
+    ],
+  },
+  {
     id: 'c7', mode: 'campaign', name: 'Double Trouble', seed: 707,
-    blurb: 'A ring with an upper deck. Swarmers up top fire homing seekers; get under the deck, or up the ramps and in close.',
+    blurb: 'A ring with an upper deck. Swarmers up top fire homing seekers; get under the deck, or up the lifts and ramps and in close.',
     config: { R: 150, halfWidth: 25, deckHeight: 10 }, vehicles: 0,
+    items: ['health', 'scatter', 'sticky', 'rocket'],
     enemies: [
       { type: 'grunt', along: 30, z: -6 }, { type: 'grunt', along: 34, z: 6 }, { type: 'soldier', along: 60, z: 0 },
       { type: 'swarmer', along: 45, z: 5, deck: true }, { type: 'swarmer', along: -50, z: -5, deck: true },
@@ -124,15 +151,30 @@ export const LEVELS: LevelDef[] = [
     id: 'c8', mode: 'campaign', name: 'Log Jam', seed: 808,
     blurb: 'Fighting on the outside of a spinning tube, 28 m across. Every hit knocks someone toward the edge, including you.',
     config: { R: 100, halfWidth: 14, tube: 'outside', tubeRadius: 14 },
+    items: ['bounce', 'health', 'hammer'],
+    tips: [{ at: 1, text: 'Bouncing grenades and the Grav Mallet knock people off the log. So does everything else, to you.' }],
     enemies: [
       { type: 'grunt', along: 25, z: 0 }, { type: 'grunt', along: 28, z: 2 }, { type: 'skirmisher', along: -30, z: -2 },
-      { type: 'soldier', along: 55, z: 0 }, { type: 'swarmer', along: -60, z: 0 }, { type: 'heavy', along: 100, z: 0 },
+      { type: 'soldier', along: 55, z: 0 }, { type: 'brute', along: -60, z: 0 }, { type: 'heavy', along: 100, z: 0 },
+    ],
+  },
+  {
+    id: 'c11', mode: 'campaign', name: 'Tube Fight', seed: 1111,
+    blurb: 'Inside a 30 m tube: the floor curves up into the ceiling. Brutes with Grav Mallets come at you round the walls.',
+    config: { R: 120, halfWidth: 15, tube: 'inside', tubeRadius: 15 },
+    items: ['hammer', 'scatter', 'health', 'bounce'],
+    enemies: [
+      { type: 'brute', along: 30, z: 0 }, { type: 'grunt', along: 35, z: 4 }, { type: 'grunt', along: 38, z: -4 },
+      { type: 'brute', along: -40, z: 2 }, { type: 'skirmisher', along: 70, z: 0 }, { type: 'brute', along: 110, z: -2 },
+      { type: 'soldier', along: -90, z: 0 },
     ],
   },
   {
     id: 'c9', mode: 'campaign', name: 'Power Cut', seed: 909,
     blurb: 'The spin motors keep failing: every 60 s the ring winds down to a fifth of its spin, then back up. Low g is coming; so is the Euler shove.',
     config: { R: 120, spinChange: 0.8, spinPeriod: 60 },
+    items: ['health', 'jetpack', 'launcher', 'sticky'],
+    tips: [{ at: 1, text: 'Watch the spin readout (top left). When it winds down you weigh almost nothing: jump and float.' }],
     enemies: [
       { type: 'grunt', along: 25, z: -5 }, { type: 'grunt', along: 28, z: 5 }, { type: 'soldier', along: 45, z: 0 },
       { type: 'skirmisher', along: -35, z: 6 }, { type: 'swarmer', along: 70, z: -4 }, { type: 'heavy', along: 100, z: 0 },
@@ -140,11 +182,54 @@ export const LEVELS: LevelDef[] = [
     ],
   },
   {
+    id: 'c12', mode: 'campaign', name: 'Planetfall', seed: 1212,
+    blurb: 'A 150 m planet with full gravity, spinning fast. Gunslingers and rocketeers are spread round it; the horizon is very close.',
+    config: { world: 'planet', R: 150, g: 9.81, planetSpin: 0.4 }, props: false,
+    items: ['health', 'rocket', 'cannon', 'chaos', 'sticky', 'health'],
+    tips: [{ at: 1, text: 'The ground moves east at 24 m/s and orbit is 38 m/s: throw a grenade hard east and it comes back round.' }],
+    enemies: [
+      { type: 'grunt', along: 30, z: 5 }, { type: 'grunt', along: 34, z: -5 }, { type: 'gunslinger', along: 70, z: 20 },
+      { type: 'rocketeer', along: -60, z: -10 }, { type: 'soldier', along: 150, z: 30 }, { type: 'gunslinger', along: 300, z: -40 },
+      { type: 'rocketeer', along: 470, z: 10 }, { type: 'heavy', along: 600, z: 0 },
+    ],
+  },
+  {
+    id: 'c13', mode: 'campaign', name: 'Counter-Spin', seed: 1313,
+    blurb: 'Two rings spinning opposite ways. Their snipers and gunslingers are on the other one, whose floor goes past at 49 m/s.',
+    config: { R: 60, halfWidth: 30, twin: true }, variedWalls: false,
+    items: ['health', 'revolver', 'cannon', 'health'],
+    tips: [
+      { at: 1, text: 'Shots that cross the seam swerve: in the other ring\'s frame they are moving sideways at 49 m/s.' },
+      { at: 10, text: 'You can cross over too, but its floor will grab you at 49 m/s. Mind the gap: it is a long way down.' },
+    ],
+    enemies: [
+      { type: 'grunt', along: 20, z: -12 }, { type: 'grunt', along: -25, z: -18 },
+      { type: 'sniper', along: 60, z: 18 }, { type: 'gunslinger', along: 120, z: 12 }, { type: 'sniper', along: 220, z: 20 },
+      { type: 'soldier', along: 170, z: 14 }, { type: 'skirmisher', along: 290, z: 16 },
+    ],
+  },
+  {
+    id: 'c14', mode: 'campaign', name: 'Inside Out', seed: 1414,
+    blurb: 'A dense ball inside a spinning shell. Swarmers walk the inside of the shell above you; the green pads throw you up to them.',
+    config: { world: 'planet', R: 60, g: 9.81, planetSpin: 0.3, outerShell: 120 }, props: false,
+    items: ['health', 'seeker', 'bounce', 'revolver'],
+    tips: [{ at: 1, text: 'Green pads throw you across to the shell. Up there the spin holds you on, but only near its equator: past the orange rings you fall back down.' }],
+    enemies: [
+      { type: 'grunt', along: 25, z: 5 }, { type: 'grunt', along: -30, z: -5 }, { type: 'soldier', along: 80, z: 10 },
+      { type: 'swarmer', along: 60, z: 5, outer: true }, { type: 'swarmer', along: 260, z: -8, outer: true },
+      { type: 'rocketeer', along: 450, z: 0, outer: true }, { type: 'brute', along: 150, z: -15 },
+    ],
+  },
+  {
     id: 'c0', mode: 'campaign', name: 'Shore Leave (Earth)', seed: 11, sky: 'earth', variedWalls: false,
-    blurb: 'Back on Earth: flat ground, normal gravity, no spin. Three grunts. Everything you learned up there is now subtly wrong.',
+    blurb: 'Back on Earth: flat ground, normal gravity, no spin. Everything you learned up there is now subtly wrong.',
     config: { ...EARTH },
     start: { angle: 0, z: 0 },
-    enemies: [{ type: 'grunt', along: 25, z: -10 }, { type: 'grunt', along: 35, z: 8 }, { type: 'grunt', along: 45, z: 0 }],
+    items: ['health', 'revolver', 'rocket'],
+    enemies: [
+      { type: 'grunt', along: 25, z: -10 }, { type: 'grunt', along: 35, z: 8 }, { type: 'grunt', along: 45, z: 0 },
+      { type: 'gunslinger', along: 90, z: 20 }, { type: 'rocketeer', along: 120, z: -20 },
+    ],
   },
   // ------------------------------------------------------------ sandbox
   { id: 's-standard', mode: 'sandbox', name: 'Standard ring (100 m)', seed: 1234, config: { R: 100 }, bots: 3,
@@ -244,6 +329,11 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
     vehicles: def.vehicles ?? (campaign ? ((def.config.R ?? 0) >= (baseConfig.vehicleMinRadius ?? defaults.vehicleMinRadius) ? 4 : 0) : undefined),
   });
   const cfg = state.config;
+  // this level's choice of pickups
+  if (def.items) {
+    const items = def.items;
+    state.pickups = items.length ? state.pickups.map((pk, i) => ({ ...pk, item: items[i % items.length] })) : [];
+  }
   // default start: angle 0, or near one end of an arena (so the enemies are ahead of you)
   const start = def.start ?? { angle: cfg.arena > 0 ? ((-cfg.arena / 2 + 8) / cfg.R) * (180 / Math.PI) : 0, z: cfg.twin ? -cfg.halfWidth / 2 : 0 };
   const startAngle = (start.angle * Math.PI) / 180;
@@ -286,6 +376,12 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
         const r = dk.r - standHeight(t.size);
         p.pos = freeSpotNear(state, [r * Math.cos(a), r * Math.sin(a), e.z ?? 0], t.size);
         p.yaw = (e.along ?? e.angle ?? 0) > 0 ? Math.PI : 0;
+        botIds.push(id);
+        continue;
+      }
+      if (e.outer && cfg.outerShell > 0) {
+        const lon = startAngle + (e.along !== undefined ? e.along / cfg.outerShell : ((e.angle ?? 0) * Math.PI) / 180);
+        p.pos = freeSpotNear(state, spawnPosition(cfg, { angle: lon, z: e.z ?? 0, outer: true }, standHeight(t.size), state.level), t.size);
         botIds.push(id);
         continue;
       }
