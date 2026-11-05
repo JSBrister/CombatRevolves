@@ -1792,3 +1792,19 @@ describe('35. scattergun and Roulette Repeater', () => {
     expect(a).toEqual(b);
   });
 });
+
+describe('36. custom levels', () => {
+  it('every shape the builder offers makes a working level; links round-trip', async () => {
+    const { CUSTOM_DEFAULTS, customLevel, encodeCustom, decodeCustom } = await import('../src/client/custom');
+    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log'] as const) {
+      const set = { ...CUSTOM_DEFAULTS, shape, R: 200, width: shape === 'log' ? 12 : 30, hills: 6, bases: 1, holes: 4, deck: 9, bots: 2 };
+      const { state, localId, botIds } = startLevel(customLevel(set));
+      expect(botIds.length).toBe(2);
+      run(state, 120, (s) => [cmdFor(s, localId), ...botIds.map((b) => botInput(s, b))]);
+      for (const p of state.players) expect(p.pos.every(Number.isFinite)).toBe(true);
+      expect(state.players.find((p) => p.id === localId)!.grounded).toBe(true);
+      expect(decodeCustom(encodeCustom(set))).toEqual(set);
+    }
+    expect(decodeCustom('not base64 at all!')).toBeNull();
+  });
+});

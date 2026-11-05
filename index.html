@@ -45,6 +45,7 @@
     <div class="buttons">
       <button data-mode="campaign">Campaign</button>
       <button data-mode="sandbox">Deathmatch</button>
+      <button id="btn-custom">Build a level</button>
     </div>
     <div class="controls">
       <div><b>WASD</b> move</div><div><b>Shift</b> toggle sprint (on)</div>
@@ -63,6 +64,18 @@
     <h2 id="levels-title"></h2>
     <div id="level-list"></div>
     <div class="buttons"><button id="btn-back">Back</button></div>
+  </div>
+
+  <div id="custom" class="overlay menu hidden">
+    <h2>BUILD A LEVEL</h2>
+    <div id="custom-form"></div>
+    <div class="buttons">
+      <button id="btn-custom-play">Play</button>
+      <button id="btn-custom-random">Surprise me</button>
+      <button id="btn-custom-link">Copy link</button>
+      <button id="btn-custom-back">Back</button>
+    </div>
+    <div id="custom-note" class="note"></div>
   </div>
 
   <div id="pause" class="overlay hidden">

@@ -46,6 +46,17 @@ Items float at fixed spots (respawning after 25 s): health, sticky and bouncing 
 special weapons, and a jetpack (about 4 s of thrust). Picking up something you already have refills it; if it would do
 nothing, it stays put. When a player dies they drop their special weapons, jetpack and grenades, which last 30 s.
 
+## Build a level
+
+*Build a level* on the title screen gives you the level generator as a form:
+- The shape: ring, sphere band, whole sphere, ridge, inside a torus, half-pipe, or the log.
+- Size, width and gravity, and the rim walls.
+- What's on the floor: hills, mountains, bases, holes, an upper deck and O'Neill windows.
+- The world: a changing spin, a planet's pull, air.
+- Bots, bikes and a layout seed.
+
+*Surprise me* rolls a random one. *Copy link* copies a URL that rebuilds the same level for anyone who opens it; only the settings that differ from the defaults go in it. The code is in `src/client/custom.ts`, and its output is an ordinary level definition.
+
 ## Where to tweak things
 
 | File | What's in it |

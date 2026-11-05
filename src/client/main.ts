@@ -8,6 +8,7 @@ import {
   type BoltKind, type GameMode, type InputCmd, type ItemKind, type LevelDef, type ThrownKind, type SimConfig, type SimEvent, type SimState, type Vec3,
 } from '../sim';
 import { Sfx } from './audio';
+import { CUSTOM_DEFAULTS, buildCustomForm, customLevel, decodeCustom, encodeCustom, randomCustom, type CustomSettings } from './custom';
 import { BOLT_COLORS, EntityViews, type PosMap } from './entities';
 import { Hud } from './hud';
 import { InputSampler } from './input';
@@ -447,17 +448,17 @@ window.addEventListener('resize', resize);
 // Screens: title -> level list -> playing <-> paused, and the campaign's
 // win/lose screen. Playing == pointer locked: losing the lock (Esc) pauses and
 // shows the debug panel.
-type Screen = 'title' | 'levels' | 'playing' | 'paused' | 'outcome';
+type Screen = 'title' | 'levels' | 'custom' | 'playing' | 'paused' | 'outcome';
 let screen: Screen = 'title';
 let outcomeAt = 0; // when the campaign outcome was first seen (performance.now)
 const $ = (id: string) => document.getElementById(id)!;
-const overlays: Record<string, HTMLElement> = { title: $('loading'), levels: $('levels'), paused: $('pause'), outcome: $('outcome') };
+const overlays: Record<string, HTMLElement> = { title: $('loading'), levels: $('levels'), custom: $('custom'), paused: $('pause'), outcome: $('outcome') };
 document.querySelector('#pause .controls')!.innerHTML = document.querySelector('#loading .controls')!.innerHTML;
 
 function show(next: Screen) {
   screen = next;
   for (const [k, el] of Object.entries(overlays)) el.classList.toggle('hidden', k !== next);
-  $('hud').classList.toggle('hidden', next === 'title' || next === 'levels');
+  $('hud').classList.toggle('hidden', next === 'title' || next === 'levels' || next === 'custom');
   $('build').classList.toggle('hidden', next === 'playing');
   view.paused = next !== 'playing';
   if (next === 'paused') gui.show();
@@ -523,6 +524,32 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('#loading button[da
   b.addEventListener('click', () => showLevels(b.dataset.mode as GameMode));
 }
 $('btn-back').addEventListener('click', () => show('title'));
+
+// Build a level: the form, a random one, and a link that rebuilds it.
+let custom: CustomSettings = { ...CUSTOM_DEFAULTS };
+function showCustom(s: CustomSettings) {
+  custom = s;
+  buildCustomForm($('custom-form'), custom, (ns) => { custom = ns; $('custom-note').textContent = ''; });
+  $('custom-note').textContent = '';
+  show('custom');
+}
+$('btn-custom').addEventListener('click', () => showCustom(custom));
+$('btn-custom-back').addEventListener('click', () => show('title'));
+$('btn-custom-random').addEventListener('click', () => showCustom(randomCustom()));
+$('btn-custom-play').addEventListener('click', () => {
+  rOverride = null;
+  history.replaceState(null, '', `#custom=${encodeCustom(custom)}`);
+  startGame(customLevel(custom));
+  requestPlay();
+});
+$('btn-custom-link').addEventListener('click', () => {
+  const url = `${location.origin}${location.pathname}#custom=${encodeCustom(custom)}`;
+  history.replaceState(null, '', `#custom=${encodeCustom(custom)}`);
+  navigator.clipboard?.writeText(url).then(
+    () => { $('custom-note').textContent = 'Link copied: anyone who opens it gets this level.'; },
+    () => { $('custom-note').textContent = url; },
+  ) ?? ($('custom-note').textContent = url);
+});
 $('btn-resume').addEventListener('click', requestPlay);
 $('btn-restart').addEventListener('click', () => { newWorld(); requestPlay(); });
 $('btn-menu').addEventListener('click', () => show('title'));
@@ -558,6 +585,11 @@ $('build').textContent = `build ${__BUILD_ID__}`;
 startGame(currentLevel); // backdrop behind the title screen
 resize();
 show('title');
+// a shared custom-level link opens the builder with its settings
+if (location.hash.startsWith('#custom=')) {
+  const s = decodeCustom(location.hash.slice('#custom='.length));
+  if (s) showCustom(s);
+}
 requestAnimationFrame((t) => {
   last = t;
   frame(t);

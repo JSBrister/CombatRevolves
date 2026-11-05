@@ -82,3 +82,14 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 #build { position: fixed; left: 10px; bottom: 8px; z-index: 6; font: 11px ui-monospace, monospace; color: rgba(159, 230, 255, 0.45); pointer-events: none; }
 #build.hidden { display: none; }
 .lil-gui.root.hidden-gui { display: none; }
+
+/* custom level builder */
+#custom { background: rgba(2, 3, 10, 0.85); justify-content: flex-start; }
+#custom > * { flex-shrink: 0; }
+#custom-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 6px 18px; width: min(960px, 100%); margin: 8px 0 12px; text-align: left; }
+.custom-row { display: grid; grid-template-columns: 1fr 120px 52px; align-items: center; gap: 8px; font-size: 13px; color: #cfe9ff; }
+.custom-row select { grid-column: 2 / 4; font: inherit; background: rgba(15, 30, 55, 0.9); color: #dff6ff; border: 1px solid var(--hud-dim); padding: 3px; }
+.custom-row input[type=range] { width: 100%; accent-color: #f2c94c; }
+.custom-row output { font-family: ui-monospace, monospace; color: #f2c94c; text-align: right; }
+.custom-row.disabled { opacity: 0.35; }
+@media (max-width: 520px) { .custom-row { grid-template-columns: 1fr 96px 44px; } }
