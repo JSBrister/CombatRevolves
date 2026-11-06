@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1858,7 +1858,7 @@ describe('35. scattergun and Roulette Repeater', () => {
 describe('36. custom levels', () => {
   it('every shape the builder offers makes a working level; links round-trip', async () => {
     const { CUSTOM_DEFAULTS, customLevel, encodeCustom, decodeCustom } = await import('../src/client/custom');
-    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'nested', 'twin'] as const) {
+    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'nested', 'twin', 'disk', 'bucket'] as const) {
       const set = { ...CUSTOM_DEFAULTS, shape, R: 200, width: shape === 'log' ? 12 : 30, hills: 6, bases: 1, holes: 4, deck: 9, bots: 2 };
       const { state, localId, botIds } = startLevel(customLevel(set));
       expect(botIds.length).toBe(2);
@@ -2306,5 +2306,47 @@ describe('44. reversing spin; tidal spheres', () => {
     for (let i = 0; i < 120 * 8 && !reached; i++) { step(s, [cmdFor(s, id)], s.tick); reached = p.grounded && Math.hypot(...p.pos) < s.config.R + 3; }
     expect(reached).toBe(true);
     expect(p.health + p.shield).toBe(p.maxHealth + p.maxShield);
+  });
+});
+
+describe('45. Disk World', () => {
+  const disk = (id: string) => {
+    const { state, localId } = startLevel(levelById(id)!);
+    state.players = state.players.filter((p) => p.id === localId);
+    state.level.boxes = [];
+    return { s: state, id: localId, p: state.players[0] };
+  };
+  const stand = (s: SimState, p: { pos: Vec3; vel: Vec3 }, rho: number, angle = 0.3) => {
+    const { pos, n } = diskPoint(s.config, angle, rho);
+    p.pos = addScaled(pos, n, 0.95);
+    p.vel = [0, 0, 0];
+  };
+  it('flat: you stand near the middle; far out the tilted gravity slides you off the edge', () => {
+    const { s, id, p } = disk('s-disk');
+    stand(s, p, 30);
+    const p0 = clone(p.pos);
+    run(s, 240, () => [cmdFor(s, id)]);
+    expect(p.grounded).toBe(true);
+    expect(dist(p.pos, p0)).toBeLessThan(0.3);
+    // "down" leans outward: at 30 m by atan(w^2 rho / g)
+    const w = omegaOf(s.config), up = localBasis(p.pos).up;
+    expect(Math.acos(up[2]) * (180 / Math.PI)).toBeCloseTo(Math.atan((w * w * Math.hypot(p.pos[0], p.pos[1])) / s.config.g) * (180 / Math.PI), 0);
+    stand(s, p, 90);
+    let died = false;
+    for (let i = 0; i < 120 * 15 && !died; i++) { step(s, [cmdFor(s, id)], s.tick); died = !p.alive; }
+    expect(died).toBe(true);
+  });
+  it('bucket: you can stand anywhere, right up the rim, and weigh sqrt(1 + (w^2 rho / g)^2)', () => {
+    const { s, id, p } = disk('s-bucket');
+    const w = omegaOf(s.config), g = s.config.g;
+    for (const rho of [20, 60, 92]) {
+      stand(s, p, rho);
+      const p0 = clone(p.pos);
+      run(s, 300, () => [cmdFor(s, id)]);
+      expect(p.grounded).toBe(true);
+      expect(dist(p.pos, p0)).toBeLessThan(0.3);
+      const r = Math.hypot(p.pos[0], p.pos[1]);
+      expect(p.apparentG).toBeCloseTo(Math.sqrt(1 + ((w * w * r) / g) ** 2), 1);
+    }
   });
 });

@@ -3,7 +3,7 @@
 
 import type { LevelDef, SimConfig } from '../sim';
 
-export type Shape = 'ring' | 'band' | 'sphere' | 'ridge' | 'torus' | 'halfpipe' | 'log' | 'planet' | 'nested' | 'twin';
+export type Shape = 'ring' | 'band' | 'sphere' | 'ridge' | 'torus' | 'halfpipe' | 'log' | 'planet' | 'nested' | 'twin' | 'disk' | 'bucket';
 
 export interface CustomSettings {
   shape: Shape;
@@ -41,7 +41,7 @@ type Field =
 
 const FIELDS: Field[] = [
   { key: 'shape', label: 'Shape', options: [['ring', 'Ring (cylinder)'], ['band', 'Sphere band (bowl)'], ['sphere', 'Whole sphere'], ['ridge', 'Ridge (Lambda)'],
-    ['torus', 'Inside a torus'], ['halfpipe', 'Half-pipe (half torus)'], ['log', 'Outside a torus (the log)'], ['planet', 'Outside a planet'], ['nested', 'Nested spheres (ball in a shell)'], ['twin', 'Twin rings (counter-rotating)']] },
+    ['torus', 'Inside a torus'], ['halfpipe', 'Half-pipe (half torus)'], ['log', 'Outside a torus (the log)'], ['planet', 'Outside a planet'], ['nested', 'Nested spheres (ball in a shell)'], ['twin', 'Twin rings (counter-rotating)'], ['disk', 'Disk World (flat, fling-off edge)'], ['bucket', 'Spinning bucket (curved disk)']] },
   { key: 'R', label: 'Radius (m)', min: 20, max: 3000, step: 5 },
   { key: 'width', label: 'Half-width / tube radius (m)', min: 6, max: 1500, step: 1 },
   { key: 'g', label: 'Gravity at the floor (m/s²)', min: 1, max: 30, step: 0.1 },
@@ -83,6 +83,8 @@ export function customLevel(s: CustomSettings): LevelDef {
     case 'planet': c.world = 'planet'; c.planetSpin = s.planetSpin; break;
     case 'nested': c.world = 'planet'; c.planetSpin = 0.3; c.outerShell = 2 * R; break; // (weightless halfway out)
     case 'twin': c.twin = true; variedWalls = false; break;
+    case 'disk': c.world = 'disk'; c.planetSpin = 1.6; break; // (walkable to 83% of the radius)
+    case 'bucket': c.world = 'disk'; c.planetSpin = 1.6; c.diskBowl = true; break;
     case 'log': c.tube = 'outside'; c.tubeRadius = Math.min(s.width, 0.45 * R); c.halfWidth = c.tubeRadius; break;
   }
   if (ring) {
@@ -95,7 +97,7 @@ export function customLevel(s: CustomSettings): LevelDef {
   if (s.air !== 'none') Object.assign(c, { dragType: 'quadratic', dragCoeff: s.air === 'hazy' ? 0.004 : 0.015 });
   return {
     id: 'custom', mode: 'sandbox', name: 'Custom level', seed: s.seed, config: c, bots: s.bots, variedWalls,
-    ...(s.shape === 'planet' || s.shape === 'nested' ? { props: false } : {}),
+    ...(s.shape === 'planet' || s.shape === 'nested' || s.shape === 'disk' || s.shape === 'bucket' ? { props: false } : {}),
     ...(s.bikes >= 0 ? { vehicles: s.bikes } : {}),
     blurb: 'Your own level.',
   };
@@ -128,7 +130,7 @@ export function decodeCustom(str: string): CustomSettings | null {
 /** A fun, sane random level. */
 export function randomCustom(): CustomSettings {
   const r = Math.random, pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
-  const shape = pick<Shape>(['ring', 'ring', 'ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'nested', 'twin']);
+  const shape = pick<Shape>(['ring', 'ring', 'ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'nested', 'twin', 'disk', 'bucket']);
   const R = pick([60, 100, 150, 250, 400, 800]);
   const s: CustomSettings = { ...CUSTOM_DEFAULTS, shape, R, seed: 1 + Math.floor(r() * 9999), bots: 2 + Math.floor(r() * 5) };
   s.width = shape === 'log' ? 10 + Math.round(r() * 10) : shape === 'torus' || shape === 'halfpipe' ? 15 + Math.round(r() * 20) : Math.round(20 + r() * Math.min(R, 120));

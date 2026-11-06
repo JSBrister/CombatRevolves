@@ -12,8 +12,9 @@ export interface SimConfig {
   g: number; // target apparent gravity at the floor (m/s^2); omega = sqrt(g/R)
   halfWidth: number; // half of the ring width along Z
   spin: boolean; // false: the world doesn't rotate at all (Earth)
-  world: 'ring' | 'planet'; // 'planet': you stand on the OUTSIDE of a spinning ball of radius R, with gravity g toward its centre
-  planetSpin: number; // planet: how much of g the spin cancels at the equator (0..1); sets the spin rate
+  world: 'ring' | 'planet' | 'disk'; // 'planet': on the OUTSIDE of a spinning ball of radius R, gravity g toward its centre; 'disk': on top of a spinning disk of radius R, gravity g straight down the axis
+  planetSpin: number; // planet: how much of g the spin cancels at the equator; disk: the spin's outward push at the rim, as a multiple of g. Sets the spin rate
+  diskBowl: boolean; // disk: the surface curves up (a paraboloid, like water in a spinning bucket) so gravity is always straight into it
   outerShell: number; // planet: >0 = a hollow shell of this radius round the ball, walkable on its inside near its equator
   launchPads: boolean; // nested spheres: launch pads between ball and shell
   twin: boolean; // two rings side by side spinning opposite ways (z < 0 at +omega, z > 0 at -omega), a gap at the seam
@@ -140,7 +141,7 @@ export interface SimConfig {
 
 /** Spin rate (rad/s): sqrt(g/R) gives g at the floor; 0 when the world doesn't spin (Earth). */
 /** The ring's base spin rate: sqrt(g/R), or 0 for a world that doesn't spin. */
-export const omegaOf = (c: SimConfig) => (!c.spin ? 0 : c.world === 'planet' ? Math.sqrt((c.planetSpin * c.g) / c.R) : Math.sqrt(c.g / c.R));
+export const omegaOf = (c: SimConfig) => (!c.spin ? 0 : c.world === 'planet' || c.world === 'disk' ? Math.sqrt((c.planetSpin * c.g) / c.R) : Math.sqrt(c.g / c.R));
 
 /**
  * Spin schedule: the multiplier on the base spin rate at time t (seconds), and
@@ -477,7 +478,7 @@ export interface Pad {
  * (level.ts: levelSdf), the force field (physics.ts) and the renderer
  * (client/scene.ts) switch on it. Only the spinning 'ring' exists so far.
  */
-export type LevelShape = 'ring' | 'planet';
+export type LevelShape = 'ring' | 'planet' | 'disk';
 
 /** A rectangular opening in a floor or deck, centred at (angle, z): halfArc metres along the ring (at radius R), halfZ across. */
 export interface Hole {

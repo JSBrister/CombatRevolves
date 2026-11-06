@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { disposeTree } from './dispose';
-import { floorRadius, type Hole, type Level, type SimConfig } from '../sim';
+import { DISK_THICKNESS, diskSurface, floorRadius, type Hole, type Level, type SimConfig } from '../sim';
 import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, rockTexture, sandTexture, snowTexture, wallTexture } from './textures';
 
 export const LAYER_ROT_TRAILS = 1;
@@ -71,6 +71,7 @@ export class RingScene {
     this.floorChoice = cfg.floorTexture;
     if (sky === 'earth') return this.buildEarth(cfg, level);
     if (level.shape === 'planet') return this.buildPlanet(cfg, level);
+    if (level.shape === 'disk') return this.buildDisk(cfg, level);
     this.scene.background = new THREE.Color(0x02030a);
     this.ambient.intensity = 0.6;
     this.axisLight.intensity = 0.85;
@@ -275,7 +276,7 @@ export class RingScene {
     }
 
     // Spawn pads.
-    for (const s of level.shape === 'planet' ? [] : level.spawns) {
+    for (const s of level.shape !== 'ring' ? [] : level.spawns) {
       const pad = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), new THREE.MeshBasicMaterial({ color: 0x3fa7ff, transparent: true, opacity: 0.35 }));
       pad.rotateX(-Math.PI / 2);
       const holder = new THREE.Object3D();
@@ -481,6 +482,54 @@ export class RingScene {
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glow, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false }));
     sp.scale.setScalar(size);
     return sp;
+  }
+
+  /**
+   * Disk World: a solid of revolution (the flat top, or the spinning bucket's
+   * paraboloid), its rim and underside, with painted rings every 20 m and, on
+   * the flat disk, an orange ring where the floor becomes too steep to stand on.
+   */
+  private buildDisk(cfg: SimConfig, level: Level) {
+    const R = cfg.R;
+    this.scene.background = new THREE.Color(0x02030a);
+    this.ambient.intensity = 0.6;
+    this.axisLight.intensity = 0;
+    this.sunLight.intensity = 2.6;
+    this.sunLight.castShadow = true;
+    this.sunDir.set(0.5, 0.2, 1).normalize(); // high over the disk's top face
+    this.starRadius = Math.max(4000, R * 20);
+    this.scene.fog = new THREE.Fog(0x0b1020, R * 3, R * 15);
+    const T = DISK_THICKNESS, n = 96;
+    const h = (r: number) => diskSurface(cfg, r).h;
+    const pts: THREE.Vector2[] = [];
+    for (let i = 0; i <= n; i++) { const r = (R * i) / n; pts.push(new THREE.Vector2(Math.max(1e-3, r), h(r))); }
+    for (let i = n; i >= 0; i--) { const r = (R * i) / n; pts.push(new THREE.Vector2(Math.max(1e-3, r), h(r) - T)); }
+    const g = new THREE.LatheGeometry(pts, 256);
+    g.rotateX(Math.PI / 2); // the lathe's axis (y) onto the spin axis (z)
+    const tex = this.floorTex(cfg.diskBowl ? 'grass' : 'deck');
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set((2 * Math.PI * R) / 6, (2 * (R + T)) / 6);
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.9, metalness: 0.1 }));
+    mesh.receiveShadow = true;
+    this.level.add(mesh);
+    const ring = (r: number, color: number) => {
+      const p: THREE.Vector3[] = [];
+      for (let i = 0; i <= 256; i++) { const a = (i / 256) * Math.PI * 2; p.push(new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), h(r) + 0.04)); }
+      this.level.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(p), new THREE.LineBasicMaterial({ color })));
+    };
+    for (let r = 20; r < R; r += 20) ring(r, 0x8a96a8);
+    ring(R - 0.2, 0xff5a2a);
+    // flat disk: beyond here "down" leans more than ~53 degrees from the floor
+    if (!cfg.diskBowl) { const lim = ((4 / 3) * R) / cfg.planetSpin; if (lim < R) ring(lim, 0xff5a2a); }
+    // a beacon on the axis
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.9, 10, 12), new THREE.MeshStandardMaterial({ color: 0x9aa3ae, emissive: 0x0c1218, metalness: 0.55, roughness: 0.32 }));
+    mast.rotation.x = Math.PI / 2;
+    mast.position.set(0, 0, 5);
+    const lamp = this.makeGlowSprite(0x7fd8ff, 5);
+    lamp.position.set(0, 0, 11);
+    this.level.add(mast, lamp);
+    this.buildBoxes(cfg, level);
+    this.buildSky(cfg);
   }
 
   /** A torus: seen from inside (Stanford torus) or outside (the log). */

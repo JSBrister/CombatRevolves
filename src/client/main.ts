@@ -351,9 +351,9 @@ function simTick() {
   const meBefore = state.players.find((p) => p.id === localId);
   const from: Vec3 | null = meBefore && meBefore.alive ? [...meBefore.pos] as Vec3 : null;
   step(state, inputs, state.tick);
-  // on a planet, keep facing the same way as you move (near a pole "east" swings round)
+  // on a planet or disk, keep facing the same way as you move (near a pole or the axis "east" swings round)
   const meAfter = state.players.find((p) => p.id === localId);
-  if (cfg.world === 'planet' && from && meAfter && meAfter.alive && dist(from, meAfter.pos) < 5) input.yaw = transportYaw(input.yaw, from, meAfter.pos);
+  if (cfg.world !== 'ring' && from && meAfter && meAfter.alive && dist(from, meAfter.pos) < 5) input.yaw = transportYaw(input.yaw, from, meAfter.pos);
   for (const e of state.events) handleEvent(e);
   views.onTick(state);
 }

@@ -1,5 +1,5 @@
-import { BIKE_RADIUS, generateLevel, generatePlanet, levelSdf, spawnPosition } from './level';
-import { setPlanet } from './physics';
+import { BIKE_RADIUS, generateDisk, generateLevel, generatePlanet, levelSdf, spawnPosition } from './level';
+import { setDisk, setPlanet } from './physics';
 import { localBasis } from './physics';
 import { rngRange } from './rng';
 import { defaultConfig } from './tuning';
@@ -59,8 +59,11 @@ export function createState(opts: WorldOptions = {}): SimState {
     events: [],
   };
   setPlanet(config.world === 'planet' ? config.g * config.R * config.R : 0, omegaOf(config));
+  setDisk(config.world === 'disk' ? config.g : 0, omegaOf(config));
   state.level = config.world === 'planet'
     ? generatePlanet(config, state, opts.obstacles ?? true, () => allocId(state))
+    : config.world === 'disk'
+    ? generateDisk(config, state, opts.obstacles ?? true, () => allocId(state))
     : generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true, opts.vehicles ?? -1);
   for (const spot of state.level.vehicleSpots) addVehicle(state, spot.pos, spot.yaw);
   if (opts.pickups ?? opts.obstacles ?? true) {

@@ -23,9 +23,20 @@ export interface Basis {
 let planetGM = 0, planetOmega = 0;
 export function setPlanet(GM: number, omega: number) { planetGM = GM; planetOmega = omega; }
 export const isPlanetWorld = () => planetGM > 0;
+/**
+ * A disk world: uniform gravity diskG straight "down" the spin axis (-z), on
+ * top of the spin. Set like the planet's, from the state's config.
+ */
+let diskG = 0, diskOmega = 0;
+export function setDisk(g: number, omega: number) { diskG = g; diskOmega = omega; }
 
 export function localBasis(r: Vec3): Basis {
   if (planetGM > 0) return planetBasis(r);
+  if (diskG > 0) {
+    // up = -(g_eff) = (-w^2 x, -w^2 y, g)
+    const w2 = diskOmega * diskOmega;
+    return effectiveBasis(r, -w2 * r[0], -w2 * r[1], diskG);
+  }
   const rho = rhoOf(r);
   if (rho < 1e-9) return { up: [-1, 0, 0], spin: [0, 1, 0], axial: [0, 0, 1] };
   const cx = r[0] / rho, cy = r[1] / rho;
@@ -42,7 +53,12 @@ function planetBasis(r: Vec3): Basis {
   const d = Math.hypot(r[0], r[1], r[2]) || 1;
   const k = planetGM / (d * d * d), w2 = planetOmega * planetOmega;
   // up = -(g_eff) = GM r / d^3 - omega^2 (x, y, 0)
-  let ux = k * r[0] - w2 * r[0], uy = k * r[1] - w2 * r[1], uz = k * r[2];
+  return effectiveBasis(r, k * r[0] - w2 * r[0], k * r[1] - w2 * r[1], k * r[2]);
+}
+
+/** The local frame for a given "up" (un-normalised): spinward is east, made level. */
+function effectiveBasis(r: Vec3, ux0: number, uy0: number, uz0: number): Basis {
+  let ux = ux0, uy = uy0, uz = uz0;
   const ul = Math.hypot(ux, uy, uz) || 1;
   ux /= ul; uy /= ul; uz /= ul;
   const rho = Math.hypot(r[0], r[1]);
@@ -123,6 +139,7 @@ export function centrifugalAccel(r: Vec3, omega: number, cfg: SimConfig): Vec3 {
     const k = -planetGM / (d2 * Math.sqrt(d2) || 1);
     a[0] += k * r[0]; a[1] += k * r[1]; a[2] += k * r[2];
   }
+  if (diskG > 0) a[2] -= diskG; // a disk world: uniform gravity down the axis
   return a;
 }
 
@@ -155,7 +172,7 @@ export function jacobi(r: Vec3, v: Vec3, omega: number): number {
 
 /** True when free flight is exactly a straight inertial line (analytic path is valid). */
 export function analyticValid(cfg: SimConfig): boolean {
-  return cfg.centrifugal && cfg.coriolis && !cfg.gravity && !cfg.planetPull && spinAlpha === 0 && planetGM === 0 && (cfg.dragType === 'none' || cfg.dragCoeff === 0);
+  return cfg.centrifugal && cfg.coriolis && !cfg.gravity && !cfg.planetPull && spinAlpha === 0 && planetGM === 0 && diskG === 0 && (cfg.dragType === 'none' || cfg.dragCoeff === 0);
 }
 
 /**

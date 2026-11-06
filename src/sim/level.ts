@@ -276,7 +276,95 @@ export function levelSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
       return ringSdf(level, cfg, p);
     case 'planet':
       return planetSdf(level, cfg, p);
+    case 'disk':
+      return diskSdf(level, cfg, p);
   }
+}
+
+export const DISK_THICKNESS = 8;
+/** Disk world: height of the surface at distance rho from the axis (0 on a flat disk), and its slope. */
+export function diskSurface(cfg: SimConfig, rho: number): { h: number; dh: number } {
+  if (!cfg.diskBowl) return { h: 0, dh: 0 };
+  // a paraboloid h = w^2 rho^2 / 2g, with w^2 = planetSpin g / R: its normal lines up with g_eff everywhere
+  const k = cfg.planetSpin / cfg.R;
+  return { h: 0.5 * k * rho * rho, dh: k * rho };
+}
+
+/** The top of a spinning disk (flat, or curved up into a bowl), plus what stands on it. */
+function diskSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
+  const out: SdfHit = { d: Infinity, n: [0, 0, 1] };
+  const rho = rhoOf(p);
+  if (!cfg.diskBowl) annulus(p, rho, 0, cfg.R, -DISK_THICKNESS, 0, out);
+  else {
+    // solid below the surface z = h(rho), above it minus the thickness, inside the rim
+    const { h, dh } = diskSurface(cfg, Math.min(rho, cfg.R));
+    const g = Math.sqrt(1 + dh * dh);
+    const dTop = (p[2] - h) / g, dBottom = h - DISK_THICKNESS - p[2], dRim = rho - cfg.R;
+    const d = Math.max(dTop, dBottom, dRim);
+    out.d = d;
+    const ir = rho > 1e-9 ? 1 / rho : 0;
+    if (d === dTop) out.n = [(-dh * p[0] * ir) / g, (-dh * p[1] * ir) / g, 1 / g];
+    else if (d === dRim) out.n = [p[0] * ir, p[1] * ir, 0];
+    else out.n = [0, 0, -1];
+  }
+  for (const b of level.boxes) boxSdf(p, b, out);
+  return out;
+}
+
+/** A point on a disk world's surface at (angle, distance from the axis), with the surface's normal. */
+export function diskPoint(cfg: SimConfig, angle: number, rho: number): { pos: Vec3; n: Vec3 } {
+  const { h, dh } = diskSurface(cfg, rho);
+  const g = Math.sqrt(1 + dh * dh), c = Math.cos(angle), s = Math.sin(angle);
+  return { pos: [rho * c, rho * s, h], n: [(-dh * c) / g, (-dh * s) / g, 1 / g] };
+}
+
+/**
+ * A disk world: spawn points in a ring part-way out, cover and towers
+ * standing straight out of the surface, pickups. Spawn points use
+ * (angle, z = distance from the axis).
+ */
+export function generateDisk(cfg: SimConfig, rng: { rng: number }, withObstacles: boolean, nextId: () => number): Level {
+  const R = cfg.R;
+  const spawns: SpawnPoint[] = [];
+  for (let i = 0; i < 8; i++) spawns.push({ angle: (i / 8) * 2 * Math.PI, z: (i % 2 ? 0.25 : 0.45) * R });
+  const boxes: Box[] = [];
+  const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
+  const stand = (angle: number, rho: number, heading: number, hx: number, hy: number, hz: number, kind: Box['kind'] = 'cover') => {
+    const { pos, n } = diskPoint(cfg, angle, rho);
+    const t0: Vec3 = [-Math.sin(angle), Math.cos(angle), 0]; // round the disk
+    const t1: Vec3 = [n[1] * t0[2] - n[2] * t0[1], n[2] * t0[0] - n[0] * t0[2], n[0] * t0[1] - n[1] * t0[0]]; // outward, along the surface
+    const ch = Math.cos(heading), sh = Math.sin(heading);
+    const X: Vec3 = [ch * t0[0] + sh * t1[0], ch * t0[1] + sh * t1[1], ch * t0[2] + sh * t1[2]];
+    const Z: Vec3 = [X[1] * n[2] - X[2] * n[1], X[2] * n[0] - X[0] * n[2], X[0] * n[1] - X[1] * n[0]];
+    const bury = 0.3 + (cfg.diskBowl ? (cfg.planetSpin / R) * Math.max(hx, hz) * Math.max(hx, hz) : 0);
+    const c: Vec3 = [pos[0] + n[0] * (hy - bury), pos[1] + n[1] * (hy - bury), pos[2] + n[2] * (hy - bury)];
+    boxes.push({ id: nextId(), type: 'box', kind, angle, tilt: 0, center: c, half: [hx, hy + bury, hz], axes: [X, n, Z] });
+  };
+  const near = (angle: number, rho: number, m: number) => spawns.some((sp) => {
+    const a = diskPoint(cfg, sp.angle, sp.z).pos, b = diskPoint(cfg, angle, rho).pos;
+    return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < m;
+  });
+  if (withObstacles) {
+    const n = Math.max(20, Math.min(200, Math.round((Math.PI * R * R) / 600)));
+    const k = Math.min(1, R / 80);
+    for (let i = 0; i < n; i++) {
+      const angle = rngNext(rng) * 2 * Math.PI, rho = R * Math.sqrt(rngRange(rng, 0.01, 0.95)); // even over the area
+      if (near(angle, rho, 6)) continue;
+      const kind = rngNext(rng), heading = rngNext(rng) * Math.PI;
+      if (kind < 0.45) stand(angle, rho, heading, rngRange(rng, 1, 2.5), rngRange(rng, 0.5, 0.9) * k, rngRange(rng, 0.3, 0.6), 'struct');
+      else if (kind < 0.7) stand(angle, rho, Math.PI / 4, 1.1, rngRange(rng, 1.5, 3) * k, 1.1, 'struct');
+      else if (kind < 0.9) stand(angle, rho, heading, rngRange(rng, 1, 2), rngRange(rng, 0.4, 0.8) * k, rngRange(rng, 1, 2));
+      else stand(angle, rho, heading, 1.6, rngRange(rng, 4, 8) * k, 1.6, 'struct');
+    }
+    const items: ItemKind[] = ['health', 'sticky', 'redRifle', 'bounce', 'launcher', 'scatter', 'cannon', 'rocket', 'health', 'revolver', 'seeker', 'jetpack'];
+    for (let i = 0; i < items.length; i++) {
+      const angle = i * 2.39996, rho = R * Math.sqrt((i + 0.5) / items.length) * 0.85;
+      if (near(angle, rho, 4)) continue;
+      const { pos, n } = diskPoint(cfg, angle, rho);
+      pickupSpots.push({ pos: [pos[0] + n[0], pos[1] + n[1], pos[2] + n[2]], item: items[i] });
+    }
+  }
+  return { shape: 'disk', terrain: null, boxes, stairTops: [], spawns, pickupSpots, vehicleSpots: [], wallPos: [], wallNeg: [] };
 }
 
 /** The outside of a ball of radius R, plus whatever stands on it. */
@@ -915,6 +1003,10 @@ export const STAIR_WIDTH = 5; // m across the ring
 export const STAIR_TOP = 6; // lookout platform length
 
 export function spawnPosition(cfg: SimConfig, s: SpawnPoint, heightAboveFloor: number, level?: Level): Vec3 {
+  if (cfg.world === 'disk') {
+    const { pos, n } = diskPoint(cfg, s.angle, Math.min(Math.abs(s.z), cfg.R * 0.95));
+    return [pos[0] + n[0] * heightAboveFloor, pos[1] + n[1] * heightAboveFloor, pos[2] + n[2] * heightAboveFloor];
+  }
   if (cfg.world === 'planet') {
     if (s.outer && cfg.outerShell > 0) {
       const d = planetDir(s.angle, s.z / cfg.outerShell), r = cfg.outerShell - heightAboveFloor;

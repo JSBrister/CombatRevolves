@@ -4,7 +4,7 @@
 // a server can run bots without disturbing replays.
 
 import { advanceFree, localBasis, planetPullAt, setSpinAlpha, viewVectors } from './physics';
-import { levelSdf, setSdfFrame } from './level';
+import { diskSurface, levelSdf, setSdfFrame } from './level';
 import { convertBody, frameOf, frameOmega } from './twin';
 import { floorRadius, terrainAt } from './terrain';
 import { boltStats, launchVelocity, muzzlePoint } from './step';
@@ -76,6 +76,7 @@ export function solveAim(state: SimState, me: Player, target: Player, kind: Bolt
 
 /** How high a player is above the floor beneath them (0 when standing on the floor). */
 function heightAboveFloor(state: SimState, p: Player): number {
+  if (state.level.shape === 'disk') return p.pos[2] - diskSurface(state.config, Math.hypot(p.pos[0], p.pos[1])).h - standHeight(p.size);
   if (state.level.shape === 'planet') {
     const r = Math.hypot(p.pos[0], p.pos[1], p.pos[2]), c = state.config;
     return Math.min(r - c.R, c.outerShell > 0 ? c.outerShell - r : Infinity) - standHeight(p.size);
@@ -115,7 +116,7 @@ interface Nav {
 
 /** Cover when shields are low; ramps up to a target on a lookout. */
 function navigate(state: SimState, me: Player, target: Player): Nav | null {
-  if (state.level.shape === 'planet') return null; // (no ramps or lookouts out there)
+  if (state.level.shape !== 'ring') return null; // (no ramps or lookouts out there)
   const cfg = state.config;
   const R = cfg.R;
   // --- cover: get a box between you and the target until shields recover past half
@@ -204,7 +205,7 @@ export function botInput(state: SimState, playerId: number): InputCmd {
 
   // Idle: sandbox bots wander (a new waypoint every ~5 s); enemies wait where placed.
   const epoch = Math.floor(tick / 600);
-  if (behaviour === 'wander' && state.level.shape === 'planet') {
+  if (behaviour === 'wander' && state.level.shape !== 'ring') {
     // wander: a new heading every ~5 s, over the curve of the planet
     const b = localBasis(me.pos);
     const h = hash01(playerId, epoch, 1) * 2 * Math.PI;

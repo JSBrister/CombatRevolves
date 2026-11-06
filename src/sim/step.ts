@@ -5,7 +5,7 @@
 import { clamp, closestOnSeg, segSegClosest, segSphere } from './geom';
 import { levelSdf, liftOffset, setSdfFrame, sphereTrace, spawnPosition } from './level';
 import { apart, convertBody, convertDir, frameOf, frameOmega } from './twin';
-import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setPlanet, setSpinAlpha, viewVectors } from './physics';
+import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setDisk, setPlanet, setSpinAlpha, viewVectors } from './physics';
 import { rngInt, rngNext } from './rng';
 import {
   BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
@@ -125,6 +125,7 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   const omega = spin.omega;
   setSpinAlpha(spin.alpha);
   setPlanet(cfg.world === 'planet' ? cfg.g * cfg.R * cfg.R : 0, omega);
+  setDisk(cfg.world === 'disk' ? cfg.g : 0, omega);
   pull = planetPullAt(cfg, state.frameAngle);
   state.events = [];
   moveLifts(state);
@@ -500,6 +501,11 @@ function collideProps(state: SimState) {
 /** Bodies that leave the ring band moving away never come back (straight inertial lines). */
 function despawnIfSpaced(state: SimState, pos: Vec3, vel: Vec3, kill: () => void, margin = 4) {
   const cfg = state.config;
+  if (cfg.world === 'disk') {
+    // fallen off: well below the disk, or far out, and still going
+    if ((pos[2] < -150 && vel[2] < 0) || (rhoOf(pos) > 3 * cfg.R && dot(pos, vel) > 0)) kill();
+    return;
+  }
   if (cfg.world === 'planet') {
     if (cfg.outerShell > 0) return; // shut in by the shell: nothing gets away
     // gone for good: well out and still climbing (escape speed is only sqrt(2gR))
@@ -512,6 +518,7 @@ function despawnIfSpaced(state: SimState, pos: Vec3, vel: Vec3, kill: () => void
 
 /** Distance by which a point lies outside the ring band (0 if inside it). */
 export function distanceOffRing(cfg: SimConfig, pos: Vec3): number {
+  if (cfg.world === 'disk') return Math.max(0, -pos[2] - 20, rhoOf(pos) - (cfg.R + 30)); // off the edge and falling
   if (cfg.world === 'planet') return cfg.outerShell > 0 ? 0 : Math.max(0, Math.hypot(pos[0], pos[1], pos[2]) - 3 * cfg.R); // flung off into space
   if (cfg.tube === 'outside') {
     // how far off the log's surface

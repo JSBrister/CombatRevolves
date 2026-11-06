@@ -286,6 +286,10 @@ export const LEVELS: LevelDef[] = [
   { id: 's-tides', mode: 'sandbox', name: 'Tidal Spheres (nested, cycling spin)', seed: 51,
     config: { world: 'planet', R: 60, g: 9.81, planetSpin: 2, outerShell: 75, launchPads: false, spinChange: 0.92, spinPeriod: 60 }, props: false, bots: 4,
     blurb: 'A ball inside a shell, and the spin comes and goes. Spun up, only the ball\'s poles hold you; everyone else is flung up to the shell. Spun down, the shell lets go and everyone falls back to the ball.' },
+  { id: 's-disk', mode: 'sandbox', name: 'Disk World (flat)', seed: 52, config: { world: 'disk', R: 100, g: 9.81, planetSpin: 1.6 }, props: false, bots: 4,
+    blurb: 'On top of a spinning disk, with gravity straight down. The further out you go, the more the spin tilts "down" toward the edge: past about 83 m the floor is too steep to stand on, and you slide off into space.' },
+  { id: 's-bucket', mode: 'sandbox', name: 'Spinning Bucket (Disk World, curved)', seed: 53, config: { world: 'disk', R: 100, g: 9.81, planetSpin: 1.6, diskBowl: true }, props: false, bots: 4,
+    blurb: 'The same spinning disk, curved up into the shape water takes in a spinning bucket, so gravity is always straight into the ground. Walk right up the 80 m-high rim, where you weigh 1.9 g; just don\'t go over it.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
     blurb: '140 m across: room to flank, and to watch your shots curve sideways.' },
   { id: 's-planet', mode: 'sandbox', name: 'Skyhook (planet below)', seed: 34, config: { R: 100, planetPull: 8.8, planetAngle: Math.PI }, bots: 2,
@@ -299,7 +303,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
