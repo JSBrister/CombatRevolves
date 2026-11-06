@@ -343,7 +343,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
     state.pickups = items.length ? state.pickups.map((pk, i) => ({ ...pk, item: items[i % items.length] })) : [];
   }
   // default start: angle 0, or near one end of an arena (so the enemies are ahead of you)
-  const start = def.start ?? { angle: cfg.arena > 0 ? ((-cfg.arena / 2 + 8) / cfg.R) * (180 / Math.PI) : 0, z: cfg.twin ? -cfg.halfWidth / 2 : 0 };
+  const start = def.start ?? { angle: cfg.arena > 0 ? ((-cfg.arena / 2 + 8) / cfg.R) * (180 / Math.PI) : 0, z: cfg.twin ? -cfg.halfWidth / 2 : cfg.world === 'planet' && cfg.planetSpin > 1 ? 1.25 * cfg.R : 0 }; // (twin: on ring A; a planet whose spin beats its gravity: near a pole)
   const startAngle = (start.angle * Math.PI) / 180;
 
   const localId = addPlayer(state, 'human', 'You');

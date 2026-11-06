@@ -302,7 +302,9 @@ export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacl
   const spawns: SpawnPoint[] = [];
   if (R2 > 0) {
     // half on the ball, half on the inside of the shell near its equator
-    for (let i = 0; i < 8; i++) spawns.push(i % 2 ? { angle: (i / 8) * 2 * Math.PI, z: 0.08 * R2 * (i % 4 === 1 ? 1 : -1), outer: true } : { angle: (i / 8) * 2 * Math.PI, z: 0.3 * R * (i % 4 === 0 ? 1 : -1) });
+    // (if the spin can beat the ball's gravity, only its poles are safe: spawn up there)
+    const ballLat = cfg.planetSpin > 1 ? 1.25 : 0.3;
+    for (let i = 0; i < 8; i++) spawns.push(i % 2 ? { angle: (i / 8) * 2 * Math.PI, z: 0.08 * R2 * (i % 4 === 1 ? 1 : -1), outer: true } : { angle: (i / 8) * 2 * Math.PI, z: ballLat * R * (i % 4 === 0 ? 1 : -1) });
   } else for (let i = 0; i < 8; i++) spawns.push({ angle: (i / 8) * 2 * Math.PI, z: (i % 2 ? 1 : -1) * 0.12 * R });
   const pads: Pad[] = [];
   const boxes: Box[] = [];
