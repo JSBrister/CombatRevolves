@@ -652,7 +652,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     // Ramps up to lookout platforms, midway between spawn points, alternating
     // which way they climb (climbing spinward vs antispinward feels different!).
     // (no lookouts where bases or mountains bring their own heights)
-    const nStairs = steep || deck || cfg.bases > 0 || cfg.mountains > 0 ? 0 : Math.max(2, Math.min(12, Math.round(circ / 150)));
+    const nStairs = steep || deck || cfg.twin || cfg.bases > 0 || cfg.mountains > 0 ? 0 : Math.max(2, Math.min(12, Math.round(circ / 150)));
     const H = Math.max(2, Math.min(LOOKOUT_HEIGHT, 0.3 * R)); // lookout height
     const rampLen = H / RAMP_SLOPE;
     const topItems: ItemKind[] = ['cannon', 'jetpack', 'hammer'];
@@ -695,6 +695,34 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       for (const sp of spawns) {
         const a = sp.angle + 5 / R, z = sp.z + (sp.z > 0 ? -3 : 3);
         vehicleSpots.push({ pos: at(a, parkHeight, z), yaw: 0 });
+      }
+    }
+    // Twin rings: jump ramps by the seam. To land gently on the other ring you
+    // ride against your own ring's spin (ring 0: antispinward; ring 1, which
+    // turns the other way: spinward), so each ramp climbs that way, angled
+    // ~20 degrees toward the seam, and ends just short of the curb.
+    if (cfg.twin) {
+      const nJ = Math.max(4, Math.min(16, Math.round(circ / 70)));
+      const len = 9, H = 1.5, width = 3.2, toward = 0.35;
+      for (let i = 0; i < nJ; i++) {
+        const ring = i % 2;
+        const sz = ring ? 1 : -1; // which side of the seam
+        const a = arcAngle(cfg, (i + 0.5) / nJ);
+        if (spawns.some((sp) => Math.abs(wrapAngle(sp.angle - a)) * R < 10)) continue;
+        // travel direction: ring 0 antispinward (and +z toward the seam); ring 1 spinward (and -z)
+        const yaw = ring ? -toward : Math.PI - toward;
+        const z = sz * (cfg.twinGap / 2 + 0.6 + 1.2 + (len / 2) * Math.sin(toward));
+        const tilt = Math.atan2(H, len);
+        const ct = Math.cos(tilt);
+        const hy = (H / 2 + 1.2) / ct; // deep enough to bury its bottom
+        const c = Math.cos(a), sn = Math.sin(a);
+        const up: Vec3 = [-c, -sn, 0], spin: Vec3 = [-sn, c, 0];
+        const X: Vec3 = [spin[0] * Math.cos(yaw), spin[1] * Math.cos(yaw), Math.sin(yaw)]; // its length, level
+        const N: Vec3 = [-Math.sin(tilt) * X[0] + ct * up[0], -Math.sin(tilt) * X[1] + ct * up[1], -Math.sin(tilt) * X[2] + ct * up[2]]; // its own up
+        const fr = Rf(a, z);
+        const topMid: Vec3 = [(fr - H / 2) * c, (fr - H / 2) * sn, z];
+        stairs.push({ angle: a, halfArc: len / 2 + 3 }); // (keep cover off it)
+        boxes.push({ id: nextId(), type: 'box', kind: 'ramp', angle: a, tilt, yaw, center: [topMid[0] - N[0] * hy, topMid[1] - N[1] * hy, topMid[2] - N[2] * hy], half: [len / 2 / ct, hy, width / 2], ring: ring as 0 | 1 });
       }
     }
     // Bases: a room with doorways and chamfered (45 degree) corners, a roof you
@@ -860,6 +888,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   if (cfg.twin) {
     for (let j = filtered.length - 1; j >= 0; j--) {
       const b = filtered[j];
+      if (b.ring !== undefined) continue; // (a jump ramp by the seam: placed on purpose)
       if (Math.abs(b.center[2]) < b.half[2] + cfg.twinGap / 2 + 2.5) filtered.splice(j, 1);
       else b.ring = b.center[2] >= 0 ? 1 : 0;
     }

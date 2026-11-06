@@ -99,3 +99,7 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
   font-size: 15px; line-height: 1.45; color: #e8f6ff; background: rgba(8, 16, 32, 0.72); border: 1px solid var(--hud-dim);
   padding: 8px 14px; opacity: 0; transition: opacity 0.4s; pointer-events: none; }
 #tip.on { opacity: 1; }
+
+.buttons.small { margin-top: -18px; }
+.buttons.small button { font-size: 12px; padding: 6px 14px; letter-spacing: 1px; opacity: 0.8; }
+#gfx-lost { background: rgba(2, 3, 10, 0.9); z-index: 9; }

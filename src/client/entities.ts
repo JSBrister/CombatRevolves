@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, convertDir, convertPoint, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_HAMMER, WEAPON_LACONIC, WEAPON_PISTOL } from '../sim';
 import { makeBike, makeGun, makePickup } from './models';
+import { disposeTree } from './dispose';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
 const PICKUP_GLOW: Record<string, number> = {
@@ -281,7 +282,7 @@ export class EntityViews {
   setViewWeapon(weapon: number, visible: boolean) {
     this.viewModel.visible = visible;
     if (weapon === this.viewWeapon) return;
-    this.viewModel.clear();
+    for (const c of [...this.viewModel.children]) disposeTree(c, undefined, true);
     const gun = makeGun(weapon);
     gun.traverse((o) => o.layers.set(LAYER_ROT_TRAILS)); // main camera only
     if (weapon === WEAPON_HAMMER) gun.position.x = 0.3; // pivot at the grip, so a swing sweeps the head
@@ -290,12 +291,15 @@ export class EntityViews {
   }
 
   reset() {
-    for (const v of this.players.values()) v.group.removeFromParent();
+    for (const v of this.players.values()) { disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); }
     for (const v of this.projs.values()) this.disposeProj(v);
-    for (const v of this.props.values()) v.removeFromParent();
-    for (const v of this.explosions.values()) v.removeFromParent();
-    for (const v of this.pickups.values()) v.group.removeFromParent();
-    for (const v of this.vehicles.values()) v.group.removeFromParent();
+    for (const v of this.props.values()) disposeTree(v, undefined, true);
+    for (const v of this.explosions.values()) disposeTree(v, undefined, true, new Set([this.unitSphere]));
+    for (const v of this.pickups.values()) disposeTree(v.group, undefined, true);
+    for (const v of this.vehicles.values()) disposeTree(v.group, undefined, true);
+    for (const d of this.debris) disposeTree(d.mesh, undefined, true);
+    for (const g of this.ghosts) disposeTree(g.group, undefined, true);
+    this.debris = []; this.ghosts = [];
     this.vehicles.clear();
     this.players.clear(); this.projs.clear(); this.props.clear(); this.explosions.clear(); this.pickups.clear();
   }
@@ -308,7 +312,8 @@ export class EntityViews {
   }
 
   private disposeProj(v: ProjView) {
-    v.sprite.removeFromParent(); v.core.removeFromParent(); v.marker.removeFromParent();
+    // (the glow texture is shared: keep it; the core's geometry and materials are this bolt's own)
+    disposeTree(v.sprite, undefined, true); disposeTree(v.core, undefined, true); disposeTree(v.marker, undefined, true);
     v.trail.dispose(); v.inTrail.dispose();
   }
 
@@ -456,7 +461,7 @@ export class EntityViews {
       v.group.scale.setScalar(p.size);
       v.marker.position.copy(v.group.position);
       if (v.gunWeapon !== p.weapon) {
-        v.gunHolder.clear();
+        for (const c of [...v.gunHolder.children]) if (c !== v.chargeGlow) disposeTree(c, undefined, true);
         const gun = makeGun(p.weapon);
         if (p.id === this.localId) gun.traverse((o) => o.layers.set(LAYER_SELF));
         v.gunHolder.add(gun);
@@ -489,7 +494,7 @@ export class EntityViews {
       const bare = p.shield <= 0 ? v.shieldFlash : 0;
       mat.emissive.setRGB(0.9 * bare, 0.1 * bare, 0.05 * bare);
     }
-    for (const [id, v] of this.players) if (!seenP.has(id)) { v.group.removeFromParent(); v.marker.removeFromParent(); this.players.delete(id); }
+    for (const [id, v] of this.players) if (!seenP.has(id)) { disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); this.players.delete(id); }
 
     // projectiles
     const pulse = 0.85 + 0.15 * Math.sin(performance.now() * 0.03);
@@ -551,7 +556,7 @@ export class EntityViews {
         mesh.rotateOnWorldAxis(axis, -dl / pr.radius);
       }
     }
-    for (const [id, mesh] of this.props) if (!seenR.has(id)) { mesh.removeFromParent(); this.props.delete(id); }
+    for (const [id, mesh] of this.props) if (!seenR.has(id)) { disposeTree(mesh, undefined, true); this.props.delete(id); }
 
     // pickups: floating, spinning, glowing; hidden while waiting to respawn
     const seenK = new Set<number>();
@@ -582,7 +587,7 @@ export class EntityViews {
       v.group.position.set(ip[0] + b.up[0] * bob, ip[1] + b.up[1] * bob, ip[2] + b.up[2] * bob);
       v.model.rotation.y = tNow * 1.5 + it.id;
     }
-    for (const [id, v] of this.pickups) if (!seenK.has(id)) { v.group.removeFromParent(); this.pickups.delete(id); }
+    for (const [id, v] of this.pickups) if (!seenK.has(id)) { disposeTree(v.group, undefined, true); this.pickups.delete(id); }
 
     // hover-bikes
     for (const veh of state.vehicles) {
@@ -651,7 +656,7 @@ export class EntityViews {
         (sh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (k === 1 ? 0.35 : k > 0.5 ? 0.6 : 0.9) * life);
       }
     }
-    for (const [id, grp] of this.explosions) if (!seenE.has(id)) { grp.removeFromParent(); this.explosions.delete(id); }
+    for (const [id, grp] of this.explosions) if (!seenE.has(id)) { disposeTree(grp, undefined, true, new Set([this.unitSphere])); this.explosions.delete(id); }
 
     // deaths: flying fragments and a fading ghost
     for (const d of this.debris) {
@@ -662,7 +667,7 @@ export class EntityViews {
       const f = Math.max(0, 1 - d.t / 1.4);
       (d.mesh.material as THREE.MeshStandardMaterial).opacity = f;
       d.mesh.scale.setScalar(0.4 + 0.6 * f);
-      if (f <= 0) d.mesh.removeFromParent();
+      if (f <= 0) disposeTree(d.mesh, undefined, true);
     }
     this.debris = this.debris.filter((d) => d.t < 1.4);
     for (const g of this.ghosts) {
@@ -671,14 +676,14 @@ export class EntityViews {
       const f = Math.max(0, 1 - g.t / 1.1);
       g.group.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined; if (m) m.opacity = (m.userData.base ?? 0.5) * f; });
       g.group.scale.setScalar(g.scale * (1 + 0.25 * g.t));
-      if (f <= 0) g.group.removeFromParent();
+      if (f <= 0) disposeTree(g.group, undefined, true);
     }
     this.ghosts = this.ghosts.filter((g) => g.t < 1.1);
 
     for (const b of this.beams) {
       b.t -= dtReal * 2.5;
       (b.line.material as THREE.MeshBasicMaterial).opacity = Math.max(0, b.t);
-      if (b.t <= 0) { b.line.removeFromParent(); b.line.geometry.dispose(); }
+      if (b.t <= 0) disposeTree(b.line, undefined, true);
     }
     this.beams = this.beams.filter((b) => b.t > 0);
     for (const sp of this.splashes) {
@@ -686,7 +691,7 @@ export class EntityViews {
       const dCam = this.cameraPos.distanceTo(sp.s.position);
       sp.s.scale.setScalar(Math.min(sp.size * (1.2 - sp.t), dCam * 0.15)); // never swamp the screen
       sp.s.material.opacity = Math.max(0, sp.t);
-      if (sp.t <= 0) sp.s.removeFromParent();
+      if (sp.t <= 0) disposeTree(sp.s, undefined, true);
     }
     this.splashes = this.splashes.filter((sp) => sp.t > 0);
     // mallet swings: progress, and the arc sweeping across then fading
@@ -701,7 +706,7 @@ export class EntityViews {
       a.mesh.geometry.dispose();
       a.mesh.geometry = new THREE.RingGeometry(a.inner, a.reach, 24, 1, -a.half, Math.max(0.001, len));
       (a.mesh.material as THREE.MeshBasicMaterial).opacity = 0.35 * Math.max(0, 1 - a.t);
-      if (a.t >= 1) { a.mesh.removeFromParent(); a.mesh.geometry.dispose(); }
+      if (a.t >= 1) disposeTree(a.mesh, undefined, true);
     }
     this.arcs = this.arcs.filter((a) => a.t < 1);
     // first-person gun: jab on melee, dip while reloading, sweep on a mallet swing

@@ -2230,3 +2230,27 @@ describe('42. bike fixes: parked bikes are just objects; bikes on the twin rings
     expect(R - Math.hypot(v.pos[0], v.pos[1])).toBeGreaterThan(v.radius); // hovering, not scraping
   });
 });
+
+describe('43. snipers stay on their lookouts; twin rings get jump ramps', () => {
+  it('a sniper placed on a lookout is still up there after 15 s of play', () => {
+    const { state, localId, botIds } = startLevel(levelById('c3')!);
+    const me = state.players.find((p) => p.id === localId)!;
+    me.maxHealth = me.health = 1e9;
+    const R = state.config.R;
+    run(state, 120 * 15, (s) => [cmdFor(s, localId), ...botIds.map((b) => botInput(s, b))]);
+    for (const sn of state.players.filter((p) => p.enemyType === 'sniper')) expect(R - Math.hypot(sn.pos[0], sn.pos[1])).toBeGreaterThan(10);
+  });
+  it('twin rings: jump ramps by the seam climb the way you ride to match the other ring', () => {
+    const { state } = startLevel(levelById('s-twin-bikes')!);
+    const jumps = state.level.boxes.filter((b) => b.kind === 'ramp' && b.yaw !== undefined);
+    expect(jumps.length).toBeGreaterThan(3);
+    for (const b of jumps) {
+      // the end that's further along the box's own +x is the high end: it points toward the seam...
+      const towardSeam = Math.sin(b.yaw!) * (b.ring ? -1 : 1);
+      expect(towardSeam).toBeGreaterThan(0.2);
+      // ...and against this ring's spin (ring 0: antispinward, cos < 0; ring 1: spinward, cos > 0)
+      expect(Math.cos(b.yaw!) * (b.ring ? 1 : -1)).toBeGreaterThan(0.8);
+      expect(b.tilt).toBeGreaterThan(0);
+    }
+  });
+});

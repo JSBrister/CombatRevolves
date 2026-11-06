@@ -17,10 +17,27 @@ import './style.css';
 
 // ---------------------------------------------------------------- setup
 const canvas = document.getElementById('view') as HTMLCanvasElement;
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
+// Graphics quality: 'low' (no sun shadows, one pixel per CSS pixel, no antialiasing)
+// for weaker machines. Chosen automatically the first time, then remembered;
+// the title screen has a button to switch (it reloads the page).
+const lowSpec = ((navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 8) <= 4 || (navigator.hardwareConcurrency ?? 8) <= 4;
+let gfx: 'high' | 'low' = lowSpec ? 'low' : 'high';
+try { const g = localStorage.getItem('cr-graphics'); if (g === 'high' || g === 'low') gfx = g; } catch { /* storage blocked: use the guess */ }
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: gfx === 'high', logarithmicDepthBuffer: true, powerPreference: gfx === 'high' ? 'high-performance' : 'default' });
+renderer.setPixelRatio(gfx === 'high' ? Math.min(window.devicePixelRatio, 2) : 1);
+renderer.shadowMap.enabled = gfx === 'high';
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// If the GPU drops us (driver reset, out of memory), say so, and rebuild when it comes back.
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  const el = document.getElementById('gfx-lost');
+  if (el) el.classList.remove('hidden');
+});
+canvas.addEventListener('webglcontextrestored', () => {
+  const el = document.getElementById('gfx-lost');
+  if (el) el.classList.add('hidden');
+  startGame(currentLevel);
+});
 const rs = new RingScene();
 const views = new EntityViews(rs);
 const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 2e5);
@@ -561,6 +578,11 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('#loading button[da
   b.addEventListener('click', () => showLevels(b.dataset.mode as GameMode));
 }
 $('btn-back').addEventListener('click', () => show('title'));
+$('btn-gfx').textContent = `Graphics: ${gfx === 'high' ? 'High' : 'Low'}`;
+$('btn-gfx').addEventListener('click', () => {
+  try { localStorage.setItem('cr-graphics', gfx === 'high' ? 'low' : 'high'); } catch { /* can't remember it: still switch for now */ }
+  location.reload();
+});
 
 // Build a level: the form, a random one, and a link that rebuilds it.
 let custom: CustomSettings = { ...CUSTOM_DEFAULTS };

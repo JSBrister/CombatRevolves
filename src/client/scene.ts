@@ -4,6 +4,7 @@
 // trails) are fixed in the non-rotating frame.
 
 import * as THREE from 'three';
+import { disposeTree } from './dispose';
 import { floorRadius, type Hole, type Level, type SimConfig } from '../sim';
 import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, rockTexture, sandTexture, snowTexture, wallTexture } from './textures';
 
@@ -62,8 +63,10 @@ export class RingScene {
   }
 
   build(cfg: SimConfig, level: Level, sky: 'space' | 'earth' = 'space') {
-    this.level.clear();
-    this.inertial.clear();
+    // free the previous level's GPU memory (keeping the shared original textures)
+    const keep = new Set<THREE.Texture>([...Object.values(this.textures), this.glow]);
+    for (const c of [...this.level.children]) disposeTree(c, keep);
+    for (const c of [...this.inertial.children]) disposeTree(c, keep);
     this.sky = sky;
     this.floorChoice = cfg.floorTexture;
     if (sky === 'earth') return this.buildEarth(cfg, level);

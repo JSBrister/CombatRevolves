@@ -151,8 +151,12 @@ export function addPickup(state: SimState, item: ItemKind, pos: Vec3, amount: nu
 export function freeSpotNear(state: SimState, pos: Vec3, size: number): Vec3 {
   const b = localBasis(pos);
   const r = PLAYER_RADIUS * size, h = PLAYER_HALF_SEG * size;
+  // (checked a little above where it stands, so standing ON something - a
+  // floor, a lookout platform - counts as fitting; otherwise the search would
+  // "free" a sniper by moving it off the edge of its lookout into thin air)
+  const lift = 0.1;
   const fits = (q: Vec3) => [-1, 0, 1].every((k) => {
-    const c: Vec3 = [q[0] + b.up[0] * k * h, q[1] + b.up[1] * k * h, q[2]];
+    const c: Vec3 = [q[0] + b.up[0] * (k * h + lift), q[1] + b.up[1] * (k * h + lift), q[2] + b.up[2] * (k * h + lift)];
     return levelSdf(state.level, state.config, c).d - r > 0.05;
   });
   if (fits(pos)) return pos;
