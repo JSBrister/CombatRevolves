@@ -156,6 +156,7 @@ The deathmatch list groups the oversized levels (radius or half-width of 500 m o
   - **Geometry:** floors and walls look the same from either frame. Boxes belong to one ring, and a query from the other frame rotates into theirs. Nothing straddles the seam.
   - **Rendering:** the client draws everything in the frame of the ring you're on, so the other ring visibly turns past.
   - **Tests:** frame conversion is exact both ways. A bolt fired across the seam flies one straight inertial line through both frames, to 1e-6 m.
+  - **Bikes** are simulated in their own ring's frame too, so you can match the other ring's speed and cross. *Counter-Spin Raceway* (150 m rings at 0.4 g, 16 bikes) is built for it: the other floor goes by at 49 m/s, just under a boosted bike's top speed. Ride against the spin flat out, hop the seam, and you land nearly at rest on the other ring. A test does exactly that.
   - **Limits:** blasts and the Mallet don't reach across the seam, and bodies only touch things in their own ring. Each ring's things are at least 2.5 m from the seam, so this rarely shows.
 - **Nested Spheres** (`outerShell`): a 60 m ball inside a 120 m shell, with gravity toward the centre plus the spin.
   - **Weights:** the spin is set so the synchronous radius (where gravity and spin cancel) is about 90 m, halfway between. On the ball gravity wins (1 g at the poles, 0.7 g at its equator). On the inside of the shell the spin wins, but only within about 50° of its equator (0.35 g there). Beyond that (an orange ring) you fall off, down to the ball.
@@ -167,7 +168,7 @@ The deathmatch list groups the oversized levels (radius or half-width of 500 m o
 - **Hover-bikes** (big rings, where there are plenty, one beside every spawn point; or spawn one from the debug panel's *Give*): a physics sphere with its own health.
   - **Hover:** it floats on a damped spring at a ride height over whatever floor-like surface is under it (floor, ramp, hillside), so it glides over bumps and ramp lips and soaks up landings, rather than rolling on its sphere.
   - **Handling:** it faces where you look. Sliding sideways dies away fast (grip) while rolling forward barely slows, so it carves round corners; momentum, the spin and slopes still matter. W/S thrust, A/D strafe, Space hops, Shift boosts. It leans into turns and tilts with the ground.
-  - **Damage:** only very fast crashes into walls or boxes (over 40 m/s) hurt the bike; landings never do; the rider is never hurt by crashes. Running people over hurts them from just 3 m/s and throws them along the bike's path and up into the air (credited to the rider), and the bike barely slows.
+  - **Damage:** only very fast crashes into walls or boxes (over 40 m/s) hurt the bike; landings never do; the rider is never hurt by crashes. A ridden bike moving at you runs you over from just 3 m/s: it hurts, and throws you along the bike's path and up into the air (credited to the rider), and the bike barely slows. A parked bike is just a heavy object: walk into it and you bump it.
   - Shots, blasts, the mallet and sticky grenades work on it. At zero health it explodes, throws the rider clear and respawns at its spot later.
   - Parked bikes sleep until something disturbs them, so even the huge levels' dozens of bikes cost almost nothing.
   - All of it is tunable in the debug panel.

@@ -2137,3 +2137,96 @@ describe('41. walking over a pole', () => {
     expect(Math.abs(p.pos[1])).toBeLessThan(0.15 * R);
   });
 });
+
+describe('42. bike fixes: parked bikes are just objects; bikes on the twin rings', () => {
+  it('walking into a parked bike just bumps you (no damage, no launch)', () => {
+    const { state: s, localId: id } = startLevel(levelById('s-large')!);
+    s.players = s.players.filter((p) => p.id === id);
+    s.level.boxes = [];
+    const p = s.players[0], v = s.vehicles[0];
+    const b = localBasis(v.pos);
+    const R = s.config.R, a = Math.atan2(v.pos[1], v.pos[0]) - 3 / R;
+    p.pos = [(R - 0.9) * Math.cos(a), (R - 0.9) * Math.sin(a), v.pos[2]];
+    p.vel = [0, 0, 0];
+    const hp = p.health + p.shield;
+    let maxUp = 0, maxSpeed = 0;
+    for (let i = 0; i < 120; i++) {
+      step(s, [cmdFor(s, id, { yaw: 0, moveY: 1 })], s.tick); // run straight at it (spinward)
+      maxUp = Math.max(maxUp, dot(p.vel, localBasis(p.pos).up));
+      maxSpeed = Math.max(maxSpeed, Math.hypot(...p.vel));
+    }
+    expect(p.health + p.shield).toBe(hp);
+    expect(maxUp).toBeLessThan(1.5);
+    expect(maxSpeed).toBeLessThan(s.config.sprintSpeed + 2);
+    void b;
+  });
+  const twinBikes = () => startLevel({ id: 't-bikes', mode: 'sandbox', name: 'twin bikes', blurb: '', seed: 5, config: { R: 160, halfWidth: 30, twin: true }, variedWalls: false, bots: 0 });
+  it('a parked bike on the other ring stays put in its own frame', () => {
+    const { state: s, localId: id } = twinBikes();
+    const v = s.vehicles.find((q) => q.pos[2] > 2)!;
+    expect(v).toBeTruthy();
+    v.vel = [0, 0, 0.02]; // wake it
+    const p0 = clone(v.pos);
+    run(s, 120 * 4, () => [cmdFor(s, id)]);
+    expect(dist(v.pos, p0)).toBeLessThan(0.3);
+    expect(v.pos[2]).toBeGreaterThan(0);
+  });
+  it('Counter-Spin Raceway: match the other ring\'s speed, hop the seam, and land nearly at rest on it', () => {
+    const { state: s, localId: id } = startLevel(levelById('s-twin-bikes')!);
+    s.players = s.players.filter((p) => p.id === id);
+    s.level.boxes = [];
+    const p = s.players[0], R = s.config.R, w = omegaOf(s.config);
+    const v = s.vehicles.reduce((a, b) => (Math.abs(a.pos[2] + 12) < Math.abs(b.pos[2] + 12) ? a : b));
+    const a0 = Math.atan2(v.pos[1], v.pos[0]);
+    v.pos = [(R - 1) * Math.cos(a0), (R - 1) * Math.sin(a0), -12];
+    p.pos = clone(v.pos);
+    const c = (o: Partial<InputCmd> = {}) => cmdFor(s, id, { yaw: Math.PI, buttons: BTN_SPRINT, ...o });
+    step(s, [c({ buttons: BTN_SPRINT | BTN_USE })], s.tick);
+    run(s, 120 * 8, () => [c({ moveY: 1 })]); // flat out against the spin
+    expect(-dot(v.vel, localBasis(v.pos).spin)).toBeGreaterThan(2 * w * R - 2);
+    let crossed = false;
+    for (let i = 0; i < 120 * 4; i++) {
+      const hop = v.pos[2] > -3.5 && v.pos[2] < -2 ? BTN_JUMP : 0;
+      step(s, [c({ moveY: 1, yaw: Math.PI - 0.35, buttons: BTN_SPRINT | hop })], s.tick);
+      if (v.pos[2] > 0) crossed = true;
+    }
+    expect(crossed).toBe(true);
+    expect(v.pos[2]).toBeGreaterThan(0);
+    expect(Math.hypot(...v.vel)).toBeLessThan(20); // nearly at rest on the other ring (not 49 m/s)
+    expect(v.health).toBe(v.maxHealth);
+  });
+  it('a bike jumping the seam keeps its inertial velocity, then hovers on the other ring', () => {
+    const { state: s, localId: id } = twinBikes();
+    s.level.boxes = [];
+    const v = s.vehicles[0];
+    const R = s.config.R, w = omegaOf(s.config);
+    // over ring A, just short of the seam, drifting across it
+    v.pos = [R - 2.2, 0, -3]; // above the curb along the seam
+    v.vel = [0, 0, 8];
+    v.contactNormal = null;
+    const rider = s.players.find((q) => q.id === id)!;
+    rider.vehicle = v.id; v.driver = id; // riding it, facing the seam (+z)
+    const ride = () => [cmdFor(s, id, { yaw: Math.PI / 2 })];
+    const vin = (): Vec3 => {
+      const f = v.pos[2] >= 0 ? 1 : 0, wf = f ? -w : w, th = f ? -s.frameAngle : s.frameAngle;
+      const x = [v.vel[0] - wf * v.pos[1], v.vel[1] + wf * v.pos[0], v.vel[2]], c = Math.cos(th), sn = Math.sin(th);
+      return [c * x[0] - sn * x[1], sn * x[0] + c * x[1], x[2]];
+    };
+    let crossed = false;
+    for (let i = 0; i < 60 && !crossed; i++) {
+      const before = vin();
+      step(s, ride(), s.tick);
+      if (v.pos[2] >= 0) {
+        crossed = true;
+        const after = vin();
+        // one tick of gravity and hovering at most: no jump of 2 omega R
+        expect(Math.hypot(after[0] - before[0], after[1] - before[1], after[2] - before[2])).toBeLessThan(1);
+      }
+    }
+    expect(crossed).toBe(true);
+    run(s, 120 * 3, ride);
+    expect(v.alive).toBe(true);
+    expect(v.pos[2]).toBeGreaterThan(0);
+    expect(R - Math.hypot(v.pos[0], v.pos[1])).toBeGreaterThan(v.radius); // hovering, not scraping
+  });
+});

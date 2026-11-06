@@ -605,8 +605,10 @@ function nextCampaignLevel(): LevelDef | undefined {
 /** Campaign over: give it a moment, then release the mouse and show the result. */
 function checkOutcome(now: number) {
   if (state.mode !== 'campaign' || state.outcome === 'playing') return;
+  // only while you're in the level: once you've gone back to the menus, leave them be
+  if (screen !== 'playing' && screen !== 'paused') return;
   if (!outcomeAt) outcomeAt = now;
-  if (now - outcomeAt < 1500 || screen === 'outcome') return;
+  if (now - outcomeAt < 1500) return;
   const won = state.outcome === 'won';
   $('outcome-title').textContent = won ? 'LEVEL CLEAR' : 'YOU DIED';
   const next = nextCampaignLevel();

@@ -5,7 +5,8 @@
 // it explodes, throws the rider off, and respawns at its spot later.
 
 import { closestOnSeg } from './geom';
-import { levelSdf } from './level';
+import { levelSdf, setSdfFrame } from './level';
+import { apart, convertBody, convertDir, frameOf, frameOmega } from './twin';
 import { localBasis, viewVectors } from './physics';
 import { BTN_JUMP, BTN_SPRINT, BTN_USE, DT, type Player, type SimState, type Vehicle } from './types';
 import { type Vec3, add, addScaled, clone, dist, dot, len, norm, scale, sub } from './vec';
@@ -99,6 +100,10 @@ export function updateVehicles(state: SimState, omega: number) {
       ramPlayers(state, v, undefined);
       continue;
     }
+    // twin rings: simulate it in the frame of the ring it's over (that ring's spin and geometry)
+    const frame = frameOf(cfg, v.pos);
+    setSdfFrame(frame, state.frameAngle);
+    const w = frameOmega(omega, frame);
     const up = localBasis(v.pos).up;
     // Hover: a damped spring holds the bike at a ride height over whatever
     // floor-like surface is under it (floor, ramp, hillside), so it glides
@@ -144,11 +149,18 @@ export function updateVehicles(state: SimState, omega: number) {
     let damage = 0;
     // (the hover spring holds it up: no contact support force, or gravity would be cancelled while it floats)
     v.contactNormal = null;
-    moveSphereBody(state.level, cfg, omega, v, cfg.bikeBounce, DT, undefined, 0, (speed, n) => {
+    moveSphereBody(state.level, cfg, w, v, cfg.bikeBounce, DT, undefined, 0, (speed, n) => {
       if (dot(n, up) > 0.6) return; // (floor-like: a landing)
       if (speed > cfg.bikeCrashSpeed) damage = Math.max(damage, (speed - cfg.bikeCrashSpeed) * cfg.bikeCrashDamage);
     });
     v.contactNormal = hovering ? probe.n : v.contactNormal;
+    // crossed the seam between twin rings: convert it (exactly) into the other ring's frame
+    const to = frameOf(cfg, v.pos);
+    if (to !== frame) {
+      const th = state.frameAngle + omega * DT; // (its new position is for the end of the tick)
+      convertBody(v.pos, v.vel, frame, to, th, omega);
+      if (v.contactNormal) v.contactNormal = convertDir(v.contactNormal, frame, to, th);
+    }
     if (damage > 0) {
       damageVehicle(state, v, v.lastAttacker >= 0 && tick - v.lastDamageTick < secs(10) ? v.lastAttacker : rider?.id ?? -1, damage);
       if (!v.alive) continue;
@@ -171,7 +183,7 @@ export function updateVehicles(state: SimState, omega: number) {
 function ramPlayers(state: SimState, v: Vehicle, rider: Player | undefined) {
   const cfg = state.config;
   for (const p of state.players) {
-    if (!p.alive || p.vehicle >= 0 || p === rider) continue;
+    if (!p.alive || p.vehicle >= 0 || p === rider || apart(cfg, p.pos, v.pos)) continue;
     if (dist(p.pos, v.pos) > 4) continue;
     const up = localBasis(p.pos).up;
     const h = capsuleHalfSeg(p);
@@ -185,16 +197,19 @@ function ramPlayers(state: SimState, v: Vehicle, rider: Player | undefined) {
     p.pos = addScaled(p.pos, n, -(minD - d) * wp);
     const closing = -dot(sub(v.vel, p.vel), n);
     if (closing <= 0) continue;
-    // the bike barely notices; the pedestrian is thrown along its path and popped up
-    const j = (1 + 0.3) * closing;
-    v.vel = addScaled(v.vel, n, j * wb * 0.3);
-    const hit = closing > cfg.bikeRamSpeed;
-    const heading = len(v.vel) > 1e-6 ? norm(v.vel) : scale(n, -1);
+    // A parked bike is just a heavy object: you bump into it (and nudge it).
+    // Only a ridden bike that is itself moving at you runs you over, and then
+    // the damage and the throw grow with the closing speed.
+    const bikeApproach = -dot(v.vel, n);
+    const hit = !!rider && bikeApproach > cfg.bikeRamSpeed && closing > cfg.bikeRamSpeed;
+    const j = (1 + (hit ? 0.3 : 0)) * closing;
+    v.vel = addScaled(v.vel, n, j * wb * (hit ? 0.3 : 1));
     p.vel = addScaled(p.vel, n, -j * wp);
-    if (hit) p.vel = addScaled(addScaled(p.vel, heading, cfg.bikeRamThrow * closing), up, 3 + cfg.bikeRamLift * closing);
-    p.grounded = false;
-    p.groundNormal = null;
     if (hit) {
+      const heading = len(v.vel) > 1e-6 ? norm(v.vel) : scale(n, -1);
+      p.vel = addScaled(addScaled(p.vel, heading, cfg.bikeRamThrow * closing), up, 3 + cfg.bikeRamLift * closing);
+      p.grounded = false;
+      p.groundNormal = null;
       const dmg = (closing - cfg.bikeRamSpeed) * cfg.bikeRamDamage;
       damagePlayer(state, p, rider?.id ?? -1, dmg, dmg, 'roadkill');
     }

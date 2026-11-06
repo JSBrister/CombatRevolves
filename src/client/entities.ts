@@ -2,7 +2,7 @@
 // the previous and current tick.
 
 import * as THREE from 'three';
-import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, convertPoint, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_HAMMER, WEAPON_LACONIC, WEAPON_PISTOL } from '../sim';
+import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, convertDir, convertPoint, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_HAMMER, WEAPON_LACONIC, WEAPON_PISTOL } from '../sim';
 import { makeBike, makeGun, makePickup } from './models';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
@@ -605,7 +605,9 @@ export class EntityViews {
       q.setFromRotationMatrix(m);
       qy.setFromAxisAngle(Y, -veh.yaw);
       // tilt with the ground it's hovering over, and lean into turns
-      const ground = veh.contactNormal ? this.toView(veh.contactNormal as Vec3, this.viewTheta) : null;
+      // (a direction, in the bike's own ring's frame: rotate it like one, not like a point)
+      const bf: 0 | 1 = this.twin && veh.pos[2] >= 0 ? 1 : 0;
+      const ground = veh.contactNormal ? (this.twin ? convertDir(veh.contactNormal as Vec3, bf, this.viewFrame, this.viewTheta) : veh.contactNormal) : null;
       const tiltQ = new THREE.Quaternion();
       if (ground) tiltQ.setFromUnitVectors(new THREE.Vector3(...b.up), new THREE.Vector3(...ground).normalize());
       let dyaw = veh.yaw - vw.prevYaw;
