@@ -341,7 +341,7 @@ export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacl
       const b = planetDir(lon, lat), r = Math.hypot(...pd.pos);
       return (r > (R + R2) / 2) === outer && Math.acos(Math.min(1, (pd.pos[0] * b[0] + pd.pos[1] * b[1] + pd.pos[2] * b[2]) / r)) * r < m;
     });
-  if (R2 > 0) {
+  if (R2 > 0 && cfg.launchPads) {
     // Launch pads round both equators: up from the ball, down from the shell.
     // Straight up doesn't work: Coriolis turns the climb into an antispinward
     // slide, and arriving at the shell moving against the spin you're too light

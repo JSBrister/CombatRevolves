@@ -23,6 +23,7 @@ export const defaultConfig = (): SimConfig => ({
   world: 'ring', // 'planet' = stand on the outside of a spinning ball (radius R, surface gravity g)
   planetSpin: 0.4, // planet: the spin cancels this much of g at the equator
   outerShell: 0, // planet: radius of a hollow shell round it (0 = none)
+  launchPads: true, // nested spheres: pads that throw you between ball and shell
   twin: false, // two counter-rotating rings side by side
   twinGap: 1.2, // the gap at the seam between them (m)
   arena: 0, // 0 = whole ring; >0 = a walled stretch this long (m), used by the Earth level
@@ -40,7 +41,7 @@ export const defaultConfig = (): SimConfig => ({
   floorTexture: 'auto', // 'auto' (deck plating; grass on hills), 'deck', 'grass', 'sand', 'snow' or 'rock'
   biomes: false, // with windows: a different biome on each land strip (grass, sand, snow, rock)
   windows: 0, // O'Neill-style glass strips along the ring (you can walk on them)
-  spinChange: 0, // >0: every spinPeriod s the spin winds down by this fraction (1 = to a stop) and back up
+  spinChange: 0, // >0: every spinPeriod s the spin winds down by this fraction (1 = to a stop, 2 = right round to full speed backwards) and back
   spinPeriod: 120,
   comboHits: 6, // Seeker Swarm: this many hits on one target, each within comboWindow s of the last,
   comboWindow: 0.6, // ...set off a "supercombine" blast on them

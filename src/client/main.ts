@@ -128,7 +128,7 @@ fRing.add(cfg, 'coriolis').name('Coriolis force');
 fRing.add(cfg, 'dragType', ['none', 'linear', 'quadratic']).name('air drag');
 fRing.add(cfg, 'dragCoeff', 0, 1, 0.001).name('drag coeff');
 fRing.add(cfg, 'fallKillDistance', 2, 500, 1).name('fall-off kill distance (m)');
-fRing.add(cfg, 'spinChange', 0, 1, 0.05).name('spin change (fraction lost each cycle)').listen();
+fRing.add(cfg, 'spinChange', 0, 2, 0.05).name('spin change (1 = stops, 2 = reverses)').listen();
 fRing.add(cfg, 'spinPeriod', 5, 600, 1).name('spin change cycle (s)').listen();
 fRing.add(cfg, 'planetPull', 0, 30, 0.05).name('planet pull (m/s²)').listen();
 fRing.add(cfg, 'gravity', 0, 30, 0.05).name('real gravity to the floor (m/s²)').listen();

@@ -281,6 +281,11 @@ export const LEVELS: LevelDef[] = [
   { id: 's-twin-bikes', mode: 'sandbox', name: 'Counter-Spin Raceway (twin rings, bikes)', seed: 49,
     config: { R: 150, g: 4, halfWidth: 40, twin: true }, variedWalls: false, vehicles: 16, bots: 3,
     blurb: 'Two 150 m rings at 0.4 g spinning opposite ways: the other floor goes by at 49 m/s, just under a boosted bike\'s top speed. Ride against the spin flat out, hop the seam, and land gently on the other ring.' },
+  { id: 's-reversal', mode: 'sandbox', name: 'Reversal (the spin turns round)', seed: 50, config: { R: 100, spinChange: 2, spinPeriod: 80 }, bots: 3,
+    blurb: 'Every 80 s the ring winds down through a dead stop to full speed BACKWARDS, holds, and comes back. Spinward becomes antispinward, and the Euler force shoves everything along the floor while it changes.' },
+  { id: 's-tides', mode: 'sandbox', name: 'Tidal Spheres (nested, cycling spin)', seed: 51,
+    config: { world: 'planet', R: 60, g: 9.81, planetSpin: 2, outerShell: 75, launchPads: false, spinChange: 0.92, spinPeriod: 60 }, props: false, bots: 4,
+    blurb: 'A ball inside a shell, and the spin comes and goes. Spun up, only the ball\'s poles hold you; everyone else is flung up to the shell. Spun down, the shell lets go and everyone falls back to the ball.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
     blurb: '140 m across: room to flank, and to watch your shots curve sideways.' },
   { id: 's-planet', mode: 'sandbox', name: 'Skyhook (planet below)', seed: 34, config: { R: 100, planetPull: 8.8, planetAngle: Math.PI }, bots: 2,
@@ -294,7 +299,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 

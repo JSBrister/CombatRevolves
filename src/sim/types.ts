@@ -15,6 +15,7 @@ export interface SimConfig {
   world: 'ring' | 'planet'; // 'planet': you stand on the OUTSIDE of a spinning ball of radius R, with gravity g toward its centre
   planetSpin: number; // planet: how much of g the spin cancels at the equator (0..1); sets the spin rate
   outerShell: number; // planet: >0 = a hollow shell of this radius round the ball, walkable on its inside near its equator
+  launchPads: boolean; // nested spheres: launch pads between ball and shell
   twin: boolean; // two rings side by side spinning opposite ways (z < 0 at +omega, z > 0 at -omega), a gap at the seam
   twinGap: number; // width of the gap between them (m)
   arena: number; // 0 = the whole ring is playable; >0 = only this many metres of it (end walls), e.g. Earth
@@ -38,7 +39,7 @@ export interface SimConfig {
   floorTexture: 'auto' | 'deck' | 'grass' | 'sand' | 'snow' | 'rock'; // how the floor looks (rendering only)
   biomes: boolean; // O'Neill windows: each land strip its own biome (grass, sand, snow...); mountains on the snow
   windows: number; // O'Neill-style: this many glass strips the length of the ring, alternating with land
-  spinChange: number; // 0 = steady spin; >0: the spin periodically drops by this fraction (1 = stops dead) and comes back
+  spinChange: number; // 0 = steady spin; >0: the spin periodically drops by this fraction (1 = stops dead, 2 = full speed backwards) and comes back
   spinPeriod: number; // s per spin-change cycle
   comboHits: number; // this many seeker hits on one target, each within comboWindow s of the last...
   comboWindow: number;

@@ -2254,3 +2254,57 @@ describe('43. snipers stay on their lookouts; twin rings get jump ramps', () => 
     }
   });
 });
+
+describe('44. reversing spin; tidal spheres', () => {
+  it('a reversing spin goes right round to full speed backwards; free flight stays a straight inertial line', () => {
+    const s = empty({ R: 400, spinChange: 2, spinPeriod: 40 });
+    expect(spinFactor(s.config, 0.66 * 40).f).toBeCloseTo(-1, 9);
+    run(s, Math.round((0.51 * 40) / DT)); // ramping down, about to pass through zero
+    const toIn = (p: Vec3): Vec3 => { const c = Math.cos(s.frameAngle), sn = Math.sin(s.frameAngle); return [c * p[0] - sn * p[1], sn * p[0] + c * p[1], p[2]]; };
+    const w = spinAt(s.config, s.tick).omega;
+    const r: Vec3 = [0, -250, 0];
+    const b = spawnBolt(s, -1, 'rifle', r, [w * r[1] + 6, -w * r[0] + 2, 0.3]);
+    b.expireTick = s.tick + 1e6;
+    run(s, 1);
+    const pts: Vec3[] = [];
+    let wentNegative = false;
+    for (let i = 0; i < 6; i++) { pts.push(toIn(b.pos)); run(s, 120); if (spinAt(s.config, s.tick).omega < 0) wentNegative = true; }
+    expect(wentNegative).toBe(true);
+    const d0 = sub(pts[1], pts[0]);
+    for (let i = 2; i < pts.length; i++) { const di = sub(pts[i], pts[i - 1]); for (let k = 0; k < 3; k++) expect(Math.abs(di[k] - d0[k])).toBeLessThan(1e-3); }
+  });
+  const tides = () => {
+    const { state, localId } = startLevel(levelById('s-tides')!);
+    state.players = state.players.filter((p) => p.id === localId);
+    state.level.boxes = [];
+    expect(state.level.pads ?? []).toHaveLength(0);
+    return { s: state, id: localId, p: state.players[0] };
+  };
+  const put = (p: { pos: Vec3; vel: Vec3 }, r: number, lat: number, lon = 0.4) => {
+    p.pos = [r * Math.cos(lat) * Math.cos(lon), r * Math.cos(lat) * Math.sin(lon), r * Math.sin(lat)];
+    p.vel = [0, 0, 0];
+  };
+  it('spun up: flung from the ball\'s equator up to the shell (alive); the poles still hold you', () => {
+    const { s, id, p } = tides();
+    run(s, Math.round((0.1 * s.config.spinPeriod) / DT), () => [cmdFor(s, id)]); // into the fast part
+    put(p, s.config.R + 0.95, 0.05);
+    let reached = false;
+    for (let i = 0; i < 120 * 10 && !reached; i++) { step(s, [cmdFor(s, id)], s.tick); reached = p.grounded && Math.hypot(...p.pos) > s.config.outerShell - 3; }
+    expect(reached).toBe(true);
+    expect(p.alive).toBe(true);
+    expect(p.health + p.shield).toBe(p.maxHealth + p.maxShield); // landed gently enough
+    put(p, s.config.R + 0.95, (80 * Math.PI) / 180);
+    run(s, 240, () => [cmdFor(s, id)]);
+    expect(p.grounded).toBe(true);
+    expect(Math.hypot(...p.pos)).toBeLessThan(s.config.R + 2);
+  });
+  it('spun down: the shell lets go and you fall back to the ball (alive)', () => {
+    const { s, id, p } = tides();
+    run(s, Math.round((0.62 * s.config.spinPeriod) / DT), () => [cmdFor(s, id)]); // into the slow part
+    put(p, s.config.outerShell - 0.95, 0.05);
+    let reached = false;
+    for (let i = 0; i < 120 * 8 && !reached; i++) { step(s, [cmdFor(s, id)], s.tick); reached = p.grounded && Math.hypot(...p.pos) < s.config.R + 3; }
+    expect(reached).toBe(true);
+    expect(p.health + p.shield).toBe(p.maxHealth + p.maxShield);
+  });
+});

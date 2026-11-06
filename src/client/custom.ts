@@ -55,7 +55,7 @@ const FIELDS: Field[] = [
   { key: 'holes', label: 'Holes in the floor', min: 0, max: 60, step: 1, ringOnly: true },
   { key: 'deck', label: 'Upper deck height (m, 0 = none)', min: 0, max: 30, step: 1, ringOnly: true },
   { key: 'windows', label: "O'Neill windows", min: 0, max: 6, step: 1, ringOnly: true },
-  { key: 'spinChange', label: 'Spin loss per cycle (1 = stops)', min: 0, max: 1, step: 0.05 },
+  { key: 'spinChange', label: 'Spin change per cycle (1 = stops, 2 = reverses)', min: 0, max: 2, step: 0.05 },
   { key: 'spinPeriod', label: 'Spin cycle (s)', min: 10, max: 600, step: 5 },
   { key: 'planetSpin', label: 'Planet: spin (fraction of g at equator)', min: 0, max: 0.95, step: 0.05 },
   { key: 'planet', label: 'Planet pull (fraction of g)', min: 0, max: 0.95, step: 0.05 },
