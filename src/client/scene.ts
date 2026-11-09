@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { disposeTree } from './dispose';
-import { DISK_THICKNESS, diskSurface, floorRadius, towerPoint, type Hole, type Level, type SimConfig, type TowerFloor } from '../sim';
+import { DISK_THICKNESS, diskBumpsAt, diskSurface, floorRadius, hillsAt, planetBumpsAt, towerPoint, type Hole, type Level, type SimConfig, type TowerFloor } from '../sim';
 import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, rockTexture, sandTexture, snowTexture, wallTexture } from './textures';
 
 export const LAYER_ROT_TRAILS = 1;
@@ -101,7 +101,7 @@ export class RingScene {
     floorGeo.rotateX(Math.PI / 2);
     const tube = level.terrain?.tube;
     if (tube && tube.kind !== 'half') {
-      this.level.add(this.tubeMesh(cfg, tube.kind, tube.radius));
+      this.level.add(this.tubeMesh(cfg, tube.kind, tube.radius, level));
     } else if (level.terrain) {
       this.level.add(this.terrainMesh(cfg, level));
       if (level.terrain.sphere && W > 0.9 * R) this.sphereMarkings(cfg);
@@ -183,12 +183,19 @@ export class RingScene {
       const tint = k ? 0xffe2c8 : 0xc8e2ff; // the two rings in slightly different light
       const tex = this.floorTex('deck');
       tex.repeat.set((2 * Math.PI * R) / 5, len / 5);
-      const fg = new THREE.CylinderGeometry(R, R, len, segs, 1, true);
-      fg.rotateX(Math.PI / 2);
-      fg.translate(0, 0, zc);
-      const floor = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: tex, color: tint, side: THREE.BackSide, roughness: 0.85, metalness: 0.2 }));
-      floor.receiveShadow = true;
-      grp.add(floor);
+      if (level.terrain) {
+        // hills: this ring's half of the terrain (its hills are fixed in its own frame)
+        const tm = this.terrainMesh(cfg, level, k ? [g, W + T] : [-(W + T), -g]);
+        (tm.material as THREE.MeshStandardMaterial).color.set(tint);
+        grp.add(tm);
+      } else {
+        const fg = new THREE.CylinderGeometry(R, R, len, segs, 1, true);
+        fg.rotateX(Math.PI / 2);
+        fg.translate(0, 0, zc);
+        const floor = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: tex, color: tint, side: THREE.BackSide, roughness: 0.85, metalness: 0.2 }));
+        floor.receiveShadow = true;
+        grp.add(floor);
+      }
       // a stripe down the middle of each ring
       const st = new THREE.CylinderGeometry(R - 0.02, R - 0.02, 0.6, segs, 1, true);
       st.rotateX(Math.PI / 2);
@@ -398,21 +405,36 @@ export class RingScene {
     const tex = this.floorTex('grass');
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.repeat.set((2 * Math.PI * R) / 6, (Math.PI * R) / 6);
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(R, 384, 192), new THREE.MeshStandardMaterial({ map: tex, color: this.floorChoice === 'auto' ? 0xb8c8a0 : 0xffffff, roughness: 0.95, metalness: 0 }));
-    ball.rotation.x = Math.PI / 2; // the sphere's poles on the spin axis (z)
+    const bg = new THREE.SphereGeometry(R, 384, 192);
+    bg.rotateX(Math.PI / 2); // the sphere's poles on the spin axis (z)
+    if (level.bumps?.length) {
+      // hills and mountains: push each vertex out by the ground's height there
+      const pa = bg.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < pa.count; i++) {
+        const x = pa.getX(i), y = pa.getY(i), z = pa.getZ(i), r = Math.hypot(x, y, z);
+        const s = (R + planetBumpsAt(level.bumps, R, [x / r, y / r, z / r]).h) / r;
+        pa.setXYZ(i, x * s, y * s, z * s);
+      }
+      bg.computeVertexNormals();
+    }
+    const ball = new THREE.Mesh(bg, new THREE.MeshStandardMaterial({ map: tex, color: this.floorChoice === 'auto' ? 0xb8c8a0 : 0xffffff, roughness: 0.95, metalness: 0 }));
     ball.receiveShadow = true;
     this.level.add(ball);
+    const lift = (x: number, y: number, z: number) => {
+      // a point on the ground (over any hills), just above it
+      const s = (R + 0.04 + planetBumpsAt(level.bumps, R, [x, y, z]).h);
+      return new THREE.Vector3(x * s, y * s, z * s);
+    };
     const ring = (lat: number, color: number) => {
       const pts: THREE.Vector3[] = [];
-      const r = (R + 0.04) * Math.cos(lat), z = (R + 0.04) * Math.sin(lat);
-      for (let i = 0; i <= 256; i++) { const a = (i / 256) * Math.PI * 2; pts.push(new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), z)); }
+      for (let i = 0; i <= 256; i++) { const a = (i / 256) * Math.PI * 2; pts.push(lift(Math.cos(lat) * Math.cos(a), Math.cos(lat) * Math.sin(a), Math.sin(lat))); }
       this.level.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color })));
     };
     for (let deg = -75; deg <= 75; deg += 15) ring((deg * Math.PI) / 180, deg === 0 ? 0xc9a43a : 0x6a7a68);
     // meridians every 30 degrees, so you can see which way is east
     for (let k = 0; k < 12; k++) {
       const lon = (k / 12) * Math.PI * 2, pts: THREE.Vector3[] = [];
-      for (let i = 0; i <= 128; i++) { const lat = -Math.PI / 2 + (i / 128) * Math.PI; pts.push(new THREE.Vector3((R + 0.04) * Math.cos(lat) * Math.cos(lon), (R + 0.04) * Math.cos(lat) * Math.sin(lon), (R + 0.04) * Math.sin(lat))); }
+      for (let i = 0; i <= 128; i++) { const lat = -Math.PI / 2 + (i / 128) * Math.PI; pts.push(lift(Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat))); }
       this.level.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x6a7a68 })));
     }
     // a beacon at each pole
@@ -619,11 +641,23 @@ export class RingScene {
     this.scene.fog = new THREE.Fog(0x0b1020, R * 3, R * 15);
     const T = DISK_THICKNESS, n = 96;
     const h = (r: number) => diskSurface(cfg, r).h;
+    const hAt = (x: number, y: number) => diskSurface(cfg, Math.hypot(x, y)).h + diskBumpsAt(level.bumps, x, y).h;
     const pts: THREE.Vector2[] = [];
     for (let i = 0; i <= n; i++) { const r = (R * i) / n; pts.push(new THREE.Vector2(Math.max(1e-3, r), h(r))); }
     for (let i = n; i >= 0; i--) { const r = (R * i) / n; pts.push(new THREE.Vector2(Math.max(1e-3, r), h(r) - T)); }
     const g = new THREE.LatheGeometry(pts, 256);
     g.rotateX(Math.PI / 2); // the lathe's axis (y) onto the spin axis (z)
+    const bumps = level.bumps ?? [];
+    if (bumps.length) {
+      // hills: raise the top face (the first n + 1 points of each lathe meridian) by the hills' height
+      const pa = g.getAttribute('position') as THREE.BufferAttribute;
+      const per = pts.length;
+      for (let i = 0; i < pa.count; i++) {
+        if (i % per > n) continue;
+        pa.setZ(i, pa.getZ(i) + diskBumpsAt(bumps, pa.getX(i), pa.getY(i)).h);
+      }
+      g.computeVertexNormals();
+    }
     const tex = this.floorTex(cfg.diskBowl ? 'grass' : 'deck');
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.repeat.set((2 * Math.PI * R) / 6, (2 * (R + T)) / 6);
@@ -632,7 +666,7 @@ export class RingScene {
     this.level.add(mesh);
     const ring = (r: number, color: number) => {
       const p: THREE.Vector3[] = [];
-      for (let i = 0; i <= 256; i++) { const a = (i / 256) * Math.PI * 2; p.push(new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), h(r) + 0.04)); }
+      for (let i = 0; i <= 256; i++) { const a = (i / 256) * Math.PI * 2, x = r * Math.cos(a), y = r * Math.sin(a); p.push(new THREE.Vector3(x, y, hAt(x, y) + 0.04)); }
       this.level.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(p), new THREE.LineBasicMaterial({ color })));
     };
     for (let r = 20; r < R; r += 20) ring(r, 0x8a96a8);
@@ -651,13 +685,24 @@ export class RingScene {
   }
 
   /** A torus: seen from inside (Stanford torus) or outside (the log). */
-  private tubeMesh(cfg: SimConfig, kind: 'inside' | 'outside', a: number): THREE.Mesh {
+  private tubeMesh(cfg: SimConfig, kind: 'inside' | 'outside', a: number, level?: Level): THREE.Mesh {
     const R = cfg.R;
     const rc = kind === 'outside' ? R + a : R - a;
     const tubular = Math.min(1440, Math.max(192, Math.round((2 * Math.PI * R) / 1.5)));
     const radial = Math.max(48, Math.round((2 * Math.PI * a) / 1.2));
     const g = new THREE.TorusGeometry(rc, a, radial, tubular);
-    const tex = this.floorTex('deck');
+    if (level?.terrain?.hills.length) {
+      // hills on the floor side (away from the axis inside a torus, toward it on the log): raise it toward the axis
+      const pa = g.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < pa.count; i++) {
+        const x = pa.getX(i), y = pa.getY(i), z = pa.getZ(i), rho = Math.hypot(x, y);
+        if (kind === 'inside' ? rho < rc : rho > rc) continue;
+        const e = hillsAt(level, cfg, Math.atan2(y, x), z);
+        if (e > 1e-3) { const s = (rho - e) / rho; pa.setXY(i, x * s, y * s); }
+      }
+      g.computeVertexNormals();
+    }
+    const tex = this.floorTex(level?.terrain?.hills.length ? 'grass' : 'deck');
     tex.repeat.set((2 * Math.PI * R) / 5, (2 * Math.PI * a) / 5);
     const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, side: kind === 'inside' ? THREE.BackSide : THREE.FrontSide, roughness: 0.85, metalness: 0.2 }));
     mesh.receiveShadow = true;
@@ -760,14 +805,15 @@ export class RingScene {
   }
 
   /** The floor as a mesh following the terrain (hills / sphere band). */
-  private terrainMesh(cfg: SimConfig, level: Level): THREE.Mesh {
+  private terrainMesh(cfg: SimConfig, level: Level, zRange?: [number, number]): THREE.Mesh {
     const R = cfg.R, W = cfg.halfWidth + cfg.wallThickness;
+    const z0 = zRange ? zRange[0] : -W, z1 = zRange ? zRange[1] : W;
     const span = 2 * Math.PI * R;
     const nu = Math.min(1400, Math.max(96, Math.round(span / 1.5)));
     const sphere = level.terrain!.sphere;
     // on a sphere, rows are evenly spaced in latitude (z = R sin(lat)), so the poles stay smooth
     const latMax = sphere ? Math.asin(Math.min(1, cfg.halfWidth / R)) : 0;
-    const nv = sphere ? Math.min(160, Math.max(16, Math.round((2 * latMax * R) / 2))) : Math.min(120, Math.max(8, Math.round((2 * W) / 1.5)));
+    const nv = sphere ? Math.min(160, Math.max(16, Math.round((2 * latMax * R) / 2))) : Math.min(120, Math.max(8, Math.round((z1 - z0) / 1.5)));
     const pos = new Float32Array((nu + 1) * (nv + 1) * 3);
     const uv = new Float32Array((nu + 1) * (nv + 1) * 2);
     const tile = level.terrain!.hills.length ? 4 : 5;
@@ -775,7 +821,7 @@ export class RingScene {
     for (let i = 0; i <= nu; i++) {
       const a = (i / nu) * Math.PI * 2;
       for (let j = 0; j <= nv; j++) {
-        const z = sphere ? R * Math.sin(-latMax + (2 * latMax * j) / nv) : -W + (2 * W * j) / nv;
+        const z = sphere ? R * Math.sin(-latMax + (2 * latMax * j) / nv) : z0 + ((z1 - z0) * j) / nv;
         const r = floorRadius(level, cfg, a, z);
         pos[k * 3] = r * Math.cos(a); pos[k * 3 + 1] = r * Math.sin(a); pos[k * 3 + 2] = z;
         uv[k * 2] = (a * R) / tile; uv[k * 2 + 1] = z / tile;

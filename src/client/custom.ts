@@ -36,7 +36,7 @@ export const CUSTOM_DEFAULTS: CustomSettings = {
 };
 
 type Field =
-  | { key: keyof CustomSettings; label: string; min: number; max: number; step: number; note?: string; ringOnly?: boolean }
+  | { key: keyof CustomSettings; label: string; min: number; max: number; step: number; note?: string; ringOnly?: boolean; hills?: boolean }
   | { key: keyof CustomSettings; label: string; options: [string, string][]; ringOnly?: boolean };
 
 const FIELDS: Field[] = [
@@ -47,10 +47,10 @@ const FIELDS: Field[] = [
   { key: 'g', label: 'Gravity at the floor (m/s²)', min: 1, max: 30, step: 0.1 },
   { key: 'walls', label: 'Rim walls', options: [['varied', 'Varied (some low)'], ['full', 'Full height'], ['low', 'Low curbs (fall off!)']] },
   { key: 'floor', label: 'Floor', options: [['auto', 'Automatic'], ['deck', 'Deck plating'], ['grass', 'Grass'], ['sand', 'Sand'], ['snow', 'Snow'], ['rock', 'Rock']] },
-  { key: 'hills', label: 'Hills', min: 0, max: 120, step: 1, ringOnly: true },
-  { key: 'hillHeight', label: 'Hill height (m)', min: 1, max: 60, step: 1, ringOnly: true },
-  { key: 'mountains', label: 'Mountains', min: 0, max: 30, step: 1, ringOnly: true },
-  { key: 'mountainHeight', label: 'Mountain height (m)', min: 10, max: 300, step: 5, ringOnly: true },
+  { key: 'hills', label: 'Hills', min: 0, max: 120, step: 1, hills: true },
+  { key: 'hillHeight', label: 'Hill height (m)', min: 1, max: 60, step: 1, hills: true },
+  { key: 'mountains', label: 'Mountains', min: 0, max: 30, step: 1, hills: true },
+  { key: 'mountainHeight', label: 'Mountain height (m)', min: 10, max: 300, step: 5, hills: true },
   { key: 'bases', label: 'Bases', min: 0, max: 20, step: 1, ringOnly: true },
   { key: 'holes', label: 'Holes in the floor', min: 0, max: 60, step: 1, ringOnly: true },
   { key: 'deck', label: 'Upper deck height (m, 0 = none)', min: 0, max: 30, step: 1, ringOnly: true },
@@ -89,9 +89,10 @@ export function customLevel(s: CustomSettings): LevelDef {
     case 'tower': c.R = Math.max(60, R); c.tower = 0.1 * c.R; c.halfWidth = Math.max(15, Math.min(s.width, 0.5 * c.R)); variedWalls = false; break;
     case 'log': c.tube = 'outside'; c.tubeRadius = Math.min(s.width, 0.45 * R); c.halfWidth = c.tubeRadius; break;
   }
+  // hills and mountains go on anything with ground (not inside the tower)
+  if (s.shape !== 'tower') Object.assign(c, { hills: s.hills, hillHeight: s.hillHeight, mountains: s.mountains, mountainHeight: s.mountainHeight });
   if (ring) {
     Object.assign(c, { bases: s.bases });
-    if (s.shape !== 'twin') Object.assign(c, { hills: s.hills, hillHeight: s.hillHeight, mountains: s.mountains, mountainHeight: s.mountainHeight }); // (twin rings have flat floors)
     if (s.shape === 'ring') Object.assign(c, { floorHoles: s.holes, deckHeight: Math.min(s.deck, 0.4 * R), windows: s.windows });
   }
   if (s.spinChange > 0) Object.assign(c, { spinChange: s.spinChange, spinPeriod: s.spinPeriod });
@@ -137,9 +138,11 @@ export function randomCustom(): CustomSettings {
   const R = pick([60, 100, 150, 250, 400, 800]);
   const s: CustomSettings = { ...CUSTOM_DEFAULTS, shape, R, seed: 1 + Math.floor(r() * 9999), bots: 2 + Math.floor(r() * 5) };
   s.width = shape === 'log' ? 10 + Math.round(r() * 10) : shape === 'torus' || shape === 'halfpipe' ? 15 + Math.round(r() * 20) : Math.round(20 + r() * Math.min(R, 120));
-  if (isRingLike(shape)) {
+  if (shape !== 'tower') {
     if (r() < 0.5) { s.hills = Math.round(r() * 30); s.hillHeight = Math.round(3 + r() * 12); }
-    if (R >= 250 && r() < 0.5) { s.mountains = Math.round(2 + r() * 6); s.mountainHeight = Math.round(20 + r() * 60); }
+    if (R >= 250 && shape !== 'log' && r() < 0.5) { s.mountains = Math.round(2 + r() * 6); s.mountainHeight = Math.round(20 + r() * 60); }
+  }
+  if (isRingLike(shape)) {
     if (R >= 200 && r() < 0.5) s.bases = Math.round(1 + r() * 5);
     if (shape === 'ring' && r() < 0.3) s.holes = Math.round(5 + r() * 15);
     if (shape === 'ring' && r() < 0.25) s.deck = 8 + Math.round(r() * 6);
@@ -156,7 +159,7 @@ export function buildCustomForm(el: HTMLElement, s: CustomSettings, onChange: (s
   const rows: { f: Field; input: HTMLInputElement | HTMLSelectElement; out?: HTMLElement; row: HTMLElement }[] = [];
   const refresh = () => {
     const ring = isRingLike(s.shape);
-    for (const r of rows) r.row.classList.toggle('disabled', !!r.f.ringOnly && !ring);
+    for (const r of rows) r.row.classList.toggle('disabled', (!!r.f.ringOnly && !ring) || ('hills' in r.f && !!r.f.hills && s.shape === 'tower'));
   };
   for (const f of FIELDS) {
     const row = document.createElement('label');

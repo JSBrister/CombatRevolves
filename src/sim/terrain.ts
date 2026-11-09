@@ -9,7 +9,7 @@
 // Collision uses F = rho - (R - h) (> 0 inside the floor) and its gradient for
 // a distance estimate d ~ -F/|grad F| (exact for planes, close for smooth hills).
 
-import type { Hill, Level, SimConfig } from './types';
+import type { Bump, Hill, Level, SimConfig } from './types';
 
 /** Height of the floor above radius R at (angle, z), and its slope (dh/ds along the ring, dh/dz across). */
 export function terrainAt(level: Level, cfg: SimConfig, angle: number, z: number): { h: number; dhds: number; dhdz: number } {
@@ -54,6 +54,17 @@ export function terrainAt(level: Level, cfg: SimConfig, angle: number, z: number
     dhdz -= (e * dz) / r2;
   }
   return { h, dhds, dhdz };
+}
+
+/** Just the hills' (and mountains') height at (angle, z), without the floor's own curve. */
+export function hillsAt(level: Level, cfg: SimConfig, angle: number, z: number): number {
+  let h = 0;
+  for (const hl of level.terrain?.hills ?? []) {
+    const ds = wrap(angle - hl.angle) * cfg.R, dz = z - hl.z, r2 = hl.radius * hl.radius;
+    if (ds * ds + dz * dz > 9 * r2) continue;
+    h += hl.height * Math.exp(-(ds * ds + dz * dz) / (2 * r2));
+  }
+  return h;
 }
 
 /** Floor radius (distance from the axis to the floor surface) at (angle, z). */
@@ -129,4 +140,60 @@ export function edgeHeight(level: Level, cfg: SimConfig): number {
   if (t.sphere) h += cfg.R - Math.sqrt(Math.max(0, cfg.R * cfg.R - W * W));
   if (t.tube && t.tube.kind !== 'outside') { const a = t.tube.radius; h += a - Math.sqrt(Math.max(0, a * a - Math.min(W, a) ** 2)); }
   return h;
+}
+
+// ---------------------------------------------------------------- bumps (planets and disks)
+
+/**
+ * Planet: height of the ground above radius R in direction n (a unit vector),
+ * and its gradient with respect to n (take the part across n, over the radius,
+ * for the slope along the ground). Distances use the chord, R |n - c|: smooth,
+ * and the same as along the surface for hills small next to the planet.
+ */
+export function planetBumpsAt(bumps: Bump[] | undefined, R: number, n: readonly number[]): { h: number; g: [number, number, number] } {
+  let h = 0, g0 = 0, g1 = 0, g2 = 0;
+  for (const b of bumps ?? []) {
+    const dx = n[0] - b.c[0], dy = n[1] - b.c[1], dz = n[2] - b.c[2];
+    const d2 = R * R * (dx * dx + dy * dy + dz * dz), s2 = b.radius * b.radius;
+    if (d2 > 9 * s2) continue;
+    const e = b.height * Math.exp(-d2 / (2 * s2)), k = (-e * R * R) / s2;
+    h += e; g0 += k * dx; g1 += k * dy; g2 += k * dz;
+  }
+  return { h, g: [g0, g1, g2] };
+}
+
+/** Disk: height of the bumps at (x, y), and their slope. */
+export function diskBumpsAt(bumps: Bump[] | undefined, x: number, y: number): { h: number; gx: number; gy: number } {
+  let h = 0, gx = 0, gy = 0;
+  for (const b of bumps ?? []) {
+    const dx = x - b.c[0], dy = y - b.c[1], s2 = b.radius * b.radius, d2 = dx * dx + dy * dy;
+    if (d2 > 9 * s2) continue;
+    const e = b.height * Math.exp(-d2 / (2 * s2));
+    h += e; gx -= (e * dx) / s2; gy -= (e * dy) / s2;
+  }
+  return { h, gx, gy };
+}
+
+/**
+ * Seeded hills and mountains for a planet or a disk, placed by `pick` (which
+ * returns a peak position for a random draw, or null to skip). Same shapes as
+ * on a ring: hills 6-22 m across, mountains about as wide as they're tall.
+ */
+export function makeBumps(
+  cfg: SimConfig, rand: () => number, pick: (u: number, v: number, radius: number) => [number, number, number] | null, maxMountain = Infinity,
+): Bump[] {
+  const out: Bump[] = [];
+  const place = (height: number, radius: number) => {
+    for (let tryN = 0; tryN < 10; tryN++) {
+      const c = pick(rand(), rand(), radius);
+      if (c) { out.push({ c, height, radius }); return; }
+    }
+  };
+  for (let i = 0; i < cfg.hills; i++) place(cfg.hillHeight * (0.3 + 0.7 * rand()), 6 + rand() * 16);
+  for (let i = 0; i < cfg.mountains; i++) {
+    const height = Math.min(maxMountain, cfg.mountainHeight * (0.5 + 0.5 * rand()));
+    const radius = height * (1.0 + 0.4 * rand());
+    place(Math.min(height, 1.2 * radius), radius);
+  }
+  return out;
 }

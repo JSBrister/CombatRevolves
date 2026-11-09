@@ -290,6 +290,8 @@ export const LEVELS: LevelDef[] = [
     blurb: 'On top of a spinning disk, with gravity straight down. The further out you go, the more the spin tilts "down" toward the edge: past about 83 m the floor is too steep to stand on, and you slide off into space.' },
   { id: 's-bucket', mode: 'sandbox', name: 'Spinning Bucket (Disk World, curved)', seed: 53, config: { world: 'disk', R: 100, g: 9.81, planetSpin: 1.6, diskBowl: true }, props: false, bots: 4,
     blurb: 'The same spinning disk, curved up into the shape water takes in a spinning bucket, so gravity is always straight into the ground. Walk right up the 80 m-high rim, where you weigh 1.9 g; just don\'t go over it.' },
+  { id: 's-rough', mode: 'sandbox', name: 'Rough Planet (hills and mountains)', seed: 55, config: { world: 'planet', R: 120, g: 9.81, planetSpin: 0.3, hills: 50, hillHeight: 8, mountains: 5, mountainHeight: 35 }, props: false, bots: 4,
+    blurb: 'A bigger ball with hills and a few mountains on it: high ground to fight over, and from the tops you can see a long way round.' },
   { id: 's-tower', mode: 'sandbox', name: 'Spin Tower', seed: 54, config: { R: 100, g: 14.7, tower: 10, halfWidth: 20 }, props: false, vehicles: 0, bots: 4,
     blurb: 'Not a ring: a tower through the axis, spinning end over end. You start at the bottom of one arm under 1.5 g and climb, floor by floor, to the narrow neck at the middle, where you weigh almost nothing, then down the other side. Launch pads on the neck floor throw you across.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,

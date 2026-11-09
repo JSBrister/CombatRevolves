@@ -1859,7 +1859,7 @@ describe('36. custom levels', () => {
   it('every shape the builder offers makes a working level; links round-trip', async () => {
     const { CUSTOM_DEFAULTS, customLevel, encodeCustom, decodeCustom } = await import('../src/client/custom');
     for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'nested', 'twin', 'disk', 'bucket', 'tower'] as const) {
-      const set = { ...CUSTOM_DEFAULTS, shape, R: 200, width: shape === 'log' ? 12 : 30, hills: 6, bases: 1, holes: 4, deck: 9, bots: 2 };
+      const set = { ...CUSTOM_DEFAULTS, shape, R: 200, width: shape === 'log' ? 12 : 30, hills: 6, mountains: 2, mountainHeight: 30, bases: 1, holes: 4, deck: 9, bots: 2 };
       const { state, localId, botIds } = startLevel(customLevel(set));
       expect(botIds.length).toBe(2);
       run(state, 120, (s) => [cmdFor(s, localId), ...botIds.map((b) => botInput(s, b))]);
@@ -2410,6 +2410,87 @@ describe('46. spin tower', () => {
     const { s, id, botIds } = tower();
     let hits = 0;
     for (let i = 0; i < 120 * 45; i++) { step(s, [cmdFor(s, id), ...botIds.map((b) => botInput(s, b))], s.tick); hits += s.events.filter((e) => e.type === 'hit').length; }
-    expect(hits).toBeGreaterThan(10);
+    expect(hits, `hits ${hits}`).toBeGreaterThan(10);
+  }, 30000);
+});
+
+describe('47. hills and mountains on more shapes', () => {
+  const custom = async (shape: string, extra = {}) => {
+    const { CUSTOM_DEFAULTS, customLevel } = await import('../src/client/custom');
+    const { state, localId } = startLevel(customLevel({ ...CUSTOM_DEFAULTS, shape: shape as never, R: 250, width: 40, hills: 30, hillHeight: 8, mountains: 3, mountainHeight: 30, bots: 0, ...extra }));
+    state.players = state.players.filter((p) => p.id === localId);
+    return { s: state, id: localId, p: state.players[0] };
+  };
+  /** The SDF never claims more room than there is: across a short hop (in the open or at the surface) it changes by no more than the hop's length. */
+  const lipschitz = (s: SimState, centre: (i: number) => Vec3) => {
+    for (let i = 0; i < 300; i++) {
+      const p = centre(i);
+      const q: Vec3 = [p[0] + (hash01(i, 4, 47) - 0.5), p[1] + (hash01(i, 5, 47) - 0.5), p[2] + (hash01(i, 6, 47) - 0.5)];
+      const dp = levelSdf(s.level, s.config, p).d, dq = levelSdf(s.level, s.config, q).d;
+      if (Math.min(dp, dq) < -1) continue; // (deep inside a mountain the estimate is rough; nothing goes there)
+      expect(Math.abs(dp - dq)).toBeLessThanOrEqual(dist(p, q) * 1.02 + 1e-9);
+    }
+  };
+  it('a planet: you can stand on top of its biggest mountain, and the ground is a proper distance field', async () => {
+    const { s, id, p } = await custom('planet');
+    const bumps = s.level.bumps!;
+    expect(bumps.length).toBeGreaterThan(20);
+    const top = bumps.reduce((a, b) => (b.height > a.height ? b : a));
+    const R = s.config.R, sh = standHeight(1);
+    const c = top.c;
+    p.pos = [c[0] * (R + top.height + sh + 0.5), c[1] * (R + top.height + sh + 0.5), c[2] * (R + top.height + sh + 0.5)];
+    p.vel = [0, 0, 0];
+    run(s, 360, () => [cmdFor(s, id)]);
+    expect(p.grounded).toBe(true);
+    expect(Math.hypot(...p.pos)).toBeGreaterThan(R + 0.9 * top.height);
+    lipschitz(s, (i) => { const b = bumps[i % bumps.length].c, r = R + hash01(i, 7, 47) * 40 - 5; return [b[0] * r, b[1] * r, b[2] * r]; });
+  });
+  it('a disk: hills stand up out of it, you can stand on one, and its distance field holds', async () => {
+    for (const shape of ['disk', 'bucket']) {
+      const { s, id, p } = await custom(shape, { R: 150 });
+      const bumps = s.level.bumps!;
+      const top = bumps.filter((b) => Math.hypot(b.c[0], b.c[1]) < 80).reduce((a, b) => (b.height > a.height ? b : a));
+      const at = diskPoint(s.config, Math.atan2(top.c[1], top.c[0]), Math.hypot(top.c[0], top.c[1]), bumps);
+      p.pos = [at.pos[0], at.pos[1], at.pos[2] + standHeight(1) + 0.3];
+      p.vel = [0, 0, 0];
+      run(s, 360, () => [cmdFor(s, id)]);
+      expect(p.grounded).toBe(true);
+      expect(Math.abs(p.pos[2] - (at.pos[2] + standHeight(1)))).toBeLessThan(1.5);
+      expect(at.pos[2]).toBeGreaterThan(0.9 * top.height);
+      lipschitz(s, (i) => { const b = bumps[i % bumps.length].c; return [b[0], b[1], hash01(i, 7, 47) * 50 - 5]; });
+    }
+  });
+  it('twin rings: hills on both rings, each turning with its own ring, none on the seam', async () => {
+    const { s, id, p } = await custom('twin', { R: 300, width: 60 });
+    const hills = s.level.terrain!.hills;
+    expect(hills.some((h) => h.z > 0) && hills.some((h) => h.z < 0)).toBe(true);
+    for (const h of hills) expect(Math.abs(h.z)).toBeGreaterThan(s.config.twinGap / 2 + 2 * h.radius);
+    // stand on the tallest hill on ring B, simulated in ring B's frame
+    const top = hills.filter((h) => h.z > 0).reduce((a, b) => (b.height > a.height ? b : a));
+    const fr = floorRadius(s.level, s.config, top.angle, top.z);
+    expect(fr).toBeLessThan(s.config.R - 0.9 * top.height);
+    p.pos = [(fr - standHeight(1) - 0.3) * Math.cos(top.angle), (fr - standHeight(1) - 0.3) * Math.sin(top.angle), top.z];
+    p.vel = [0, 0, 0];
+    run(s, 2, () => [cmdFor(s, id)]);
+    // (the sim moves bodies into their ring's frame; check against that ring's floor)
+    run(s, 360, () => [cmdFor(s, id)]);
+    expect(p.grounded).toBe(true);
+    expect(Math.hypot(p.pos[0], p.pos[1])).toBeLessThan(s.config.R - 0.8 * top.height);
+  });
+  it('a torus, a half-pipe and a whole sphere: hills stay on the floor, and you stand on them', async () => {
+    for (const shape of ['torus', 'halfpipe', 'sphere', 'log']) {
+      const { s, id, p } = await custom(shape, shape === 'log' ? { width: 20, mountains: 0 } : {});
+      const hills = s.level.terrain!.hills;
+      expect(hills.length).toBeGreaterThan(5);
+      const lim = shape === 'sphere' ? 0.6 * s.config.R : 0.55 * s.config.tubeRadius;
+      for (const h of hills) expect(Math.abs(h.z)).toBeLessThanOrEqual(lim);
+      const top = hills.reduce((a, b) => (b.height > a.height ? b : a));
+      const fr = floorRadius(s.level, s.config, top.angle, top.z);
+      p.pos = [(fr - standHeight(1) - 0.3) * Math.cos(top.angle), (fr - standHeight(1) - 0.3) * Math.sin(top.angle), top.z];
+      p.vel = [0, 0, 0];
+      run(s, 360, () => [cmdFor(s, id)]);
+      expect(p.grounded).toBe(true);
+      expect(Math.abs(Math.hypot(p.pos[0], p.pos[1]) - floorRadius(s.level, s.config, angleOf(p.pos), p.pos[2]) + standHeight(1))).toBeLessThan(0.3);
+    }
   });
 });

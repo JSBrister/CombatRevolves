@@ -3,10 +3,10 @@
 // are axis-aligned in the local frame of their ring angle.
 
 import { rngNext, rngRange } from './rng';
-import type { Box, Deck, Hole, ItemKind, Level, Pad, SimConfig, SpawnPoint } from './types';
+import type { Box, Bump, Deck, Hole, ItemKind, Level, Pad, SimConfig, SpawnPoint } from './types';
 import { type Vec3, rhoOf } from './vec';
 import { towerSdf } from './tower';
-import { type ClearZone, edgeHeight, floorRadius, makeHills, makeMountains, terrainAt } from './terrain';
+import { type ClearZone, diskBumpsAt, edgeHeight, floorRadius, makeBumps, makeHills, makeMountains, planetBumpsAt, terrainAt } from './terrain';
 
 export interface SdfHit {
   d: number; // signed distance (negative = inside solid)
@@ -297,16 +297,38 @@ export function diskSurface(cfg: SimConfig, rho: number): { h: number; dh: numbe
   return { h: 0.5 * k * rho * rho, dh: k * rho };
 }
 
+/** Disk world: height of the surface at (x, y) with any hills, and its slope. */
+export function diskHeight(cfg: SimConfig, bumps: Bump[] | undefined, x: number, y: number): { h: number; gx: number; gy: number } {
+  const rho = Math.hypot(x, y);
+  const { h, dh } = diskSurface(cfg, Math.min(rho, cfg.R));
+  const ir = rho > 1e-9 ? 1 / rho : 0;
+  const b = diskBumpsAt(bumps, x, y);
+  return { h: h + b.h, gx: dh * x * ir + b.gx, gy: dh * y * ir + b.gy };
+}
+
 /** The top of a spinning disk (flat, or curved up into a bowl), plus what stands on it. */
 function diskSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   const out: SdfHit = { d: Infinity, n: [0, 0, 1] };
   const rho = rhoOf(p);
-  if (!cfg.diskBowl) annulus(p, rho, 0, cfg.R, -DISK_THICKNESS, 0, out);
+  if (level.bumps?.length) {
+    // hills on it: a height field (the underside stays as it was)
+    const { h, gx, gy } = diskHeight(cfg, level.bumps, p[0], p[1]);
+    const g = Math.sqrt(1 + gx * gx + gy * gy);
+    // (a height field's -F/|grad F| can overstate the room a little next to a hill: shrink it in free space, so tracing stays safe)
+    const dF = (p[2] - h) / g, dTop = dF > 0 ? 0.9 * dF : dF;
+    const base = diskSurface(cfg, Math.min(rho, cfg.R));
+    const dBottom = (base.h - DISK_THICKNESS - p[2]) / Math.sqrt(1 + base.dh * base.dh), dRim = rho - cfg.R;
+    const d = Math.max(dTop, dBottom, dRim);
+    out.d = d;
+    if (d === dTop) out.n = [-gx / g, -gy / g, 1 / g];
+    else if (d === dRim) out.n = [p[0] / rho, p[1] / rho, 0];
+    else out.n = [0, 0, -1];
+  } else if (!cfg.diskBowl) annulus(p, rho, 0, cfg.R, -DISK_THICKNESS, 0, out);
   else {
     // solid below the surface z = h(rho), above it minus the thickness, inside the rim
     const { h, dh } = diskSurface(cfg, Math.min(rho, cfg.R));
     const g = Math.sqrt(1 + dh * dh);
-    const dTop = (p[2] - h) / g, dBottom = h - DISK_THICKNESS - p[2], dRim = rho - cfg.R;
+    const dTop = (p[2] - h) / g, dBottom = (h - DISK_THICKNESS - p[2]) / g, dRim = rho - cfg.R;
     const d = Math.max(dTop, dBottom, dRim);
     out.d = d;
     const ir = rho > 1e-9 ? 1 / rho : 0;
@@ -319,10 +341,11 @@ function diskSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
 }
 
 /** A point on a disk world's surface at (angle, distance from the axis), with the surface's normal. */
-export function diskPoint(cfg: SimConfig, angle: number, rho: number): { pos: Vec3; n: Vec3 } {
-  const { h, dh } = diskSurface(cfg, rho);
-  const g = Math.sqrt(1 + dh * dh), c = Math.cos(angle), s = Math.sin(angle);
-  return { pos: [rho * c, rho * s, h], n: [(-dh * c) / g, (-dh * s) / g, 1 / g] };
+export function diskPoint(cfg: SimConfig, angle: number, rho: number, bumps?: Bump[]): { pos: Vec3; n: Vec3 } {
+  const c = Math.cos(angle), s = Math.sin(angle);
+  const { h, gx, gy } = diskHeight(cfg, bumps, rho * c, rho * s);
+  const g = Math.sqrt(1 + gx * gx + gy * gy);
+  return { pos: [rho * c, rho * s, h], n: [-gx / g, -gy / g, 1 / g] };
 }
 
 /**
@@ -334,21 +357,27 @@ export function generateDisk(cfg: SimConfig, rng: { rng: number }, withObstacles
   const R = cfg.R;
   const spawns: SpawnPoint[] = [];
   for (let i = 0; i < 8; i++) spawns.push({ angle: (i / 8) * 2 * Math.PI, z: (i % 2 ? 0.25 : 0.45) * R });
+  // hills and mountains: anywhere out to near the rim (a mountain's foot can reach past it)
+  const bumps = makeBumps(cfg, () => rngNext(rng), (u, v, radius) => {
+    const rho = Math.min(R * 0.9, radius) + Math.sqrt(u) * Math.max(0, R * 0.9 - radius), a = v * 2 * Math.PI;
+    return [rho * Math.cos(a), rho * Math.sin(a), 0];
+  });
   const boxes: Box[] = [];
   const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
   const stand = (angle: number, rho: number, heading: number, hx: number, hy: number, hz: number, kind: Box['kind'] = 'cover') => {
-    const { pos, n } = diskPoint(cfg, angle, rho);
+    const { pos, n } = diskPoint(cfg, angle, rho, bumps);
     const t0: Vec3 = [-Math.sin(angle), Math.cos(angle), 0]; // round the disk
     const t1: Vec3 = [n[1] * t0[2] - n[2] * t0[1], n[2] * t0[0] - n[0] * t0[2], n[0] * t0[1] - n[1] * t0[0]]; // outward, along the surface
     const ch = Math.cos(heading), sh = Math.sin(heading);
     const X: Vec3 = [ch * t0[0] + sh * t1[0], ch * t0[1] + sh * t1[1], ch * t0[2] + sh * t1[2]];
     const Z: Vec3 = [X[1] * n[2] - X[2] * n[1], X[2] * n[0] - X[0] * n[2], X[0] * n[1] - X[1] * n[0]];
-    const bury = 0.3 + (cfg.diskBowl ? (cfg.planetSpin / R) * Math.max(hx, hz) * Math.max(hx, hz) : 0);
+    const slope = Math.sqrt(Math.max(0, 1 / (n[2] * n[2]) - 1)); // how steep the ground is here
+    const bury = 0.3 + (cfg.diskBowl ? (cfg.planetSpin / R) * Math.max(hx, hz) * Math.max(hx, hz) : 0) + (bumps.length ? slope * Math.max(hx, hz) : 0);
     const c: Vec3 = [pos[0] + n[0] * (hy - bury), pos[1] + n[1] * (hy - bury), pos[2] + n[2] * (hy - bury)];
     boxes.push({ id: nextId(), type: 'box', kind, angle, tilt: 0, center: c, half: [hx, hy + bury, hz], axes: [X, n, Z] });
   };
   const near = (angle: number, rho: number, m: number) => spawns.some((sp) => {
-    const a = diskPoint(cfg, sp.angle, sp.z).pos, b = diskPoint(cfg, angle, rho).pos;
+    const a = diskPoint(cfg, sp.angle, sp.z, bumps).pos, b = diskPoint(cfg, angle, rho, bumps).pos;
     return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < m;
   });
   if (withObstacles) {
@@ -367,17 +396,28 @@ export function generateDisk(cfg: SimConfig, rng: { rng: number }, withObstacles
     for (let i = 0; i < items.length; i++) {
       const angle = i * 2.39996, rho = R * Math.sqrt((i + 0.5) / items.length) * 0.85;
       if (near(angle, rho, 4)) continue;
-      const { pos, n } = diskPoint(cfg, angle, rho);
+      const { pos, n } = diskPoint(cfg, angle, rho, bumps);
       pickupSpots.push({ pos: [pos[0] + n[0], pos[1] + n[1], pos[2] + n[2]], item: items[i] });
     }
   }
-  return { shape: 'disk', terrain: null, boxes, stairTops: [], spawns, pickupSpots, vehicleSpots: [], wallPos: [], wallNeg: [] };
+  return { shape: 'disk', terrain: null, boxes, stairTops: [], spawns, pickupSpots, vehicleSpots: [], wallPos: [], wallNeg: [], ...(bumps.length ? { bumps } : {}) };
 }
 
 /** The outside of a ball of radius R, plus whatever stands on it. */
 function planetSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   const r = Math.hypot(p[0], p[1], p[2]) || 1e-9;
   const out: SdfHit = { d: r - cfg.R, n: [p[0] / r, p[1] / r, p[2] / r] };
+  if (level.bumps?.length) {
+    // hills: F = r - (R + h(n)), grad F = n - (the part of dh/dn across n) / r
+    const n: Vec3 = [p[0] / r, p[1] / r, p[2] / r];
+    const { h, g } = planetBumpsAt(level.bumps, cfg.R, n);
+    const gn = g[0] * n[0] + g[1] * n[1] + g[2] * n[2];
+    const G: Vec3 = [n[0] - (g[0] - gn * n[0]) / r, n[1] - (g[1] - gn * n[1]) / r, n[2] - (g[2] - gn * n[2]) / r];
+    const gl = Math.hypot(...G);
+    const dF = (r - cfg.R - h) / gl;
+    out.d = dF > 0 ? 0.9 * dF : dF; // (shrunk in free space: the estimate can overstate the room by a little)
+    out.n = [G[0] / gl, G[1] / gl, G[2] / gl];
+  }
   // the outer shell: solid beyond radius outerShell
   if (cfg.outerShell > 0 && cfg.outerShell - r < out.d) { out.d = cfg.outerShell - r; out.n = [-p[0] / r, -p[1] / r, -p[2] / r]; }
   for (const b of level.boxes) boxSdf(p, b, out);
@@ -424,8 +464,14 @@ export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacl
     const ch = Math.cos(heading), sh = Math.sin(heading);
     const X: Vec3 = [ch * east[0] + sh * north[0], ch * east[1] + sh * north[1], ch * east[2] + sh * north[2]];
     const Z: Vec3 = [X[1] * up[2] - X[2] * up[1], X[2] * up[0] - X[0] * up[2], X[0] * up[1] - X[1] * up[0]];
-    const sag = (hx * hx + hz * hz) / (2 * R) + 0.2; // bury the bottom: the ground curves away under it
-    const rc = R + lift + hy - sag;
+    let sag = (hx * hx + hz * hz) / (2 * R) + 0.2; // bury the bottom: the ground curves away under it
+    if (bumps.length) {
+      // ...and on a hillside, by how much the ground falls away across it
+      const { g } = planetBumpsAt(bumps, R, up);
+      const gn = g[0] * up[0] + g[1] * up[1] + g[2] * up[2];
+      sag += (Math.hypot(g[0] - gn * up[0], g[1] - gn * up[1], g[2] - gn * up[2]) / R) * Math.hypot(hx, hz);
+    }
+    const rc = R + groundH(up) + lift + hy - sag;
     boxes.push({ id: nextId(), type: 'box', kind, angle: lon, tilt: 0, center: [up[0] * rc, up[1] * rc, up[2] * rc], half: [hx, hy + sag, hz], axes: [X, up, Z] });
   };
   const near = (lon: number, lat: number, m: number, outer = false) =>
@@ -452,6 +498,13 @@ export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacl
       pads.push({ pos: [e[0] * R2, e[1] * R2, e[2] * R2], up: [-e[0] * Math.cos(tilt) - ee[0] * Math.sin(tilt), -e[1] * Math.cos(tilt) - ee[1] * Math.sin(tilt), 0], speed });
     }
   }
+  // hills and mountains on the ball (clear of the launch pads; on a nested ball, short of the shell)
+  const bumps = makeBumps(cfg, () => rngNext(rng), (u, v, radius) => {
+    const c = planetDir(u * 2 * Math.PI, Math.asin(v * 1.9 - 0.95));
+    if (pads.some((pd) => { const rr = Math.hypot(...pd.pos); return rr < R + 1 && R * Math.hypot(pd.pos[0] / rr - c[0], pd.pos[1] / rr - c[1], pd.pos[2] / rr - c[2]) < 3 * radius + 3; })) return null;
+    return c;
+  }, R2 > 0 ? 0.35 * (R2 - R) : Infinity);
+  const groundH = (d: Vec3) => planetBumpsAt(bumps, R, d).h;
   if (withObstacles) {
     const area = 4 * Math.PI * R * R;
     const n = Math.max(20, Math.min(260, Math.round(area / 900)));
@@ -485,14 +538,15 @@ export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacl
       const lat = Math.asin(-0.85 + (1.7 * (i + 0.5)) / m), lon = i * 2.39996; // golden angle
       if (near(lon, lat, 4)) continue;
       const d = planetDir(lon, lat);
-      pickupSpots.push({ pos: [d[0] * (R + 1), d[1] * (R + 1), d[2] * (R + 1)], item: items[i] });
+      const rp = R + groundH(d) + 1;
+      pickupSpots.push({ pos: [d[0] * rp, d[1] * rp, d[2] * rp], item: items[i] });
       if (R2 > 0 && Math.abs(lat) < 0.7 && !near(lon + 1, lat, 4, true)) {
         const e = planetDir(lon + 1, lat);
         pickupSpots.push({ pos: [e[0] * (R2 - 1), e[1] * (R2 - 1), e[2] * (R2 - 1)], item: items[(i + 5) % m] });
       }
     }
   }
-  return { shape: 'planet', terrain: null, boxes, stairTops: [], spawns, pickupSpots, vehicleSpots: [], wallPos: [], wallNeg: [], ...(pads.length ? { pads } : {}) };
+  return { shape: 'planet', terrain: null, boxes, stairTops: [], spawns, pickupSpots, vehicleSpots: [], wallPos: [], wallNeg: [], ...(pads.length ? { pads } : {}), ...(bumps.length ? { bumps } : {}) };
 }
 
 function ringSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
@@ -500,7 +554,26 @@ function ringSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   const rho = rhoOf(p);
   const R = cfg.R, W = cfg.halfWidth, T = cfg.wallThickness, hull = cfg.hullThickness;
   const theta = Math.atan2(p[1], p[0]);
-  if (cfg.twin) {
+  // twin rings: a point over the other ring is looked at in that ring's frame (its boxes and hills are fixed in it)
+  const da = cfg.twin ? (sdfFrame ? -sdfTheta : sdfTheta) - (sdfFrame ? sdfTheta : -sdfTheta) : 0; // theta_from - theta_to
+  const ca = Math.cos(da), sa = Math.sin(da);
+  if (cfg.twin && level.terrain) {
+    // hills: each ring's floor in its own frame, with the gap cut out of it
+    const g = cfg.twinGap / 2, curb = 0.6;
+    const own = (p[2] >= 0 ? 1 : 0) === sdfFrame;
+    const f: SdfHit = { d: Infinity, n: [0, 0, 1] };
+    if (own) terrainFloor(level, cfg, p, rho, theta, f);
+    else {
+      const q: Vec3 = [ca * p[0] - sa * p[1], sa * p[0] + ca * p[1], p[2]];
+      terrainFloor(level, cfg, q, rho, Math.atan2(q[1], q[0]), f);
+      f.n = [ca * f.n[0] + sa * f.n[1], -sa * f.n[0] + ca * f.n[1], f.n[2]];
+    }
+    const dGap = g - Math.abs(p[2]);
+    if (dGap > f.d) { f.d = dGap; f.n = [0, 0, -Math.sign(p[2]) || 1]; }
+    if (f.d < out.d) { out.d = f.d; out.n = f.n; }
+    annulus(p, rho, R - curb, R + hull, -g - T, -g, out);
+    annulus(p, rho, R - curb, R + hull, g, g + T, out);
+  } else if (cfg.twin) {
     // two floors with a gap at the seam, and a curb along each side of it
     const g = cfg.twinGap / 2, curb = 0.6;
     annulus(p, rho, R, R + hull, -(W + T), -g, out);
@@ -526,8 +599,7 @@ function ringSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
   rimWall(p, rho, theta, level.wallNeg, R - edge, R + hull, -(W + T), -W, out); // -Z rim wall
   if (cfg.twin) {
     // a box of the other ring: rotate the query into its frame, and the normal back
-    const da = (sdfFrame ? -sdfTheta : sdfTheta) - (sdfFrame ? sdfTheta : -sdfTheta); // theta_from - theta_to
-    const c = Math.cos(da), s = Math.sin(da);
+    const c = ca, s = sa;
     const q: Vec3 = [c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]];
     for (const b of level.boxes) {
       if ((b.ring ?? 0) === sdfFrame) { boxSdf(p, b, out); continue; }
@@ -667,7 +739,11 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     }
   }
   const flat: ClearZone[] = [...rampClear, ...windows, ...baseSites.map((b) => ({ angle: b.angle, halfArc: BASE_REACH, z: b.z, halfZ: BASE_HALF + 3 }))];
-  const hills = makeHills(cfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), flat, windows.length ? 3 : 2.5);
+  // twin rings: keep hills off the seam; in a tube or a whole sphere, keep them to the floor (the height field's good there)
+  if (cfg.twin) flat.push({ angle: 0, halfArc: Math.PI * R, z: 0, halfZ: cfg.twinGap / 2 + 2 });
+  const hillW = cfg.tube !== 'none' ? Math.min(cfg.halfWidth, 0.55 * cfg.tubeRadius) : cfg.terrainSphere && cfg.halfWidth > 0.6 * R ? 0.6 * R : cfg.halfWidth;
+  const hcfg = hillW < cfg.halfWidth ? { ...cfg, halfWidth: hillW } : cfg;
+  const hills = makeHills(hcfg, cfg.hills, cfg.hillHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), flat, windows.length ? 3 : 2.5);
   if (cfg.mountains > 0) {
     // with windows, put the mountains in the land strips (and keep them narrow enough to fade out before the glass)
     const n = windows.length;
@@ -675,7 +751,7 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
     const strip = (rand: () => number) => (cfg.biomes && n >= 3 ? 2 : Math.floor(rand() * n));
     const pick = n ? (rand: () => number) => (strip(rand) / n) * 2 * Math.PI + (rand() * 2 - 1) * (0.3 * Math.PI) / n : undefined;
     const maxR = n ? (0.7 * windows[0].halfArc) / 3 : undefined;
-    hills.push(...makeMountains(cfg, cfg.mountains, cfg.mountainHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), flat, pick, maxR));
+    hills.push(...makeMountains(hcfg, cfg.mountains, cfg.mountainHeight, () => rngNext(rng), (u) => arcAngle(cfg, u), flat, pick, maxR));
   }
   const terrain: Level['terrain'] = cfg.terrainSphere || hills.length > 0 || ridge || cfg.tube !== 'none'
     ? { sphere: cfg.terrainSphere, hills, ...(ridge ? { ridge } : {}) }
@@ -1011,7 +1087,7 @@ export const STAIR_TOP = 6; // lookout platform length
 
 export function spawnPosition(cfg: SimConfig, s: SpawnPoint, heightAboveFloor: number, level?: Level): Vec3 {
   if (cfg.world === 'disk') {
-    const { pos, n } = diskPoint(cfg, s.angle, Math.min(Math.abs(s.z), cfg.R * 0.95));
+    const { pos, n } = diskPoint(cfg, s.angle, Math.min(Math.abs(s.z), cfg.R * 0.95), level?.bumps);
     return [pos[0] + n[0] * heightAboveFloor, pos[1] + n[1] * heightAboveFloor, pos[2] + n[2] * heightAboveFloor];
   }
   if (cfg.world === 'planet') {
@@ -1020,7 +1096,7 @@ export function spawnPosition(cfg: SimConfig, s: SpawnPoint, heightAboveFloor: n
       return [d[0] * r, d[1] * r, d[2] * r];
     }
     const d = planetDir(s.angle, s.z / cfg.R);
-    const r = cfg.R + heightAboveFloor;
+    const r = cfg.R + planetBumpsAt(level?.bumps, cfg.R, d).h + heightAboveFloor;
     return [d[0] * r, d[1] * r, d[2] * r];
   }
   const r = (s.floor ?? (level ? floorRadius(level, cfg, s.angle, s.z) : cfg.R)) - heightAboveFloor;

@@ -4,9 +4,9 @@
 // a server can run bots without disturbing replays.
 
 import { advanceFree, localBasis, planetPullAt, setSpinAlpha, viewVectors } from './physics';
-import { diskSurface, levelSdf, setSdfFrame } from './level';
+import { diskHeight, levelSdf, setSdfFrame } from './level';
 import { convertBody, frameOf, frameOmega } from './twin';
-import { floorRadius, terrainAt } from './terrain';
+import { floorRadius, planetBumpsAt, terrainAt } from './terrain';
 import { towerFloorBelow } from './tower';
 import { boltStats, launchVelocity, muzzlePoint } from './step';
 import { hash01 } from './rng';
@@ -77,10 +77,11 @@ export function solveAim(state: SimState, me: Player, target: Player, kind: Bolt
 
 /** How high a player is above the floor beneath them (0 when standing on the floor). */
 function heightAboveFloor(state: SimState, p: Player): number {
-  if (state.level.shape === 'disk') return p.pos[2] - diskSurface(state.config, Math.hypot(p.pos[0], p.pos[1])).h - standHeight(p.size);
+  if (state.level.shape === 'disk') return p.pos[2] - diskHeight(state.config, state.level.bumps, p.pos[0], p.pos[1]).h - standHeight(p.size);
   if (state.level.shape === 'planet') {
     const r = Math.hypot(p.pos[0], p.pos[1], p.pos[2]), c = state.config;
-    return Math.min(r - c.R, c.outerShell > 0 ? c.outerShell - r : Infinity) - standHeight(p.size);
+    const ground = c.R + planetBumpsAt(state.level.bumps, c.R, [p.pos[0] / r, p.pos[1] / r, p.pos[2] / r]).h;
+    return Math.min(r - ground, c.outerShell > 0 ? c.outerShell - r : Infinity) - standHeight(p.size);
   }
   if (state.level.tower) return towerFloorBelow(state.level.tower, state.config, p.pos) - Math.hypot(p.pos[0], p.pos[1]) - standHeight(p.size);
   const ang = Math.atan2(p.pos[1], p.pos[0]);

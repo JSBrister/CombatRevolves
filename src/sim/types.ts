@@ -502,6 +502,9 @@ export interface Deck {
 }
 
 /** A Gaussian hill on the floor. */
+/** A Gaussian bump: peak height and spread (sigma, metres along the surface). */
+export interface Bump { c: [number, number, number]; height: number; radius: number }
+
 export interface Hill {
   angle: number; // ring angle of its peak
   z: number;
@@ -525,6 +528,8 @@ export interface Level {
   pads?: Pad[];
   /** Spin tower geometry. */
   tower?: Tower;
+  /** Hills and mountains on a planet (c: unit vector to the peak) or a disk (c: the peak's (x, y) on the disk): Gaussian bumps on the surface. */
+  bumps?: Bump[];
   boxes: Box[];
   stairTops: Vec3[]; // a floor point on each staircase's lookout (add stand height to place a player)
   spawns: SpawnPoint[];
