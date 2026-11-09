@@ -85,8 +85,8 @@ export function customLevel(s: CustomSettings): LevelDef {
     case 'twin': c.twin = true; variedWalls = false; break;
     case 'disk': c.world = 'disk'; c.planetSpin = 1.6; break; // (walkable to 83% of the radius)
     case 'bucket': c.world = 'disk'; c.planetSpin = 1.6; c.diskBowl = true; break;
-    // (its width scales with the radius, so the launch pads' Coriolis-bent throw still fits; the slider sets its depth)
-    case 'tower': c.R = Math.max(60, R); c.tower = 0.1 * c.R; c.halfWidth = Math.max(15, Math.min(s.width, 0.5 * c.R)); variedWalls = false; break;
+    // (its size scales with the radius, so the launch pads' Coriolis-bent throw still lands on the far hub floor)
+    case 'tower': c.R = Math.max(60, R); c.tower = 0.1 * c.R; variedWalls = false; break;
     case 'log': c.tube = 'outside'; c.tubeRadius = Math.min(s.width, 0.45 * R); c.halfWidth = c.tubeRadius; break;
   }
   // hills and mountains go on anything with ground (not inside the tower)

@@ -1,16 +1,19 @@
-// Spin Tower: a closed tower through the spin axis instead of a ring.
+// Spin Tower: a tower through the spin axis instead of a ring.
 //
 // Two arms stick out from the axis in opposite directions (+x and -x in the
-// rotating frame), each a box `halfWidth` across (round the spin) and
-// cfg.halfWidth deep (along the axis), closed off at radius R. You start at
-// the far end of an arm, where the spin gives the full g, and climb floors
-// toward the axis, where you weigh almost nothing; the hollow runs straight
-// through the axis into the other arm.
+// rotating frame). Each is a stack of floors, open at the sides, stepping in
+// toward the axis like a ziggurat: the bottom floor (at radius R, the full g)
+// is the biggest, and each one up is smaller, so from below you can see up the
+// tower, and out past the edges to the stars wheeling round. You climb ramps
+// from floor to floor toward the axis, where you weigh almost nothing, and
+// launch pads on the top (hub) floor throw you across to the other arm.
 //
 // The floors are curved slabs at constant radius (level ground: the spin's
-// pull is straight out from the axis everywhere), with openings for the ramps
-// and lifts between them. Everything is 180-degree symmetric about the axis,
-// so the SDF folds a point into the +x arm and works there.
+// pull is straight out from the axis everywhere). Each storey's two ramps
+// stand on the floor below, in the strip left round the floor above, and
+// climb alongside that floor's edge to arrive level with it. Everything is
+// 180-degree symmetric about the axis, so the SDF folds a point into the +x
+// arm and works there.
 
 import { rngNext } from './rng';
 import type { Box, ItemKind, Level, Pad, SimConfig, SpawnPoint, Tower, TowerFloor } from './types';
@@ -18,33 +21,73 @@ import type { Vec3 } from './vec';
 
 export interface TowerHit { d: number; n: Vec3 }
 
-/** Floor radii and the neck, for a tower of radius R (fractions tuned so each storey is a ramp or a lift ride). */
-export function towerLayout(R: number): number[] {
-  return [0.9, 0.79, 0.66, 0.5, 0.15].map((f) => f * R);
+export const TOWER_RAMP_SLOPE = 0.6; // rise per metre (31 degrees)
+const RAMP_W = 5; // ramp width
+const STEP = RAMP_W + 2; // how much bigger each floor is than the one above, on the ramps' sides
+
+/**
+ * How a storey is climbed: two ramps, either round the spin ('y': beside the
+ * upper floor's +-z edges, sweeping through +-halfAngle) or along the axis
+ * ('z': beside its +-y edges, each straight up a radial line at angle +-phi,
+ * so "down" never leans across it).
+ */
+export interface TowerStorey { along: 'y' | 'z'; rise: number; len: number; halfAngle: number; phi: number }
+
+/**
+ * The floors of a tower of radius R, bottom first, and how each storey is
+ * climbed. Built from the top down: each floor is one ramp strip bigger than
+ * the one above, on the sides where that storey's ramps go. Near the axis the
+ * ramps run round the spin (y) and the floors grow along the axis; further
+ * out, where the floors curve less, they run along the axis and the floors
+ * grow round the spin.
+ */
+export function towerLayout(cfg: SimConfig): { floors: TowerFloor[]; storeys: TowerStorey[] } {
+  const R = cfg.R;
+  const radii = [1, 0.86, 0.72, 0.58, 0.45, 0.32, 0.18].map((f) => f * R);
+  const n = radii.length - 1;
+  const storeys: TowerStorey[] = [];
+  for (let k = 0; k < n; k++) {
+    const rise = radii[k] - radii[k + 1], len = rise / TOWER_RAMP_SLOPE;
+    // near the axis (where floors curve a lot across the spin) the ramps go round the spin and the floors grow along the axis
+    storeys.push({ along: radii[k + 1] < 0.7 * R ? 'y' : 'z', rise, len, halfAngle: len / (radii[k] + radii[k + 1]), phi: 0 });
+  }
+  // a floor must reach past both ends of round-the-spin ramps that start on it or arrive beside it
+  const reach = (k: number, s: TowerStorey | undefined) => (s && s.along === 'y' ? radii[k] * Math.sin(s.halfAngle) + 1.5 : 0);
+  let w = Math.max(cfg.tower, reach(n, storeys[n - 1])), d = Math.max(12, 0.12 * R);
+  const floors: TowerFloor[] = [];
+  floors[n] = { r: radii[n], thickness: 0.8, w, d, holes: [] };
+  for (let k = n - 1; k >= 0; k--) {
+    const s = storeys[k];
+    if (s.along === 'y') { d += STEP; w = Math.max(w, reach(k, s), reach(k, storeys[k - 1])); }
+    else {
+      // straight up a radial line that passes just outside the upper floor's edge
+      s.phi = Math.asin(Math.min(0.9, (w + RAMP_W / 2 + 0.1) / radii[k + 1]));
+      w = radii[k] * Math.sin(s.phi) + RAMP_W / 2 + 2;
+      d = Math.max(d, s.len / 2 + 2);
+    }
+    floors[k] = { r: radii[k], thickness: k === 0 ? 3 : 0.8, w, d, holes: [] };
+  }
+  return { floors, storeys };
 }
 
-/** Distance from p to the tower's walls and floors (positive in free space), into `out` if nearer. */
-export function towerSdf(T: Tower, cfg: SimConfig, p: Vec3, out: TowerHit) {
+/** Distance from p to the tower's floors (positive in free space), into `out` if nearer. */
+export function towerSdf(T: Tower, p: Vec3, out: TowerHit) {
   const flip = p[0] < 0;
   const x = flip ? -p[0] : p[0], y = flip ? -p[1] : p[1], z = p[2];
   const rho = Math.hypot(x, y) || 1e-9;
   const rx = x / rho, ry = y / rho;
-  const sy = Math.sign(y) || 1, sz = Math.sign(z) || 1;
-  // inside the hollow: across, out to the end wall, and along the axis
-  let d = T.halfWidth - Math.abs(y), n: Vec3 = [0, -sy, 0];
-  const dEnd = cfg.R - rho;
-  if (dEnd < d) { d = dEnd; n = [-rx, -ry, 0]; }
-  const dz = cfg.halfWidth - Math.abs(z);
-  if (dz < d) { d = dz; n = [0, 0, -sz]; }
-  // floors: a slab from r to r + thickness, minus its openings
+  let d = out.d, n: Vec3 | null = null;
   for (const f of T.floors) {
+    // the slab is where three bands meet: radius, across and along; the largest of the three
+    // distances is a safe (never too big) estimate of the distance to it
     const half = f.thickness / 2;
-    let fd = Math.abs(rho - (f.r + half)) - half;
+    const dr = Math.abs(rho - (f.r + half)) - half, dy = Math.abs(y) - f.w, dz = Math.abs(z) - f.d;
+    let fd = dr, fn: Vec3 | null = null;
+    if (dy > fd) { fd = dy; fn = [0, Math.sign(y) || 1, 0]; }
+    if (dz > fd) { fd = dz; fn = [0, 0, Math.sign(z) || 1]; }
     if (fd >= d) continue;
-    const s = Math.sign(rho - (f.r + half)) || 1;
-    let fn: Vec3 = [s * rx, s * ry, 0];
+    if (!fn) { const s = Math.sign(rho - (f.r + half)) || 1; fn = [s * rx, s * ry, 0]; }
     for (const h of f.holes) {
-      // the opening's prism (along the radius), as a 2D box in (y, z)
       const qy = Math.abs(y - h.y) - h.hy, qz = Math.abs(z - h.z) - h.hz;
       let hd: number, gy = 0, gz = 0;
       if (qy > 0 || qz > 0) {
@@ -56,16 +99,16 @@ export function towerSdf(T: Tower, cfg: SimConfig, p: Vec3, out: TowerHit) {
     }
     if (fd < d) { d = fd; n = fn; }
   }
-  if (d < out.d) { out.d = d; out.n = flip ? [-n[0], -n[1], n[2]] : n; }
+  if (n) { out.d = d; out.n = flip ? [-n[0], -n[1], n[2]] : n; }
 }
 
-/** Radius of the floor under a point (the first one out from it that isn't open there). */
+/** Radius of the floor under a point (the nearest one out from it that's under it), or R + 50 if none. */
 export function towerFloorBelow(T: Tower, cfg: SimConfig, p: Vec3): number {
   const y = p[0] < 0 ? -p[1] : p[1], z = p[2];
   const rho = Math.hypot(p[0], p[1]);
-  let best = cfg.R;
+  let best = cfg.R + 50;
   for (const f of T.floors) {
-    if (f.r < rho - 0.5 || f.r >= best) continue;
+    if (f.r < rho - 0.5 || f.r >= best || Math.abs(y) > f.w || Math.abs(z) > f.d) continue;
     if (f.holes.some((h) => Math.abs(y - h.y) < h.hy && Math.abs(z - h.z) < h.hz)) continue;
     best = f.r;
   }
@@ -78,160 +121,198 @@ export function towerPoint(r: number, y: number, z: number, arm: 0 | 1): Vec3 {
   return arm ? [-x, -y, z] : [x, y, z];
 }
 
-const RAMP_SLOPE = 0.45, RAMP_W = 4, LIFT_HALF = 1.8;
+interface Rect { y: number; z: number; hy: number; hz: number }
 
 export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacles: boolean, nextId: () => number): Level {
-  const R = cfg.R, W = cfg.tower, hw = cfg.halfWidth;
-  const radii = towerLayout(R), hubR = 0.36 * R;
-  const floors: TowerFloor[] = radii.map((r) => ({ r, thickness: 0.8, holes: [] }));
-  const T: Tower = { halfWidth: W, floors };
+  const R = cfg.R;
+  const { floors, storeys } = towerLayout(cfg);
+  const N = floors.length - 1;
+  const T: Tower = { floors };
   const boxes: Box[] = [];
   const pads: Pad[] = [];
   const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
   const spawns: SpawnPoint[] = [];
-  /** Footprints on each floor (index 0 = the end wall at R, k + 1 = floors[k]) that must stay clear. */
-  const used: { y: number; z: number; hy: number; hz: number }[][] = radii.map(() => []).concat([[]]);
-  const holesOn = (fi: number) => (fi === 0 ? [] : floors[fi - 1].holes);
-  const clear = (fi: number, y: number, z: number, hy: number, hz: number, m = 1) =>
-    [...holesOn(fi), ...used[fi]].every((h) => Math.abs(y - h.y) > hy + h.hy + m || Math.abs(z - h.z) > hz + h.hz + m);
-  const rOf = (fi: number) => (fi === 0 ? R : radii[fi - 1]);
+  /** What's already on each floor (footprints in (y, z)), to keep things apart. */
+  const used: Rect[][] = floors.map(() => []);
+  const clear = (fi: number, y: number, z: number, hy: number, hz: number, m = 1) => {
+    const f = floors[fi];
+    if (Math.abs(y) + hy > f.w - 0.6 || Math.abs(z) + hz > f.d - 0.6) return false;
+    return used[fi].every((h) => Math.abs(y - h.y) > hy + h.hy + m || Math.abs(z - h.z) > hz + h.hz + m);
+  };
   const rot = (v: Vec3, arm: 0 | 1): Vec3 => (arm ? [-v[0], -v[1], v[2]] : v);
 
-  /** A box standing on floor `fi` at (y, z): its own frame is the radial one there. */
-  const stand = (fi: number, y: number, z: number, ht: number, hu: number, hz: number, kind: Box['kind'] = 'cover') => {
-    const r = rOf(fi);
+  /** A box standing on floor fi at (y, z) (`lift` up off it), in the radial frame there; in both arms. */
+  const stand = (fi: number, y: number, z: number, ht: number, hu: number, hz: number, kind: Box['kind'] = 'cover', mark = true) => {
+    const r = floors[fi].r;
     for (const arm of [0, 1] as const) {
       const c = towerPoint(r - hu + 0.1, y, z, arm);
       boxes.push({ id: nextId(), type: 'box', kind, angle: Math.atan2(c[1], c[0]), tilt: 0, center: c, half: [ht, hu + 0.1, hz] });
     }
-    used[fi].push({ y, z, hy: ht, hz });
+    if (mark) used[fi].push({ y, z, hy: ht, hz });
   };
-  /** A straight ramp along the axis at `y`, from floor fi at z0 up to the next floor at z0 + dir * L. */
-  const ramp = (fi: number, y: number, dir: 1 | -1) => {
-    const r0 = rOf(fi), r1 = rOf(fi + 1), L = (r0 - r1) / RAMP_SLOPE;
-    const z0 = (-dir * L) / 2, z1 = (dir * L) / 2;
-    for (const arm of [0, 1] as const) {
-      const B = towerPoint(r0, y, z0, 0), Tp = towerPoint(r1, y, z1, 0);
-      const dx = Tp[0] - B[0], dy = Tp[1] - B[1], dzz = Tp[2] - B[2];
-      const len = Math.hypot(dx, dy, dzz);
-      const X: Vec3 = [dx / len, dy / len, dzz / len];
-      const mid: Vec3 = [(B[0] + Tp[0]) / 2, (B[1] + Tp[1]) / 2, (B[2] + Tp[2]) / 2];
+
+  /**
+   * A ramp from floor k up to floor k + 1, along a path in (angle, z) while
+   * climbing evenly: in a few flat pieces, each tilted to the "up" (radial)
+   * where it is, so it never leans across. A low stop across its top end.
+   */
+  const ramp = (k: number, a0: number, z0: number, a1: number, z1: number) => {
+    const r0 = floors[k].r, r1 = floors[k + 1].r, segs = a0 === a1 ? 1 : 6;
+    const pts: Vec3[] = [];
+    for (let i = 0; i <= segs; i++) {
+      const s = i / segs, r = r0 + (r1 - r0) * s, a = a0 + (a1 - a0) * s;
+      pts.push([r * Math.cos(a), r * Math.sin(a), z0 + (z1 - z0) * s]);
+    }
+    for (let i = 0; i < segs; i++) {
+      const A = pts[i], B = pts[i + 1];
+      const dx = B[0] - A[0], dy = B[1] - A[1], dz = B[2] - A[2];
+      const len = Math.hypot(dx, dy, dz);
+      const X: Vec3 = [dx / len, dy / len, dz / len];
+      const mid: Vec3 = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2];
       const mr = Math.hypot(mid[0], mid[1]);
-      const u: Vec3 = [-mid[0] / mr, -mid[1] / mr, 0]; // up (toward the axis) at its middle
+      const u: Vec3 = [-mid[0] / mr, -mid[1] / mr, 0]; // up (toward the axis) here
       const ux = u[0] * X[0] + u[1] * X[1];
       const N0: Vec3 = [u[0] - ux * X[0], u[1] - ux * X[1], -ux * X[2]];
       const nl = Math.hypot(...N0);
-      const N: Vec3 = [N0[0] / nl, N0[1] / nl, N0[2] / nl];
-      const Z: Vec3 = [X[1] * N[2] - X[2] * N[1], X[2] * N[0] - X[0] * N[2], X[0] * N[1] - X[1] * N[0]];
+      const Nn: Vec3 = [N0[0] / nl, N0[1] / nl, N0[2] / nl];
+      const Z: Vec3 = [X[1] * Nn[2] - X[2] * Nn[1], X[2] * Nn[0] - X[0] * Nn[2], X[0] * Nn[1] - X[1] * Nn[0]];
       const hy = 0.35;
-      const c: Vec3 = [mid[0] - N[0] * hy, mid[1] - N[1] * hy, mid[2] - N[2] * hy];
-      boxes.push({ id: nextId(), type: 'box', kind: 'ramp', angle: Math.atan2(rot(mid, arm)[1], rot(mid, arm)[0]), tilt: 0, center: rot(c, arm), half: [len / 2, hy, RAMP_W / 2], axes: [rot(X, arm), rot(N, arm), rot(Z, arm)] });
+      const c: Vec3 = [mid[0] - Nn[0] * hy, mid[1] - Nn[1] * hy, mid[2] - Nn[2] * hy];
+      for (const arm of [0, 1] as const) {
+        const cc = rot(c, arm);
+        boxes.push({ id: nextId(), type: 'box', kind: 'ramp', angle: Math.atan2(cc[1], cc[0]), tilt: 0, center: cc, half: [len / 2 + (segs > 1 ? 0.12 : 0), hy, RAMP_W / 2], axes: [rot(X, arm), rot(Nn, arm), rot(Z, arm)] });
+      }
     }
-    used[fi].push({ y, z: 0, hy: RAMP_W / 2, hz: L / 2 + 1.5 });
-    // the opening above it: the whole run, so you never bang your head
-    floors[fi].holes.push({ y, z: (z0 + z1) / 2 - dir * 0.5, hy: RAMP_W / 2 + 0.4, hz: L / 2 + 0.5 });
-  };
-  /** A lift from floor fi up through an opening in the next one. */
-  const lift = (fi: number, y: number, z: number, phase: number) => {
-    const r0 = rOf(fi), r1 = rOf(fi + 1), th = 0.2;
-    const travel = r0 - r1;
+    // the stop across its top end (you step off sideways onto the floor)
+    const ae = a1 + Math.sign(a1 - a0) * (0.3 / r1), ze = z1 + Math.sign(z1 - z0) * 0.3;
     for (const arm of [0, 1] as const) {
-      const base = towerPoint(r0 + th, y, z, arm);
-      boxes.push({ id: nextId(), type: 'box', kind: 'lift', angle: Math.atan2(base[1], base[0]), tilt: 0, center: [...base] as Vec3, half: [LIFT_HALF, th, LIFT_HALF], lift: { base, travel, period: Math.max(12, travel * 0.8), phase: phase + arm * 0.5 } });
+      const rc = r1 - 0.55 + 0.1, c = rot([rc * Math.cos(ae), rc * Math.sin(ae), ze], arm);
+      boxes.push({ id: nextId(), type: 'box', kind: 'wall', angle: Math.atan2(c[1], c[0]), tilt: 0, center: c, half: a0 === a1 ? [RAMP_W / 2, 0.65, 0.25] : [0.25, 0.65, RAMP_W / 2] });
     }
-    used[fi].push({ y, z, hy: LIFT_HALF + 0.5, hz: LIFT_HALF + 0.5 });
-    // it rises straight out along its radius, so it arrives a little nearer the middle
-    const yTop = (y * r1) / r0;
-    floors[fi].holes.push({ y: yTop, z, hy: LIFT_HALF + 0.35, hz: LIFT_HALF + 0.35 });
+    const ys = [r0 * Math.sin(a0), r0 * Math.sin(a1), r1 * Math.sin(a0), r1 * Math.sin(a1)];
+    const yLo = Math.min(...ys), yHi = Math.max(...ys);
+    used[k].push({ y: (yLo + yHi) / 2, z: (z0 + z1) / 2, hy: (yHi - yLo) / 2 + (a0 === a1 ? RAMP_W / 2 : 1.5), hz: Math.abs(z1 - z0) / 2 + (z0 === z1 ? RAMP_W / 2 : 1.5) });
   };
 
-  // storeys: a ramp and a lift where a ramp fits, otherwise two lifts
-  const zl = hw - LIFT_HALF - 1.7;
-  const nStoreys = radii.length; // from the end wall (0) up to each floor
-  for (let k = 0; k < nStoreys; k++) {
-    const rise = rOf(k) - rOf(k + 1);
-    const s: 1 | -1 = k % 2 ? -1 : 1;
-    const neck = rOf(k + 1) < hubR; // the long lift up to the hub floor: in the middle
-    const yA = neck ? 0 : (s * W) / 2;
-    if (!neck && rise / RAMP_SLOPE <= 2 * (zl - LIFT_HALF - 2)) {
-      ramp(k, yA, s);
-      lift(k, -yA, -s * zl, 0.25 * k);
-      continue;
+  // Ramps: two per storey, on opposite sides of the floor above, climbing opposite ways.
+  /** Where each floor's edge has a ramp arriving (keep the parapet open there), per floor: [edge, from, to]. */
+  const arrivals: { edge: '+y' | '-y' | '+z' | '-z'; a: number; b: number }[][] = floors.map(() => []);
+  for (let k = 0; k < N; k++) {
+    const st = storeys[k], up = floors[k + 1], L = st.len;
+    for (const sg of [1, -1]) {
+      if (st.along === 'y') {
+        const z = sg * (up.d + RAMP_W / 2 + 0.05), ha = st.halfAngle;
+        ramp(k, -sg * ha, z, sg * ha, z);
+        const yTop = sg * up.r * Math.sin(ha), run = 0.45 * L;
+        arrivals[k + 1].push({ edge: sg > 0 ? '+z' : '-z', a: Math.min(yTop, yTop - sg * run), b: Math.max(yTop, yTop - sg * run) });
+      } else {
+        ramp(k, sg * st.phi, -sg * L / 2, sg * st.phi, sg * L / 2);
+        arrivals[k + 1].push({ edge: sg > 0 ? '+y' : '-y', a: sg > 0 ? L / 2 - 0.45 * L : -L / 2, b: sg > 0 ? L / 2 : -L / 2 + 0.45 * L });
+      }
     }
-    const cands: [number, number][] = neck
-      ? [[0, zl], [0, -zl], [0, 0]]
-      : [[yA, s * zl], [-yA, -s * zl], [yA, -s * zl], [-yA, s * zl], [yA, 0], [-yA, 0]];
-    let placed = 0;
-    for (const [y, z] of cands) {
-      if (placed >= 2) break;
-      // clear here, and its opening in the next floor clear of what's already planned up there
-      if (!clear(k, y, z, LIFT_HALF, LIFT_HALF, 1.5)) continue;
-      lift(k, y, z, 0.3 * placed + 0.1 * k);
-      placed++;
+  }
+
+  // Columns at the corners (and along long edges) of each floor, down to the one below.
+  for (let k = 1; k <= N; k++) {
+    const f = floors[k], below = floors[k - 1];
+    const top = f.r + f.thickness, bottom = below.r, hh = (bottom - top) / 2;
+    const ys = f.w > 20 ? [-(f.w - 0.8), 0, f.w - 0.8] : [-(f.w - 0.8), f.w - 0.8];
+    const zs = f.d > 20 ? [-(f.d - 0.8), 0, f.d - 0.8] : [-(f.d - 0.8), f.d - 0.8];
+    for (const y of ys) for (const z of zs) {
+      if (Math.abs(y) < f.w - 1 && Math.abs(z) < f.d - 1) continue; // only round the edges
+      for (const arm of [0, 1] as const) {
+        const c = towerPoint(top + hh, y, z, arm);
+        boxes.push({ id: nextId(), type: 'box', kind: 'struct', angle: Math.atan2(c[1], c[0]), tilt: 0, center: c, half: [0.5, hh + 0.05, 0.5] });
+      }
+      used[k - 1].push({ y, z, hy: 0.5, hz: 0.5 });
     }
+  }
+
+  // Parapets round each floor's edge: waist high, with gaps where there's a floor to land on below, and open where a ramp arrives.
+  for (let k = 0; k <= N; k++) {
+    const f = floors[k];
+    // gaps only where a bigger floor below would catch you (never round the bottom floor: off there is space)
+    const below = floors[k - 1];
+    const gapAt = (edge: string) => (!below ? 0 : (edge[1] === 'y' ? below.w - f.w : below.d - f.d) >= 5 ? 0.35 : 0);
+    const open = (edge: string, s: number) => arrivals[k].some((a) => a.edge === edge && s > a.a - 1 && s < a.b + 1);
+    const run = (edge: '+y' | '-y' | '+z' | '-z', len: number) => {
+      const gapChance = gapAt(edge);
+      const nSeg = Math.max(2, Math.round((2 * len) / 4));
+      const segL = (2 * len) / nSeg;
+      for (let i = 0; i < nSeg; i++) {
+        const s = -len + (i + 0.5) * segL;
+        if (open(edge, s) || rngNext(rng) < gapChance) continue;
+        const sg = edge[0] === '+' ? 1 : -1;
+        if (edge[1] === 'y') {
+          // (straight along the axis: join it up with the following pieces)
+          let j = i;
+          while (j + 1 < nSeg && !open(edge, -len + (j + 1.5) * segL) && rngNext(rng) >= gapChance) j++;
+          const zc = -len + ((i + j + 1) / 2) * segL;
+          stand(k, sg * (f.w - 0.25), zc, 0.25, 0.55, ((j - i + 1) * segL) / 2 - 0.05, 'wall', false);
+          i = j;
+        } else stand(k, s, sg * (f.d - 0.25), segL / 2 - 0.05, 0.55, 0.25, 'wall', false);
+      }
+    };
+    run('+y', f.d); run('-y', f.d); run('+z', f.w); run('-z', f.w);
   }
 
   // The hub floor: launch pads that throw you across the axis onto the other arm's hub floor.
   // Coriolis bends the path round, so they throw you well antispinward of straight up
   // (tuned by test: about 3 s across, landing near the middle of the far floor).
-  const top = floors[floors.length - 1];
-  const padSpeed = 2.05 * Math.sqrt(cfg.g / R) * top.r, padTilt = 0.9;
-  for (const z of [-hw / 3, hw / 3]) {
-    if (!clear(nStoreys, 0, z, 1.2, 1.2, 0.5)) continue;
+  const hub = floors[N];
+  const padSpeed = 2.05 * Math.sqrt(cfg.g / R) * hub.r, padTilt = 0.9;
+  for (const z of [-hub.d / 2, hub.d / 2]) {
     for (const arm of [0, 1] as const) {
-      const pos = towerPoint(top.r, 0, z, arm);
+      const pos = towerPoint(hub.r, 0, z, arm);
       const up: Vec3 = rot([-1, 0, 0], arm), spin: Vec3 = rot([0, 1, 0], arm);
       const ct = Math.cos(padTilt), st = Math.sin(padTilt);
       pads.push({ pos, up: [up[0] * ct - spin[0] * st, up[1] * ct - spin[1] * st, 0], speed: padSpeed });
     }
-    used[nStoreys].push({ y: 0, z, hy: 1.5, hz: 1.5 });
+    used[N].push({ y: 0, z, hy: 1.5, hz: 1.5 });
   }
 
-  // Spawn points: on the end wall of each arm, and part-way up (so not everyone starts at the bottom)
-  const spawnCands: [number, number, number][] = [
-    [0, -W / 2, -hw / 2], [0, W / 2, hw / 2], [0, 0, -hw + 3], [0, 0, hw - 3], [0, -W / 2, hw / 2], [0, W / 2, -hw / 2],
-    [2, -W / 2, -hw / 2], [2, W / 2, hw / 2], [2, 0, 0], [2, -W + 2, hw - 4], [2, W - 2, -hw + 4],
-  ];
-  const perFloor = [3, 0, 1];
-  for (const fi of [0, 2]) {
-    let n = 0;
-    for (const [f, y, z] of spawnCands) {
-      if (f !== fi || n >= perFloor[fi]) continue;
-      if (!clear(fi, y, z, 1.5, 1.5, 1)) continue;
-      used[fi].push({ y, z, hy: 1.5, hz: 1.5 });
-      const r = rOf(fi);
-      for (const arm of [0, 1] as const) spawns.push({ angle: Math.asin(y / r) + arm * Math.PI, z, ...(fi ? { floor: r } : {}) });
-      n++;
+  /** A random clear spot on floor fi, or null. */
+  const spot = (fi: number, hy: number, hz: number, m = 1): [number, number] | null => {
+    const f = floors[fi];
+    for (let i = 0; i < 30; i++) {
+      const y = (rngNext(rng) * 2 - 1) * (f.w - hy - 1), z = (rngNext(rng) * 2 - 1) * (f.d - hz - 1);
+      if (clear(fi, y, z, hy, hz, m)) return [y, z];
+    }
+    return null;
+  };
+
+  // Spawn points: on the bottom floor of each arm, and two floors up (so not everyone starts at the bottom).
+  for (const [fi, count] of [[0, 4], [2, 1]] as const) {
+    for (let i = 0; i < count; i++) {
+      const at = spot(fi, 1.5, 1.5, 1.5);
+      if (!at) continue;
+      used[fi].push({ y: at[0], z: at[1], hy: 1.5, hz: 1.5 });
+      const r = floors[fi].r;
+      for (const arm of [0, 1] as const) spawns.push({ angle: Math.asin(at[0] / r) + arm * Math.PI, z: at[1], ...(fi ? { floor: r } : {}) });
     }
   }
 
   if (withObstacles) {
-    // cover on every floor of the body, and something worth climbing for on each
+    // cover on every floor below the hub, and something worth climbing for on each
     const items: ItemKind[] = ['health', 'sticky', 'scatter', 'rocket', 'launcher', 'jetpack'];
-    for (let fi = 0; fi <= nStoreys; fi++) {
-      const r = rOf(fi);
-      if (r < hubR) continue;
-      const k = Math.min(1, r / R + 0.3);
-      const ys = [-W + 2.2, 0, W - 2.2], zs = [-hw + 4, -hw / 3, 0, hw / 3, hw - 4];
-      let n = 0;
-      for (let i = 0; i < 12 && n < 4; i++) {
-        const y = ys[Math.floor(rngNext(rng) * ys.length)], z = zs[Math.floor(rngNext(rng) * zs.length)];
-        const tall = rngNext(rng) < 0.4;
+    for (let fi = 0; fi < N; fi++) {
+      const f = floors[fi];
+      const count = Math.max(3, Math.min(10, Math.round((f.w * f.d) / 120)));
+      for (let i = 0; i < count; i++) {
+        const tall = rngNext(rng) < 0.35;
         const ht = tall ? 1 : 1.2 + rngNext(rng), hz = tall ? 1 : 1.5 + rngNext(rng);
-        if (!clear(fi, y, z, ht, hz, 1.2)) continue;
-        stand(fi, y, z, ht, (tall ? 1.6 : 0.6) * k + 0.2, hz, tall ? 'struct' : 'cover');
-        n++;
+        const at = spot(fi, ht, hz, 1.5);
+        if (!at) continue;
+        stand(fi, at[0], at[1], ht, tall ? 1.6 : 0.6, hz, tall ? 'struct' : 'cover');
       }
-      for (let i = 0; i < 10; i++) {
-        const y = (rngNext(rng) * 2 - 1) * (W - 2), z = (rngNext(rng) * 2 - 1) * (hw - 3);
-        if (!clear(fi, y, z, 0.8, 0.8, 1)) continue;
-        for (const arm of [0, 1] as const) pickupSpots.push({ pos: towerPoint(r - 1, y, z, arm), item: items[fi % items.length] });
-        used[fi].push({ y, z, hy: 0.8, hz: 0.8 });
-        break;
+      const at = spot(fi, 0.8, 0.8);
+      if (at) {
+        for (const arm of [0, 1] as const) pickupSpots.push({ pos: towerPoint(f.r - 1, at[0], at[1], arm), item: items[fi % items.length] });
+        used[fi].push({ y: at[0], z: at[1], hy: 0.8, hz: 0.8 });
       }
     }
     // prizes floating at the axis, where you weigh nothing
-    pickupSpots.push({ pos: [0, 0, 0], item: 'cannon' }, { pos: [0, 0, -hw / 2], item: 'chaos' }, { pos: [0, 0, hw / 2], item: 'seeker' });
+    pickupSpots.push({ pos: [0, 0, 0], item: 'cannon' }, { pos: [0, 0, -hub.d / 2], item: 'chaos' }, { pos: [0, 0, hub.d / 2], item: 'seeker' });
   }
   return { shape: 'tower', terrain: null, tower: T, boxes, stairTops: [], spawns, pickupSpots, vehicleSpots: [], wallPos: [], wallNeg: [], pads };
 }

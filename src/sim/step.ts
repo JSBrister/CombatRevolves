@@ -506,6 +506,11 @@ function despawnIfSpaced(state: SimState, pos: Vec3, vel: Vec3, kill: () => void
     if ((pos[2] < -150 && vel[2] < 0) || (rhoOf(pos) > 3 * cfg.R && dot(pos, vel) > 0)) kill();
     return;
   }
+  if (cfg.tower > 0) {
+    // flung off the tower: out past the bottom floor, or off the end of it along the axis, and still going
+    if ((rhoOf(pos) > cfg.R + 10 && dot([pos[0], pos[1], 0], vel) > 0) || (Math.abs(pos[2]) > cfg.R && pos[2] * vel[2] > 0)) kill();
+    return;
+  }
   if (cfg.world === 'planet') {
     if (cfg.outerShell > 0) return; // shut in by the shell: nothing gets away
     // gone for good: well out and still climbing (escape speed is only sqrt(2gR))
@@ -519,6 +524,7 @@ function despawnIfSpaced(state: SimState, pos: Vec3, vel: Vec3, kill: () => void
 /** Distance by which a point lies outside the ring band (0 if inside it). */
 export function distanceOffRing(cfg: SimConfig, pos: Vec3): number {
   if (cfg.world === 'disk') return Math.max(0, -pos[2] - 20, rhoOf(pos) - (cfg.R + 30)); // off the edge and falling
+  if (cfg.tower > 0) return Math.max(0, rhoOf(pos) - (cfg.R + 10), Math.abs(pos[2]) - cfg.R); // off the tower, into space
   if (cfg.world === 'planet') return cfg.outerShell > 0 ? 0 : Math.max(0, Math.hypot(pos[0], pos[1], pos[2]) - 3 * cfg.R); // flung off into space
   if (cfg.tube === 'outside') {
     // how far off the log's surface
@@ -900,11 +906,20 @@ function moveLifts(state: SimState) {
     const delta = sub(next, b.center);
     if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) continue;
     const spin: Vec3 = [-up[1], up[0], 0];
+    const down = dot(delta, up) < 0;
     for (const p of state.players) {
       if (!p.alive || p.vehicle >= 0) continue;
       const d = sub(p.pos, b.center);
+      const inside = Math.abs(dot(d, spin)) < b.half[0] + 0.3 && Math.abs(d[2]) < b.half[2] + 0.3;
       const lu = dot(d, up) - b.half[1] - standHeight(p.size);
-      if (Math.abs(dot(d, spin)) < b.half[0] + 0.3 && Math.abs(d[2]) < b.half[2] + 0.3 && lu > -0.3 && lu < 0.35) p.pos = add(p.pos, delta);
+      if (inside && lu > -0.3 && lu < 0.35) { p.pos = add(p.pos, delta); continue; }
+      // caught underneath as it comes down: squashed (pushing you out would push you through the floor)
+      if (down && inside) {
+        const dn = sub(p.pos, next);
+        const below = -dot(dn, up) - b.half[1]; // from its underside down to your centre
+        const top = capsuleHalfSeg(p) + capsuleRadius(p); // your centre up to the top of your head (it touches: you can't get out from under)
+        if (below > -0.2 && below < top + 0.05) kill(state, p, p.lastAttacker >= 0 && state.tick - p.lastDamageTick < secs(5) ? p.lastAttacker : p.id, 'crushed');
+      }
     }
     b.center = next;
   }

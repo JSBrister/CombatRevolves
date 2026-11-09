@@ -281,7 +281,7 @@ export function levelSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
       return diskSdf(level, cfg, p);
     case 'tower': {
       const out: SdfHit = { d: Infinity, n: [0, 0, 1] };
-      towerSdf(level.tower!, cfg, p, out);
+      towerSdf(level.tower!, p, out);
       for (const b of level.boxes) boxSdf(p, b, out);
       return out;
     }
@@ -1016,13 +1016,13 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
       const z = (i % 2 ? -1 : 1) * Math.min(cfg.halfWidth * 0.5, cfg.halfWidth - 4);
       if (dk.holes.some((h) => Math.abs(wrapAngle(a - h.angle)) * R < h.halfArc + 6)) continue;
       const hw = 1.8, th = 0.2;
-      const rc = R + th; // top flush with the floor at the bottom
+      const rc = R - th; // resting on the floor at the bottom (sunk flush into it, it flickered and seemed to vanish)
       const base: Vec3 = [rc * Math.cos(a), rc * Math.sin(a), z];
       for (let j = boxes.length - 1; j >= 0; j--) {
         const b = boxes[j];
         if (b.kind !== 'wall' && Math.abs(wrapAngle(b.angle - a)) * R < hw + b.half[0] + 2 && Math.abs(b.center[2] - z) < hw + b.half[2] + 2) boxes.splice(j, 1);
       }
-      boxes.push({ id: nextId(), type: 'box', kind: 'lift', angle: a, tilt: 0, center: [...base] as Vec3, half: [hw, th, hw], lift: { base, travel: D, period: 12, phase: i * 0.37 } });
+      boxes.push({ id: nextId(), type: 'box', kind: 'lift', angle: a, tilt: 0, center: [...base] as Vec3, half: [hw, th, hw], lift: { base, travel: D - 2 * th, period: 12, phase: i * 0.37 } }); // (rising to sit flush with the deck)
       dk.holes.push({ angle: a, z, halfArc: hw + 0.35, halfZ: hw + 0.35 });
       stairs.push({ angle: a, halfArc: hw + 3 });
     }

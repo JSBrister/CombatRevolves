@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  towerPoint, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -2359,38 +2359,46 @@ describe('46. spin tower', () => {
   };
   const solo = () => { const t = tower(); t.s.players = [t.p]; return t; };
   const rhoP = (p: { pos: Vec3 }) => Math.hypot(p.pos[0], p.pos[1]);
-  it('the hollow is the same in both arms (half a turn apart), and you can stand on every floor', () => {
+  it('both arms are the same (half a turn apart); every floor is smaller than the one below, and you can stand on each', () => {
     const { s, id, p } = solo();
     for (let i = 0; i < 400; i++) {
-      const q: Vec3 = [(hash01(i, 1, 46) * 2 - 1) * 100, (hash01(i, 2, 46) * 2 - 1) * 12, (hash01(i, 3, 46) * 2 - 1) * 22];
+      const q: Vec3 = [(hash01(i, 1, 46) * 2 - 1) * 100, (hash01(i, 2, 46) * 2 - 1) * 40, (hash01(i, 3, 46) * 2 - 1) * 42];
       expect(levelSdf(s.level, s.config, q).d).toBeCloseTo(levelSdf(s.level, s.config, [-q[0], -q[1], q[2]]).d, 9);
     }
-    for (const r of [100, ...s.level.tower!.floors.map((f) => f.r)]) for (const arm of [0, 1] as const) {
-      p.pos = towerPoint(r - standHeight(1), -8, -5, arm);
+    const floors = s.level.tower!.floors;
+    for (let k = 1; k < floors.length; k++) {
+      expect(floors[k].w).toBeLessThanOrEqual(floors[k - 1].w);
+      expect(floors[k].d).toBeLessThanOrEqual(floors[k - 1].d);
+      expect(floors[k].w * floors[k].d).toBeLessThan(floors[k - 1].w * floors[k - 1].d);
+    }
+    for (const f of floors) for (const arm of [0, 1] as const) {
+      p.pos = towerPoint(f.r - standHeight(1), -3, -5, arm);
       p.vel = [0, 0, 0];
       run(s, 240, () => [cmdFor(s, id)]);
       expect(p.grounded).toBe(true);
-      expect(Math.abs(rhoP(p) - (r - standHeight(1)))).toBeLessThan(0.05);
-      expect(Math.hypot(...p.vel)).toBeLessThan(0.01);
+      expect(Math.abs(rhoP(p) - (f.r - standHeight(1)))).toBeLessThan(0.05);
     }
   });
-  it('a ramp takes you up from the end wall to the first floor, and a lift up to the next', () => {
-    const { s, id, p } = solo();
-    const R = s.config.R, f1 = s.level.tower!.floors[0].r;
-    p.pos = towerPoint(R - standHeight(1), 5, -14, 0);
-    p.vel = [0, 0, 0];
-    run(s, 120, () => [cmdFor(s, id)]);
-    run(s, 120 * 8, () => [cmdFor(s, id, { moveY: 1, yaw: Math.PI / 2 })]);
-    expect(p.grounded).toBe(true);
-    expect(Math.abs(rhoP(p) - (f1 - standHeight(1)))).toBeLessThan(0.1);
-    // stand on the lift from the first floor (it goes up and comes back down)
-    const lift = s.level.boxes.find((b) => b.lift && b.center[0] > 0 && Math.abs(Math.hypot(b.lift.base[0], b.lift.base[1]) - f1) < 1)!;
-    p.pos = [lift.center[0] - 0.2 - standHeight(1), lift.center[1], lift.center[2]];
-    p.vel = [0, 0, 0];
-    let minRho = Infinity;
-    for (let i = 0; i < 120 * 16; i++) { step(s, [cmdFor(s, id)], s.tick); minRho = Math.min(minRho, rhoP(p)); }
-    expect(minRho).toBeLessThan(lift.lift!.base[0] - lift.lift!.travel); // it rose above the next floor's surface
-    expect(p.alive).toBe(true);
+  it('every storey has a ramp: walk up it and step off onto the next floor', () => {
+    const { s: s0 } = solo();
+    const { floors, storeys } = towerLayout(s0.config);
+    expect(s0.level.boxes.some((b) => b.lift)).toBe(false); // (no lifts)
+    storeys.forEach((st, k) => {
+      const { s, id, p } = solo();
+      const up = floors[k + 1], lo = floors[k], sh = standHeight(1);
+      let a: number, z: number, yaw: number, side: number;
+      if (st.along === 'y') { a = -st.halfAngle - 1.5 / lo.r; z = up.d + 2.55; yaw = 0; side = -Math.PI / 2; } // round the spin, then step in along the axis
+      else { a = st.phi; z = -st.len / 2 - 1.5; yaw = Math.PI / 2; side = Math.PI; } // along the axis, then step in round the spin
+      p.pos = [(lo.r - sh) * Math.cos(a), (lo.r - sh) * Math.sin(a), z];
+      p.vel = [0, 0, 0];
+      run(s, 60, () => [cmdFor(s, id)]);
+      for (let i = 0; i < 120 * 10 && rhoP(p) > up.r - sh + 0.3; i++) step(s, [cmdFor(s, id, { moveY: 1, yaw })], s.tick);
+      run(s, 240, () => [cmdFor(s, id, { moveY: 1, yaw: side })]);
+      run(s, 60, () => [cmdFor(s, id)]);
+      expect(p.alive).toBe(true);
+      expect(p.grounded).toBe(true);
+      expect(Math.abs(rhoP(p) - (up.r - sh))).toBeLessThan(0.6); // (on the floor, or on something low standing on it)
+    });
   });
   it('a launch pad on the hub floor throws you across the axis onto the other arm, unhurt', () => {
     const { s, id, p } = solo();
@@ -2406,12 +2414,61 @@ describe('46. spin tower', () => {
     expect(Math.abs(rhoP(p) - (top - standHeight(1)))).toBeLessThan(0.2); // on its hub floor
     expect(p.health + p.shield).toBe(p.maxHealth + p.maxShield);
   });
-  it('bots find each other and fight', () => {
+  it('off the edge of the bottom floor is space: you go, and you die', () => {
+    const { s, id, p } = solo();
+    const f0 = s.level.tower!.floors[0];
+    p.pos = towerPoint(f0.r - 3, 0, f0.d + 2, 0); // just past its end, along the axis
+    p.vel = [0, 0, 0];
+    let spaced = false;
+    for (let i = 0; i < 120 * 6 && !spaced; i++) { step(s, [cmdFor(s, id)], s.tick); spaced = s.events.some((e) => e.type === 'kill' && e.cause === 'spaced'); }
+    expect(spaced).toBe(true);
+  });
+  it('bots find each other and fight, and seldom fall off', () => {
     const { s, id, botIds } = tower();
-    let hits = 0;
-    for (let i = 0; i < 120 * 45; i++) { step(s, [cmdFor(s, id), ...botIds.map((b) => botInput(s, b))], s.tick); hits += s.events.filter((e) => e.type === 'hit').length; }
+    let hits = 0, spaced = 0;
+    for (let i = 0; i < 120 * 45; i++) {
+      step(s, [cmdFor(s, id), ...botIds.map((b) => botInput(s, b))], s.tick);
+      for (const e of s.events) { if (e.type === 'hit') hits++; if (e.type === 'kill' && e.cause === 'spaced') spaced++; }
+    }
     expect(hits, `hits ${hits}`).toBeGreaterThan(10);
+    expect(spaced).toBeLessThanOrEqual(2);
   }, 30000);
+});
+
+describe('46b. lifts', () => {
+  const deck = () => {
+    const { state, localId } = startLevel(levelById('s-decks')!);
+    state.players = state.players.filter((p) => p.id === localId);
+    const lift = state.level.boxes.find((b) => b.lift)!;
+    return { s: state, id: localId, p: state.players[0], lift };
+  };
+  it('a lift rests on the floor (not sunk into it) and rises to sit flush with the deck', () => {
+    const { s, lift } = deck();
+    const R = s.config.R, D = s.config.deckHeight;
+    const r = (c: Vec3) => Math.hypot(c[0], c[1]);
+    expect(r(lift.lift!.base) + lift.half[1]).toBeCloseTo(R, 6); // its underside on the floor
+    expect(r(lift.lift!.base) - lift.lift!.travel - lift.half[1]).toBeCloseTo(R - D, 6); // its top level with the deck
+  });
+  it('caught under a lift coming down: crushed, not pushed through the floor', () => {
+    const { s, id, p, lift } = deck();
+    // wait for it to be up, then stand underneath
+    const up = localBasis(lift.lift!.base).up;
+    let i = 0;
+    for (; i < 120 * 30 && dot(sub(lift.center, lift.lift!.base), up) < lift.lift!.travel - 0.01; i++) step(s, [cmdFor(s, id)], s.tick);
+    // stand on the floor right where it comes down
+    const base = lift.lift!.base, fr = Math.hypot(base[0], base[1]) + lift.half[1];
+    p.pos = scale([base[0], base[1], 0], (fr - standHeight(1)) / Math.hypot(base[0], base[1]));
+    p.pos[2] = base[2];
+    p.vel = [0, 0, 0];
+    let died = false, through = false;
+    for (let j = 0; j < 120 * 20 && !died; j++) {
+      step(s, [cmdFor(s, id)], s.tick);
+      if (!p.alive) died = s.events.some((e) => e.type === 'kill' && e.cause === 'crushed') || died;
+      if (Math.hypot(p.pos[0], p.pos[1]) > fr + 0.5) through = true;
+    }
+    expect(died).toBe(true);
+    expect(through).toBe(false);
+  });
 });
 
 describe('47. hills and mountains on more shapes', () => {

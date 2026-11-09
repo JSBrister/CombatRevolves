@@ -14,7 +14,7 @@ export interface SimConfig {
   spin: boolean; // false: the world doesn't rotate at all (Earth)
   world: 'ring' | 'planet' | 'disk'; // 'planet': on the OUTSIDE of a spinning ball of radius R, gravity g toward its centre; 'disk': on top of a spinning disk of radius R, gravity g straight down the axis
   planetSpin: number; // planet: how much of g the spin cancels at the equator; disk: the spin's outward push at the rim, as a multiple of g. Sets the spin rate
-  tower: number; // ring world: >0 = a closed tower through the axis instead of a ring: its half-width round the spin (m); halfWidth is its half-depth along the axis
+  tower: number; // ring world: >0 = a spin tower through the axis instead of a ring: the top (hub) floor's least half-width round the spin (m); the floors below are bigger
   diskBowl: boolean; // disk: the surface curves up (a paraboloid, like water in a spinning bucket) so gravity is always straight into it
   outerShell: number; // planet: >0 = a hollow shell of this radius round the ball, walkable on its inside near its equator
   launchPads: boolean; // nested spheres: launch pads between ball and shell
@@ -482,10 +482,13 @@ export interface Pad {
  */
 export type LevelShape = 'ring' | 'planet' | 'disk' | 'tower';
 
-/** A spin tower's floor: a curved slab whose walking surface is at radius r (on both arms), with openings (in the arm's own (across, along-axis) coordinates). */
-export interface TowerFloor { r: number; thickness: number; holes: { y: number; z: number; hy: number; hz: number }[] }
-/** A spin tower: a hollow box through the axis, two arms long, `halfWidth` across (round the spin). */
-export interface Tower { halfWidth: number; floors: TowerFloor[] }
+/**
+ * A spin tower's floor: a curved slab whose walking surface is at radius r (in both arms), reaching `w` either
+ * side across (round the spin) and `d` either side along the axis, with openings (in the arm's own (across, along-axis) coordinates).
+ */
+export interface TowerFloor { r: number; thickness: number; w: number; d: number; holes: { y: number; z: number; hy: number; hz: number }[] }
+/** A spin tower: two arms of floors stepping in toward the axis, the bottom (biggest) one first. */
+export interface Tower { floors: TowerFloor[] }
 
 /** A rectangular opening in a floor or deck, centred at (angle, z): halfArc metres along the ring (at radius R), halfZ across. */
 export interface Hole {

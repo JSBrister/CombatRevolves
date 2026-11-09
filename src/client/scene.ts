@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { disposeTree } from './dispose';
-import { DISK_THICKNESS, diskBumpsAt, diskSurface, floorRadius, hillsAt, planetBumpsAt, towerPoint, type Hole, type Level, type SimConfig, type TowerFloor } from '../sim';
+import { DISK_THICKNESS, diskBumpsAt, diskSurface, floorRadius, hillsAt, planetBumpsAt, towerPoint, type Hole, type Level, type SimConfig, type Vec3 } from '../sim';
 import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, rockTexture, sandTexture, snowTexture, wallTexture } from './textures';
 
 export const LAYER_ROT_TRAILS = 1;
@@ -505,100 +505,70 @@ export class RingScene {
   }
 
   /**
-   * Spin Tower: the hollow box through the axis, seen from inside. Floors are
-   * curved (each at one radius) and tinted from warm at the heavy ends to cool
-   * near the weightless middle, with their weight painted on the end walls.
+   * Spin Tower: two stacks of open floors through the axis, out among the
+   * stars. Floors are curved (each at one radius) and tinted from warm at the
+   * heavy ends to cool near the weightless middle, with their weight painted
+   * on them; ramps, parapets and columns are boxes.
    */
   private buildTower(cfg: SimConfig, level: Level) {
-    const T = level.tower!, R = cfg.R, W = T.halfWidth, hw = cfg.halfWidth;
+    const T = level.tower!, R = cfg.R;
     this.scene.background = new THREE.Color(0x02030a);
-    this.sunLight.intensity = 0;
-    this.sunLight.castShadow = false;
-    this.ambient.intensity = 1.25;
-    this.axisLight.intensity = 1.4;
-    this.starRadius = Math.max(4000, R * 12);
-    this.scene.fog = new THREE.Fog(0x0b1020, R * 1.2, R * 4);
-    const xe = Math.sqrt(R * R - W * W);
+    this.ambient.intensity = 0.75;
+    this.axisLight.intensity = 0.9;
+    this.sunLight.intensity = 2.4;
+    this.sunLight.castShadow = true;
+    this.sunDir.set(Math.sin(0.7), 0, Math.cos(0.7));
+    this.starRadius = Math.max(4000, R * 20);
+    this.scene.fog = new THREE.Fog(0x0b1020, R * 3, R * 12);
     const tint = (r: number) => new THREE.Color(0x6ab0e8).lerp(new THREE.Color(0xe0a070), r / R);
-    // floors (and the end walls, which are the bottom floors): curved surfaces with their openings left out
-    const surface = (f: TowerFloor, arm: 0 | 1) => {
-      const ys = new Set<number>(), zs = new Set<number>();
-      for (let i = 0; i <= 20; i++) ys.add(-W + (2 * W * i) / 20);
-      for (let i = 0; i <= 8; i++) zs.add(-hw + (2 * hw * i) / 8);
-      for (const h of f.holes) { ys.add(h.y - h.hy); ys.add(h.y + h.hy); zs.add(h.z - h.hz); zs.add(h.z + h.hz); }
-      const Y = [...ys].filter((y) => y >= -W && y <= W).sort((a, b) => a - b), Z = [...zs].filter((z) => z >= -hw && z <= hw).sort((a, b) => a - b);
-      const pos: number[] = [], uv: number[] = [];
-      for (let i = 0; i + 1 < Y.length; i++) for (let j = 0; j + 1 < Z.length; j++) {
-        const yc = (Y[i] + Y[i + 1]) / 2, zc = (Z[j] + Z[j + 1]) / 2;
-        if (f.holes.some((h) => Math.abs(yc - h.y) < h.hy && Math.abs(zc - h.z) < h.hz)) continue;
-        const q = [[Y[i], Z[j]], [Y[i + 1], Z[j]], [Y[i + 1], Z[j + 1]], [Y[i], Z[j]], [Y[i + 1], Z[j + 1]], [Y[i], Z[j + 1]]];
-        for (const [y, z] of q) { pos.push(...towerPoint(f.r - 0.02, y, z, arm)); uv.push(y / 4, z / 4); }
+    /** A grid surface over (u, v) in [0,1]^2, mapped by `at`, with the floor texture's tiling `uvOf`. */
+    const sheet = (nu: number, nv: number, at: (u: number, v: number) => Vec3, uvOf: (u: number, v: number) => [number, number]) => {
+      const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+      for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) { pos.push(...at(i / nu, j / nv)); uv.push(...uvOf(i / nu, j / nv)); }
+      for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
+        const a = i * (nv + 1) + j, b = (i + 1) * (nv + 1) + j;
+        idx.push(a, b, a + 1, b, b + 1, a + 1);
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
       g.computeVertexNormals();
       return g;
     };
     const tex = this.floorTex('deck');
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    const all: TowerFloor[] = [{ r: R, thickness: 0, holes: [] }, ...T.floors];
-    for (const f of all) {
-      const mat = new THREE.MeshStandardMaterial({ map: tex, color: tint(f.r), side: THREE.DoubleSide, roughness: 0.8, metalness: 0.2 });
-      for (const arm of [0, 1] as const) {
-        const m = new THREE.Mesh(surface(f, arm), mat);
-        m.receiveShadow = true;
-        this.level.add(m);
-        // a thin dark edge under it: the slab's thickness, seen from below
-        if (f.thickness) this.level.add(new THREE.Mesh(surface({ ...f, r: f.r + f.thickness }, arm), new THREE.MeshStandardMaterial({ color: 0x2a2f38, side: THREE.DoubleSide, roughness: 0.9 })));
-      }
-    }
-    // side walls (round the spin) and the two faces (along the axis)
-    const wallTex = this.textures.wall.clone();
-    wallTex.needsUpdate = true;
-    wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
-    wallTex.repeat.set((2 * xe) / 6, (2 * hw) / 6);
-    const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, color: 0xc4ccd8, side: THREE.DoubleSide, roughness: 0.75, metalness: 0.2 });
-    for (const sy of [-1, 1]) {
-      const g = new THREE.PlaneGeometry(2 * xe, 2 * hw);
-      g.rotateX(Math.PI / 2);
-      g.translate(0, sy * W, 0);
-      this.level.add(new THREE.Mesh(g, wallMat));
-    }
-    const outline = new THREE.Shape();
-    const a = Math.asin(W / R);
-    outline.moveTo(xe, -W);
-    outline.absarc(0, 0, R, -a, a, false);
-    outline.lineTo(-xe, W);
-    outline.absarc(0, 0, R, Math.PI - a, Math.PI + a, false);
-    outline.lineTo(xe, -W);
-    const faceMat = new THREE.MeshStandardMaterial({ color: 0x5e6878, side: THREE.DoubleSide, roughness: 0.85, metalness: 0.2 });
-    for (const sz of [-1, 1]) {
-      const g = new THREE.ShapeGeometry(outline, 48);
-      g.translate(0, 0, sz * hw);
-      this.level.add(new THREE.Mesh(g, faceMat));
-    }
-    // each floor's weight, painted on both faces of both arms, and a stripe where it meets them
+    const edgeMat = new THREE.MeshStandardMaterial({ color: 0x3a404c, side: THREE.DoubleSide, roughness: 0.85, metalness: 0.4 });
+    const underMat = new THREE.MeshStandardMaterial({ map: tex, color: 0x6a7280, side: THREE.DoubleSide, roughness: 0.9, metalness: 0.3 });
     const w2 = cfg.g / R;
-    for (const f of all) {
-      const label = this.textPlane(`${((w2 * f.r) / 9.81).toFixed(2)} g`, '#ffe9b0');
-      for (const arm of [0, 1] as const) for (const sz of [-1, 1]) {
-        const m = label.clone();
-        const p = towerPoint(f.r - 2.2, 0, sz * (hw - 0.05), arm);
-        m.position.set(...p);
-        // upright: the floor's "up" (toward the axis) is the label's up
-        const up = new THREE.Vector3(-p[0], -p[1], 0).normalize();
-        const n = new THREE.Vector3(0, 0, -sz);
-        m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(up, n), up, n));
-        this.level.add(m);
+    for (const f of T.floors) {
+      const top = new THREE.MeshStandardMaterial({ map: tex, color: tint(f.r), side: THREE.DoubleSide, roughness: 0.8, metalness: 0.2 });
+      const r0 = f.r - 0.02, r1 = f.r + f.thickness, nu = Math.max(8, Math.round(f.w / 1.5)), nv = 4;
+      for (const arm of [0, 1] as const) {
+        const Y = (u: number) => -f.w + 2 * f.w * u, Z = (v: number) => -f.d + 2 * f.d * v;
+        const add = (g: THREE.BufferGeometry, m: THREE.Material, shadow = true) => { const me = new THREE.Mesh(g, m); me.receiveShadow = true; me.castShadow = shadow; this.level.add(me); };
+        add(sheet(nu, nv, (u, v) => towerPoint(r0, Y(u), Z(v), arm), (u, v) => [Y(u) / 4, Z(v) / 4]), top);
+        add(sheet(nu, nv, (u, v) => towerPoint(r1, Y(u), Z(v), arm), (u, v) => [Y(u) / 4, Z(v) / 4]), underMat);
+        // its four edges: straight along the axis at +-w, curved round the spin at +-d
+        for (const sy of [-1, 1]) add(sheet(1, nv, (u, v) => towerPoint(r0 + (r1 - r0) * u, sy * f.w, Z(v), arm), () => [0, 0]), edgeMat, false);
+        for (const sz of [-1, 1]) add(sheet(nu, 1, (u, v) => towerPoint(r0 + (r1 - r0) * v, Y(u), sz * f.d, arm), () => [0, 0]), edgeMat, false);
+        // its weight, painted on the floor near each end
+        const label = this.textPlane(`${((w2 * f.r) / 9.81).toFixed(2)} g`, '#ffe9b0');
+        for (const sz of [-1, 1]) {
+          const m = label.clone();
+          const p = towerPoint(f.r - 0.05, 0, sz * (f.d - 3), arm);
+          m.position.set(...p);
+          const up = new THREE.Vector3(-p[0], -p[1], 0).normalize(); // out of the floor
+          const along = new THREE.Vector3(0, 0, -sz); // text reads looking out toward this end
+          const right = new THREE.Vector3().crossVectors(along, up);
+          m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, along, up));
+          this.level.add(m);
+        }
       }
     }
-    // the axis: a ring of light round it on each face
-    for (const sz of [-1, 1]) {
-      const lamp = this.makeGlowSprite(0x7fd8ff, 4);
-      lamp.position.set(0, 0, sz * (hw - 1));
-      this.level.add(lamp);
-    }
+    // the axis: a beacon at the middle
+    const lamp = this.makeGlowSprite(0x7fd8ff, 3);
+    this.level.add(lamp);
     this.buildPads(level, (pos) => new THREE.Vector3(-pos[0], -pos[1], 0).normalize());
     this.buildBoxes(cfg, level);
     this.buildSky(cfg);
