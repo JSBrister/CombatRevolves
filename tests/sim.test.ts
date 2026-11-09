@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  TEAM_COLORS, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  TEAM_COLORS, matchScores, timeLeft, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -2660,7 +2660,7 @@ describe('48. teams and team bases', () => {
 
 describe('49. capture the flag', () => {
   const ctf = (id = 's-standard', bots = [1, 1]) => {
-    const { state, localId, botIds } = startLevel(levelById(id)!, {}, { teams: 2, myTeam: 0, ctf: true, bots });
+    const { state, localId, botIds } = startLevel(levelById(id)!, {}, { teams: 2, myTeam: 0, ctf: true, bots, scoreLimit: 3 });
     const me = state.players.find((p) => p.id === localId)!;
     return { s: state, id: localId, me, botIds, mine: state.flags.find((f) => f.team === 0)!, theirs: state.flags.find((f) => f.team === 1)! };
   };
@@ -2771,14 +2771,15 @@ describe('49. capture the flag', () => {
     const { s, id, me, theirs } = ctf('s-twin-bikes', [0, 0]);
     const mine = s.flags.find((f) => f.team === 0)!;
     let won = -1;
-    for (let c = 0; c < s.config.ctfCaptures; c++) {
+    for (let c = 0; c < s.config.scoreLimit; c++) {
       stand(s, me, theirs.home);
       run(s, 2, (st) => [cmdFor(st, id)]);
       expect(me.carrying).toBe(1);
       stand(s, me, mine.home);
-      run(s, 2, (st) => { for (const e of st.events) if (e.type === 'ctfWin') won = e.team; return [cmdFor(st, id)]; });
+      run(s, 2, (st) => { for (const e of st.events) if (e.type === 'matchOver') won = e.winner; return [cmdFor(st, id)]; });
     }
-    expect(s.captures[0]).toBe(s.config.ctfCaptures);
+    expect(s.captures[0]).toBe(s.config.scoreLimit);
+    expect(s.over).toBe(true);
     expect(s.winner).toBe(0);
     expect(won).toBe(0);
   });
@@ -2791,4 +2792,79 @@ describe('49. capture the flag', () => {
     }
     expect(taken).toBeGreaterThan(0);
   }, 30000);
+});
+
+describe('50. win conditions', () => {
+  const kills = (s: SimState, killer: Player, victim: Player, n: number) => {
+    for (let i = 0; i < n; i++) {
+      victim.alive = true; victim.health = 1; victim.shield = 0;
+      damagePlayer(s, victim, killer.id, 100, 100, 'test');
+      step(s, [], s.tick);
+    }
+  };
+  it('a kill scores 1, killing yourself loses 1; first to the score limit wins a free-for-all', () => {
+    const { state: s, localId } = startLevel(levelById('s-standard')!, {}, { bots: [2], scoreLimit: 3 });
+    const me = s.players.find((p) => p.id === localId)!, [a, b] = s.players.filter((p) => p.id !== localId);
+    damagePlayer(s, me, me.id, 1e4, 1e4, 'test'); // (oops)
+    expect(me.score).toBe(-1);
+    kills(s, a, b, 2);
+    expect(a.score).toBe(2);
+    expect(s.over).toBe(false);
+    kills(s, a, b, 1);
+    expect(s.over).toBe(true);
+    expect(s.winner).toBe(a.id);
+    // nothing scores after the end
+    kills(s, b, a, 2);
+    expect(b.score).toBe(0);
+    expect(s.winner).toBe(a.id);
+  });
+  it('teams: the team\'s total counts; time running out gives it to whoever\'s ahead, or a draw', () => {
+    const { state: s, localId } = startLevel(levelById('s-standard')!, {}, { teams: 2, myTeam: 0, bots: [1, 2], timeLimit: 2 });
+    const me = s.players.find((p) => p.id === localId)!;
+    const red = s.players.filter((p) => p.team === 1);
+    kills(s, me, red[0], 1);
+    kills(s, red[1], me, 1);
+    expect(matchScores(s).map((x) => x.score)).toEqual([1, 1]);
+    expect(timeLeft(s)).toBeLessThan(2);
+    run(s, Math.round(2.1 / DT));
+    expect(s.over).toBe(true);
+    expect(s.winner).toBe(-1); // level: a draw
+    const g2 = startLevel(levelById('s-standard')!, {}, { teams: 2, myTeam: 0, bots: [1, 2], timeLimit: 1 });
+    const me2 = g2.state.players.find((p) => p.id === g2.localId)!;
+    kills(g2.state, me2, g2.state.players.find((p) => p.team === 1)!, 1);
+    run(g2.state, Math.round(1.1 / DT));
+    expect(g2.state.winner).toBe(0);
+  });
+  it('with no limits the match never ends, but scores are still kept', () => {
+    const { state: s, localId } = startLevel(levelById('s-standard')!, {}, { bots: [1] });
+    const me = s.players.find((p) => p.id === localId)!, a = s.players.find((p) => p.id !== localId)!;
+    kills(s, me, a, 40);
+    run(s, 600);
+    expect(me.score).toBe(40);
+    expect(s.over).toBe(false);
+    expect(timeLeft(s)).toBe(Infinity);
+  });
+  it('capture the flag: a carrier bot whose own flag is away goes after it rather than waiting at home', () => {
+    const { state: s, localId, botIds } = startLevel(levelById('s-standard')!, {}, { teams: 2, myTeam: 0, ctf: true, bots: [0, 1] });
+    const me = s.players.find((p) => p.id === localId)!, bot = s.players.find((p) => p.id === botIds[0])!;
+    const blue = s.flags.find((f) => f.team === 0)!, red = s.flags.find((f) => f.team === 1)!;
+    // the bot is home with our flag; theirs lies dropped 25 m round the ring (and stays there)
+    const up = localBasis(red.home).up;
+    bot.pos = addScaled(red.home, up, -(1.0 - standHeight(1)));
+    bot.vel = [0, 0, 0];
+    bot.carrying = 0; bot.owned.push(WEAPON_FLAG); blue.state = 'carried'; blue.carrier = bot.id;
+    const c = Math.cos(0.25), sn = Math.sin(0.25);
+    const away: Vec3 = [c * red.home[0] - sn * red.home[1], sn * red.home[0] + c * red.home[1], red.home[2]];
+    red.state = 'dropped'; red.pos = clone(away); red.droppedTick = s.tick;
+    me.pos = addScaled(me.pos, localBasis(me.pos).up, 0); // (you: nowhere near)
+    me.maxHealth = me.health = 1e9;
+    const d0 = dist(bot.pos, red.pos);
+    let returned = false;
+    for (let i = 0; i < 120 * 20 && !returned; i++) {
+      step(s, [cmdFor(s, localId), botInput(s, bot.id)], s.tick);
+      returned = s.events.some((e) => e.type === 'flag' && e.what === 'returned' && e.by === bot.id);
+    }
+    expect(d0).toBeGreaterThan(20);
+    expect(returned).toBe(true);
+  });
 });

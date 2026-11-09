@@ -49,6 +49,7 @@ export function createState(opts: WorldOptions = {}): SimState {
     flags: [],
     captures: [],
     winner: -1,
+    over: false,
     frameAngle: 0,
     rng: (opts.seed ?? 1234) >>> 0,
     nextId: 1,
@@ -138,7 +139,7 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
     fireReadyTick: 0, hasJetpack: false, jetFuel: 0, jetting: false, lastGroundTick: -1e9, lastJumpTick: -1e9,
     grenades: MAX_GRENADES, bounceGrenades: MAX_GRENADES, grenadeReadyTick: 0,
     prevButtons: 0, lastInput: neutralInput(id, 0),
-    kills: 0, deaths: 0, carrying: -1, needles: 0, needleTick: -1e9,
+    kills: 0, deaths: 0, score: 0, carrying: -1, needles: 0, needleTick: -1e9,
   };
   state.players.push(p);
   return id;

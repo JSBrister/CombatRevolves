@@ -231,7 +231,7 @@ export function botInput(state: SimState, playerId: number): InputCmd {
   if (hash01(playerId, epoch, 3) < 0.3) cmd.buttons |= BTN_SPRINT;
 
   // Capture the flag: somewhere to be (overrides wandering, and steers while fighting)
-  let goal = state.flags.length && state.winner < 0 ? ctfGoal(state, me) : null;
+  let goal = state.flags.length && !state.over ? ctfGoal(state, me) : null;
   if (goal && state.level.tower) goal = towerWaypoint(state.level, me.pos, goal, standHeight(me.size)); // (the way there, by ramps and pads)
   const towardGoal = () => {
     if (!goal) return;
@@ -360,7 +360,9 @@ export function botInput(state: SimState, playerId: number): InputCmd {
 function ctfGoal(state: SimState, me: Player): Vec3 | null {
   const mine = state.flags.find((f) => f.team === me.team);
   if (!mine) return null;
-  if (me.carrying >= 0) return mine.home;
+  // carrying: home to score; but you can't score while your own flag's away, so go and get that back
+  // (touch it if it's lying somewhere; swat whoever's carrying it)
+  if (me.carrying >= 0) return mine.state === 'home' ? mine.home : mine.pos;
   const enemyFlags = state.flags.filter((f) => f.team !== me.team);
   const attacker = hash01(me.id, 0, 11) < 0.5;
   // our flag's been taken or dropped: whoever's near goes for it (defenders always)

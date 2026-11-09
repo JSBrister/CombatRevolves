@@ -26,7 +26,8 @@ export const defaultConfig = (): SimConfig => ({
   teams: 0, // 0 = free-for-all; 2-4 teams
   teamBases: false,
   ctf: false, // capture the flag (needs team bases)
-  ctfCaptures: 3,
+  scoreLimit: 0, // first to this many points (or captures) wins; 0 = play on for ever
+  timeLimit: 0, // seconds; 0 = no time limit
   flagReturnTime: 30, // teams: give each a base (spawns, flag stand) and make the pickups even
   tower: 0, // >0: a spin tower (its half-width round the spin) instead of a ring
   diskBowl: false, // disk world: curve the surface up into a paraboloid (gravity always straight into it)

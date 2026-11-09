@@ -5,7 +5,7 @@
 import { TEAM_COLORS, TEAM_NAMES, maxTeamBases, splitBots, type GameSetup, type LevelDef, type SimConfig } from '../sim';
 
 export interface PlayerPrefs { name: string; color: number } // color -1 = default blue
-export interface MatchPrefs { teams: number; myTeam: number; bots: (number | null)[]; bases: boolean; ctf: boolean } // bots: null = the level's own number
+export interface MatchPrefs { teams: number; myTeam: number; bots: (number | null)[]; bases: boolean; ctf: boolean; scoreLimit: number; ctfLimit: number; timeLimit: number } // limits: 0 = none; timeLimit in minutes // bots: null = the level's own number
 
 export const PLAYER_COLORS = [-1, 0x2fb8c8, 0xe07a2a, 0xd84aa0, 0x8a5ad8, 0xe8e6dc, 0x40c080, 0xc8a040];
 
@@ -15,7 +15,7 @@ const load = <T,>(key: string, fallback: T): T => {
 const save = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* not remembered: fine for now */ } };
 
 export const player: PlayerPrefs = load('cr-player', { name: '', color: -1 });
-export const match: MatchPrefs = load('cr-match', { teams: 0, myTeam: 0, bots: [null, null, null, null], bases: true, ctf: false });
+export const match: MatchPrefs = load('cr-match', { teams: 0, myTeam: 0, bots: [null, null, null, null], bases: true, ctf: false, scoreLimit: 15, ctfLimit: 3, timeLimit: 0 });
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 
@@ -102,6 +102,13 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
     bots.appendChild(inp);
   }
   if (match.teams >= 2) el.appendChild(bots); else row('Bots', bots);
+  // what ends the match: a score, a time, both or neither (scores are kept either way)
+  const ctfMode = match.teams >= 2 && match.ctf;
+  const lim = ctfMode ? [1, 2, 3, 5, 7, 10] : [5, 10, 15, 25, 50, 100];
+  row(ctfMode ? 'Captures to win' : 'Score to win', select([['0', 'No limit'], ...lim.map((n) => [String(n), String(n)] as [string, string])], String(ctfMode ? match.ctfLimit : match.scoreLimit), (v) => { if (ctfMode) match.ctfLimit = +v; else match.scoreLimit = +v; }))
+    .title = ctfMode ? 'First team to this many captures wins' : 'A kill scores 1, killing yourself loses 1; first to this wins (a team: its total)';
+  row('Time', select([['0', 'No limit'], ...[2, 5, 10, 15, 20, 30].map((n) => [String(n), `${n} min`] as [string, string])], String(match.timeLimit), (v) => { match.timeLimit = +v; }))
+    .title = 'When time runs out the highest score wins';
   if (match.teams >= 2 && !match.ctf) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
@@ -120,6 +127,8 @@ export function basesFor(def: LevelDef, defaults: SimConfig): boolean {
 export function setupFor(def: LevelDef): GameSetup {
   const s: GameSetup = { name: player.name, color: player.color };
   if (def.mode !== 'sandbox') return s;
+  s.scoreLimit = match.teams >= 2 && match.ctf ? match.ctfLimit : match.scoreLimit;
+  s.timeLimit = match.timeLimit * 60;
   const teams = match.teams >= 2 ? match.teams : 0;
   if (teams) {
     const auto = splitBots(def.bots ?? 0, teams, match.myTeam);

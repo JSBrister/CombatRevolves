@@ -537,7 +537,7 @@ function requestPlay() {
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
   if (locked) show('playing');
-  else if (screen === 'playing') show((state.outcome !== 'playing' || state.winner >= 0) && outcomeAt ? 'outcome' : 'paused');
+  else if (screen === 'playing') show((state.outcome !== 'playing' || state.over) && outcomeAt ? 'outcome' : 'paused');
 });
 
 const fmtSpin = (R: number) => `${((2 * Math.PI) / Math.sqrt(cfg.g / R)).toFixed(1)} s spin`;
@@ -639,7 +639,7 @@ function nextCampaignLevel(): LevelDef | undefined {
 
 /** Campaign over: give it a moment, then release the mouse and show the result. */
 function checkOutcome(now: number) {
-  if (state.winner >= 0) return ctfOutcome(now);
+  if (state.over) return matchOutcome(now);
   if (state.mode !== 'campaign' || state.outcome === 'playing') return;
   // only while you're in the level: once you've gone back to the menus, leave them be
   if (screen !== 'playing' && screen !== 'paused') return;
@@ -655,17 +655,24 @@ function checkOutcome(now: number) {
   else show('outcome');
 }
 
-/** Capture the flag: a team has won. */
-function ctfOutcome(now: number) {
+/** A deathmatch or capture-the-flag match has ended (score or time limit): who won. */
+function matchOutcome(now: number) {
   if (screen !== 'playing' && screen !== 'paused') return;
   if (!outcomeAt) outcomeAt = now;
   if (now - outcomeAt < 2500) return;
   const me = state.players.find((p) => p.id === localId);
-  const t = state.winner;
-  $('outcome-title').textContent = `${sim.TEAM_NAMES[t].toUpperCase()} WINS`;
-  ($('outcome-title') as HTMLElement).style.color = `#${sim.TEAM_COLORS[t].toString(16).padStart(6, '0')}`;
-  $('outcome-sub').textContent = (me && me.team === t ? 'Your team took it. ' : 'Not this time. ') +
-    state.captures.map((c, i) => `${sim.TEAM_NAMES[i]} ${c}`).join(' · ');
+  const w = state.winner, teams = state.config.teams >= 2;
+  const title = $('outcome-title') as HTMLElement;
+  title.style.color = '';
+  if (w < 0) title.textContent = 'A DRAW';
+  else if (teams) {
+    title.textContent = `${sim.TEAM_NAMES[w].toUpperCase()} WINS`;
+    title.style.color = `#${sim.TEAM_COLORS[w].toString(16).padStart(6, '0')}`;
+  } else title.textContent = w === localId ? 'YOU WIN' : `${state.players.find((p) => p.id === w)?.name ?? '?'} WINS`.toUpperCase();
+  const scores = sim.matchScores(state).sort((a, b) => b.score - a.score).slice(0, 6)
+    .map((x) => `${teams ? sim.TEAM_NAMES[x.id] : state.players.find((p) => p.id === x.id)?.name ?? '?'} ${x.score}`).join(' · ');
+  const mine = w >= 0 && (teams ? me?.team === w : w === localId);
+  $('outcome-sub').textContent = (w < 0 ? '' : mine ? (teams ? 'Your team took it. ' : '') : 'Not this time. ') + scores;
   $('btn-next').classList.add('hidden');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   else show('outcome');

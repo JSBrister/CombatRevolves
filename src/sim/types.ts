@@ -17,7 +17,8 @@ export interface SimConfig {
   teams: number; // 0 = everyone for themselves; 2-4 = teams (teammates can't hurt each other)
   teamBases: boolean;
   ctf: boolean; // capture the flag (with team bases)
-  ctfCaptures: number; // captures to win
+  scoreLimit: number; // deathmatch: first to this score wins (a player's, or a team's total); capture the flag: captures. 0 = no limit
+  timeLimit: number; // the match ends after this long (s), highest score wins (or a draw). 0 = no limit
   flagReturnTime: number; // a dropped flag goes home by itself after this long (s) // with teams: each team has a home (spawns, a flag stand) and the pickups are the same on every side
   tower: number; // ring world: >0 = a spin tower through the axis instead of a ring: the top (hub) floor's least half-width round the spin (m); the floors below are bigger
   diskBowl: boolean; // disk: the surface curves up (a paraboloid, like water in a spinning bucket) so gravity is always straight into it
@@ -336,6 +337,7 @@ export interface Player {
   prevButtons: number;
   lastInput: InputCmd;
   kills: number;
+  score: number; // +1 for a kill, -1 for killing yourself
   carrying: number; // capture the flag: the team whose flag you're carrying, or -1
   needles: number; // seeker hits taken recently (enough of them in a row supercombine)
   needleTick: number; // tick of the last one
@@ -592,7 +594,7 @@ export type SimEvent =
   | { type: 'respawn'; id: number }
   | { type: 'outcome'; outcome: Outcome }
   | { type: 'flag'; what: 'taken' | 'dropped' | 'returned' | 'captured'; flagTeam: number; by: number; pos: Vec3 }
-  | { type: 'ctfWin'; team: number }
+  | { type: 'matchOver'; winner: number }
   | { type: 'reload'; id: number }
   | { type: 'mount'; id: number; vehicle: number; on: boolean }
   | { type: 'vehicleHit'; id: number; damage: number; pos: Vec3 }
@@ -616,7 +618,8 @@ export interface SimState {
   /** Capture the flag: each team's flag, captures so far, and the winning team (-1 while playing). */
   flags: Flag[];
   captures: number[];
-  winner: number;
+  winner: number; // (once over) the winning team, or in a free-for-all the winning player's id; -1: a draw
+  over: boolean; // the match has ended (score or time limit): nothing scores any more
   /** Accumulated spin angle (= omega * t for constant omega). Inertial-frame things render at -frameAngle. */
   frameAngle: number;
   rng: number;

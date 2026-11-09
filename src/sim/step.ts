@@ -162,6 +162,7 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   for (const p of state.players) updateVitals(state, p);
   updatePickups(state);
   if (state.flags.length) updateFlags(state, omega);
+  if (state.mode === 'sandbox' && !state.over) updateMatch(state);
   if (state.mode === 'campaign') updateOutcome(state);
   for (const p of state.players) p.prevButtons = p.lastInput.buttons;
 
@@ -1229,6 +1230,8 @@ function kill(state: SimState, p: Player, killer: number, cause: string) {
   p.respawnTick = state.tick + secs(state.config.respawnTime);
   const k = state.players.find((q) => q.id === killer);
   if (k && k.id !== p.id) k.kills++;
+  // the score: a point for a kill, one off for killing yourself (nothing once the match is over)
+  if (!state.over) { if (k && k.id !== p.id) k.score++; else p.score--; }
   state.events.push({ type: 'kill', killer, victim: p.id, cause });
   dropItems(state, p);
   for (const g of state.grenades) if (g.stuck && g.stuck.kind === 'player' && g.stuck.id === p.id) g.stuck = null;
@@ -1454,7 +1457,7 @@ function updateFlags(state: SimState, omega: number) {
       if (distanceOffRing(cfg, f.pos) > cfg.fallKillDistance || state.tick - f.droppedTick > secs(cfg.flagReturnTime)) flagHome(state, f, -1);
     }
   }
-  if (state.winner >= 0) return; // (game over: the flags just sit there)
+  if (state.over) return; // (game over: the flags just sit there)
   for (const p of state.players) {
     if (!p.alive || p.kind === 'dummy') continue;
     for (const f of state.flags) {
@@ -1489,11 +1492,44 @@ function updateFlags(state: SimState, omega: number) {
         theirs.carrier = -1;
         theirs.pos = clone(theirs.home);
         theirs.vel = [0, 0, 0];
-        if (state.captures[p.team] >= cfg.ctfCaptures) {
-          state.winner = p.team;
-          state.events.push({ type: 'ctfWin', team: p.team });
-        }
       }
     }
   }
+}
+
+// =========================================================================== winning
+
+/**
+ * The sides in a match and their scores: teams (capture the flag: captures;
+ * otherwise their players' scores added up), or in a free-for-all each player.
+ * `id` is the team number, or the player's id.
+ */
+export function matchScores(state: SimState): { id: number; score: number }[] {
+  const cfg = state.config;
+  if (cfg.teams >= 2) {
+    return Array.from({ length: cfg.teams }, (_, t) => ({
+      id: t,
+      score: state.flags.length ? state.captures[t] ?? 0 : state.players.reduce((n, p) => n + (p.team === t && p.kind !== 'dummy' ? p.score : 0), 0),
+    }));
+  }
+  return state.players.filter((p) => p.kind !== 'dummy').map((p) => ({ id: p.id, score: p.score }));
+}
+
+/** Seconds left on the clock, or Infinity with no time limit. */
+export const timeLeft = (state: SimState) => (state.config.timeLimit > 0 ? Math.max(0, state.config.timeLimit - state.tick * DT) : Infinity);
+
+/** The match ends when a side reaches the score limit, or when time runs out (highest score wins; level at the top is a draw). */
+function updateMatch(state: SimState) {
+  const cfg = state.config;
+  if (cfg.scoreLimit <= 0 && cfg.timeLimit <= 0) return;
+  const scores = matchScores(state);
+  if (!scores.length) return;
+  const top = Math.max(...scores.map((s) => s.score));
+  const leaders = scores.filter((s) => s.score === top);
+  const byScore = cfg.scoreLimit > 0 && top >= cfg.scoreLimit;
+  const byTime = cfg.timeLimit > 0 && state.tick * DT >= cfg.timeLimit;
+  if (!byScore && !byTime) return;
+  state.over = true;
+  state.winner = leaders.length === 1 ? leaders[0].id : -1;
+  state.events.push({ type: 'matchOver', winner: state.winner });
 }

@@ -1,4 +1,4 @@
-import { DT, TEAM_COLORS, TEAM_NAMES, PLAYER_WEAPON_SLOTS, slotKey, WEAPON_IDS, WEAPON_NAMES, omegaOf, spinAt, type Player, type SimEvent, type SimState } from '../sim';
+import { DT, matchScores, timeLeft, TEAM_COLORS, TEAM_NAMES, PLAYER_WEAPON_SLOTS, slotKey, WEAPON_IDS, WEAPON_NAMES, omegaOf, spinAt, type Player, type SimEvent, type SimState } from '../sim';
 import { ITEM_NAMES } from './models';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -64,21 +64,34 @@ export class Hud {
     const sc = $('scores');
     sc.classList.toggle('hidden', !opts.showScores);
     if (opts.showScores) {
-      const rows = state.players.filter((p) => p.kind !== 'dummy').sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
-      const line = (p: Player) => `${p.id === me.id ? '&gt; ' : '  '}<span style="color:${p.color >= 0 ? hex(p.color) : 'inherit'}">${esc(p.name.padEnd(16))}</span>${String(p.kills).padStart(5)}  ${String(p.deaths).padStart(6)}`;
+      const rows = state.players.filter((p) => p.kind !== 'dummy').sort((a, b) => b.score - a.score || b.kills - a.kills || a.deaths - b.deaths);
+      const line = (p: Player) => `${p.id === me.id ? '&gt; ' : '  '}<span style="color:${p.color >= 0 ? hex(p.color) : 'inherit'}">${esc(p.name.padEnd(16))}</span>${String(p.score).padStart(5)}  ${String(p.kills).padStart(5)}  ${String(p.deaths).padStart(6)}`;
       if (cfg.teams >= 2) {
         // by team, best team first (by captures, in capture the flag)
-        const score = (t: number) => (state.flags.length ? (state.captures[t] ?? 0) * 1000 : 0) + teamKills(state, t);
+        const ts = matchScores(state);
+        const score = (t: number) => (ts.find((x) => x.id === t)?.score ?? 0) * 1000 + teamKills(state, t);
         const teams = Array.from({ length: cfg.teams }, (_, t) => t).sort((a, b) => score(b) - score(a));
-        sc.innerHTML = teams.map((t) => `<span style="color:${hex(TEAM_COLORS[t])}">${(TEAM_NAMES[t].toUpperCase() + (state.flags.length ? `  ⚑ ${state.captures[t] ?? 0}` : '')).padEnd(18)}${String(teamKills(state, t)).padStart(5)}</span>\n` +
+        sc.innerHTML = 'NAME              SCORE  KILLS  DEATHS\n' + teams.map((t) => `<span style="color:${hex(TEAM_COLORS[t])}">${(TEAM_NAMES[t].toUpperCase() + (state.flags.length ? `  ⚑ ${state.captures[t] ?? 0}` : '')).padEnd(18)}${String(ts.find((x) => x.id === t)?.score ?? 0).padStart(5)}  ${String(teamKills(state, t)).padStart(5)}</span>\n` +
           rows.filter((p) => p.team === t).map(line).join('\n')).join('\n\n');
-      } else sc.innerHTML = 'NAME              KILLS  DEATHS\n' + rows.map(line).join('\n');
+      } else sc.innerHTML = 'NAME              SCORE  KILLS  DEATHS\n' + rows.map(line).join('\n');
     }
     const ctf = state.flags.length > 0;
-    $('team-scores').innerHTML = cfg.teams >= 2
-      ? Array.from({ length: cfg.teams }, (_, t) => `<span style="color:${hex(TEAM_COLORS[t])}">${TEAM_NAMES[t].toUpperCase()} ${ctf ? `⚑ ${state.captures[t] ?? 0}` : teamKills(state, t)}</span>`).join('') +
-        (ctf ? `<div class="small">first to ${cfg.ctfCaptures} captures</div>` : '')
-      : '';
+    // the score line: teams, or in a free-for-all you and whoever's ahead; then what ends the match
+    const ms = matchScores(state);
+    const tl = timeLeft(state);
+    const limits = [
+      cfg.scoreLimit > 0 ? `first to ${cfg.scoreLimit}${ctf ? ' captures' : ''}` : '',
+      tl < Infinity ? `${Math.floor(tl / 60)}:${String(Math.floor(tl % 60)).padStart(2, '0')} left` : '',
+    ].filter(Boolean).join(' · ');
+    let scoreLine = '';
+    if (state.mode === 'sandbox' && cfg.teams >= 2) {
+      scoreLine = ms.map((x) => `<span style="color:${hex(TEAM_COLORS[x.id])}">${TEAM_NAMES[x.id].toUpperCase()} ${ctf ? '⚑ ' : ''}${x.score}</span>`).join('');
+    } else if (state.mode === 'sandbox' && ms.length > 1) {
+      const lead = [...ms].filter((x) => x.id !== me.id).sort((a, b) => b.score - a.score)[0];
+      const lp = state.players.find((p) => p.id === lead.id);
+      scoreLine = `<span>You ${me.score}</span><span>${me.score >= lead.score ? 'next' : 'leader'}: ${tag(lp)} ${lead.score}</span>`;
+    }
+    $('team-scores').innerHTML = scoreLine + (scoreLine && limits ? `<div class="small"${tl < 30 ? ' style="color:#ff6a3d;opacity:1"' : ''}>${limits}</div>` : '');
     if (ctf) {
       // the flags: where each one is, and (if you've got one) what to do
       const where = (f: (typeof state.flags)[number]) => {
@@ -89,7 +102,8 @@ export class Hud {
       };
       const lines = state.flags.map((f) => `<span style="color:${hex(TEAM_COLORS[f.team])}">${f.team === me.team ? 'Your flag' : `${TEAM_NAMES[f.team]} flag`}</span>: ${where(f)}`);
       const carrying = me.carrying >= 0
-        ? `<div class="carry" style="color:${hex(TEAM_COLORS[me.carrying])}">YOU HAVE THE ${TEAM_NAMES[me.carrying].toUpperCase()} FLAG · take it home to your own flag · Q tosses it</div>`
+        ? `<div class="carry" style="color:${hex(TEAM_COLORS[me.carrying])}">YOU HAVE THE ${TEAM_NAMES[me.carrying].toUpperCase()} FLAG · ${
+          state.flags.find((f) => f.team === me.team)?.state === 'home' ? 'take it home to your own flag' : "your own flag is away: you can't score until it's back"} · Q tosses it</div>`
         : '';
       $('objective').innerHTML = carrying + lines.join(' &nbsp;·&nbsp; ');
     }
@@ -159,7 +173,10 @@ export class Hud {
         : e.what === 'returned' ? (who ? `${who} returned the ${flag}` : `The ${flag} went home`)
         : `<b>${who} CAPTURED the ${flag}!</b>`);
     }
-    if (e.type === 'ctfWin') this.push(`<b style="color:${hex(TEAM_COLORS[e.team])}">${TEAM_NAMES[e.team].toUpperCase()} WINS</b>`);
+    if (e.type === 'matchOver') {
+      this.push(e.winner < 0 ? '<b>MATCH OVER: A DRAW</b>'
+        : state.config.teams >= 2 ? `<b style="color:${hex(TEAM_COLORS[e.winner])}">${TEAM_NAMES[e.winner].toUpperCase()} WINS</b>` : `<b>${name(e.winner)} WINS</b>`);
+    }
     if (e.type === 'stick' && e.target === localId) this.push('<span style="color:#ff6a3d">YOU ARE STUCK</span>');
     if (e.type === 'pickup' && e.player === localId) this.push(`<span style="color:#9dff7a">+ ${ITEM_NAMES[e.item]}</span>`);
   }
