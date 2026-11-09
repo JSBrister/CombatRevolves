@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  TEAM_COLORS, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  TEAM_COLORS, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -2400,6 +2400,24 @@ describe('46. spin tower', () => {
       expect(Math.abs(rhoP(p) - (up.r - sh))).toBeLessThan(0.6); // (on the floor, or on something low standing on it)
     });
   });
+  it('no crack between a landing and the floor beside it: you step straight across', () => {
+    const { s: s0 } = solo();
+    const { floors, storeys } = towerLayout(s0.config);
+    storeys.forEach((st, k) => {
+      const { s, id, p } = solo();
+      const up = floors[k + 1], sh = standHeight(1);
+      // on the inner edge of the landing, then walk in onto the floor
+      let a: number, z: number, yaw: number;
+      if (st.along === 'z') { a = st.phi - 2.3 / up.r; z = st.len / 2 + 2; yaw = Math.PI; } else { a = st.halfAngle + 2 / up.r; z = up.d + 0.3; yaw = -Math.PI / 2; }
+      p.pos = [(up.r - sh) * Math.cos(a), (up.r - sh) * Math.sin(a), z];
+      p.vel = [0, 0, 0];
+      run(s, 30, () => [cmdFor(s, id)]);
+      const from = clone(p.pos);
+      run(s, 120, () => [cmdFor(s, id, { moveY: 1, yaw })]);
+      expect(dist(p.pos, from), `storey ${k}`).toBeGreaterThan(3);
+      expect(p.grounded).toBe(true);
+    });
+  });
   it('a launch pad on the hub floor throws you across the axis onto the other arm, unhurt', () => {
     const { s, id, p } = solo();
     const top = s.level.tower!.floors.at(-1)!.r;
@@ -2638,4 +2656,139 @@ describe('48. teams and team bases', () => {
     expect(game('s-standard', 2, undefined, false).state.level.bases).toBeUndefined();
     expect(game('s-tower', 3).state.level.bases).toBeUndefined(); // (two arms: two teams)
   });
+});
+
+describe('49. capture the flag', () => {
+  const ctf = (id = 's-standard', bots = [1, 1]) => {
+    const { state, localId, botIds } = startLevel(levelById(id)!, {}, { teams: 2, myTeam: 0, ctf: true, bots });
+    const me = state.players.find((p) => p.id === localId)!;
+    return { s: state, id: localId, me, botIds, mine: state.flags.find((f) => f.team === 0)!, theirs: state.flags.find((f) => f.team === 1)! };
+  };
+  const stand = (s: SimState, p: Player, at: Vec3) => {
+    const up = localBasis(at).up;
+    p.pos = addScaled(at, up, -(1.0 - standHeight(p.size))); // (a flag's home is 1 m up off its stand)
+    p.vel = [0, 0, 0];
+  };
+  it('each base has its flag; touch the enemy flag and you hold it, as your only weapon', () => {
+    const { s, id, me, mine, theirs } = ctf();
+    expect(s.flags.length).toBe(2);
+    expect(mine.state).toBe('home');
+    expect(s.captures).toEqual([0, 0]);
+    stand(s, me, theirs.home);
+    run(s, 2, (st) => [cmdFor(st, id)]);
+    expect(theirs.state).toBe('carried');
+    expect(theirs.carrier).toBe(id);
+    expect(me.carrying).toBe(1);
+    expect(me.weapon).toBe(WEAPON_FLAG);
+    run(s, 10, (st) => [cmdFor(st, id, { weapon: 0 })]); // try to switch: you can't
+    expect(me.weapon).toBe(WEAPON_FLAG);
+    // the flag goes with you
+    expect(dist(theirs.pos, me.pos)).toBeLessThan(1.5);
+  });
+  it('the flag swings like the mallet, but much weaker', () => {
+    const { s, id, me, theirs } = ctf('s-standard', [0, 1]);
+    const enemy = s.players.find((p) => p.team === 1)!;
+    stand(s, me, theirs.home);
+    run(s, 2, (st) => [cmdFor(st, id)]);
+    expect(me.carrying).toBe(1);
+    run(s, 40, (st) => [cmdFor(st, id)]); // (a moment to get it in hand, as with any weapon)
+    // an enemy right in front
+    const b = localBasis(me.pos);
+    enemy.pos = addScaled(me.pos, b.spin, 1.6);
+    enemy.vel = [0, 0, 0];
+    const before = enemy.health + enemy.shield;
+    run(s, 1, (st) => [cmdFor(st, id, { buttons: BTN_FIRE, yaw: 0 })]);
+    const dealt = before - (enemy.health + enemy.shield);
+    expect(dealt).toBeGreaterThan(0);
+    expect(dealt).toBeLessThan(s.config.weapons.hammer.damage / 2);
+  });
+  it('Q tosses it ahead; you can\'t grab it straight back, a teammate can, and the other side returns it by touching it', () => {
+    const { s, id, me, theirs } = ctf('s-standard', [1, 1]);
+    stand(s, me, theirs.home);
+    run(s, 2, (st) => [cmdFor(st, id)]);
+    run(s, 1, (st) => [cmdFor(st, id, { buttons: BTN_Q, yaw: 0 })]);
+    expect(theirs.state).toBe('dropped');
+    expect(me.carrying).toBe(-1);
+    expect(me.weapon).not.toBe(WEAPON_FLAG);
+    expect(len(sub(theirs.vel, me.vel))).toBeGreaterThan(5); // thrown
+    // straight back onto it: not for a second
+    theirs.pos = clone(me.pos);
+    theirs.vel = clone(me.vel);
+    run(s, 10, (st) => [cmdFor(st, id)]);
+    expect(theirs.state).toBe('dropped');
+    // a teammate picks it up
+    const mate = s.players.find((p) => p.team === 0 && p.id !== id)!;
+    mate.pos = clone(theirs.pos);
+    run(s, 1, (st) => [cmdFor(st, id)]);
+    expect(theirs.carrier).toBe(mate.id);
+    // the other side touches its own dropped flag: home it goes
+    me.pos = addScaled(me.pos, localBasis(me.pos).axial, 10); // (out of the way)
+    damagePlayer(s, mate, -1, 1e4, 1e4, 'test');
+    expect(theirs.state).toBe('dropped');
+    const red = s.players.find((p) => p.team === 1)!;
+    red.pos = clone(theirs.pos);
+    run(s, 1, (st) => [cmdFor(st, id)]);
+    expect(theirs.state).toBe('home');
+  });
+  it('bring it home while your flag is there: a capture; not while yours is away', () => {
+    const { s, id, me, mine, theirs } = ctf('s-standard', [0, 0]);
+    stand(s, me, theirs.home);
+    run(s, 2, (st) => [cmdFor(st, id)]);
+    mine.state = 'dropped'; // ours is away: lying on the floor a way round the ring
+    mine.droppedTick = s.tick;
+    const c = Math.cos(0.4), sn = Math.sin(0.4);
+    mine.pos = [c * mine.home[0] - sn * mine.home[1], sn * mine.home[0] + c * mine.home[1], mine.home[2]];
+    stand(s, me, mine.home);
+    run(s, 2, (st) => [cmdFor(st, id)]);
+    expect(s.captures[0]).toBe(0);
+    expect(me.carrying).toBe(1);
+    mine.state = 'home';
+    mine.pos = clone(mine.home);
+    run(s, 2, (st) => [cmdFor(st, id)]);
+    expect(s.captures[0]).toBe(1);
+    expect(me.carrying).toBe(-1);
+    expect(theirs.state).toBe('home');
+    expect(me.weapon).not.toBe(WEAPON_FLAG);
+  });
+  it('die and you drop it; left alone it goes home after a while, or at once if it\'s lost to space', () => {
+    const { s, id, me, theirs } = ctf('s-standard', [0, 0]);
+    stand(s, me, theirs.home);
+    run(s, 2, (st) => [cmdFor(st, id)]);
+    damagePlayer(s, me, -1, 1e4, 1e4, 'test');
+    expect(theirs.state).toBe('dropped');
+    expect(me.carrying).toBe(-1);
+    run(s, Math.round((s.config.flagReturnTime + 0.5) / DT), (st) => [cmdFor(st, id)]);
+    expect(theirs.state).toBe('home');
+    // thrown off into space
+    theirs.state = 'dropped';
+    theirs.droppedTick = s.tick;
+    theirs.pos = [0, 0, s.config.halfWidth + 200];
+    theirs.vel = [0, 0, 30];
+    run(s, 2, (st) => [cmdFor(st, id)]);
+    expect(theirs.state).toBe('home');
+  });
+  it('first to the capture limit wins', () => {
+    const { s, id, me, theirs } = ctf('s-twin-bikes', [0, 0]);
+    const mine = s.flags.find((f) => f.team === 0)!;
+    let won = -1;
+    for (let c = 0; c < s.config.ctfCaptures; c++) {
+      stand(s, me, theirs.home);
+      run(s, 2, (st) => [cmdFor(st, id)]);
+      expect(me.carrying).toBe(1);
+      stand(s, me, mine.home);
+      run(s, 2, (st) => { for (const e of st.events) if (e.type === 'ctfWin') won = e.team; return [cmdFor(st, id)]; });
+    }
+    expect(s.captures[0]).toBe(s.config.ctfCaptures);
+    expect(s.winner).toBe(0);
+    expect(won).toBe(0);
+  });
+  it('bots play for the flag: they go and take it', () => {
+    const { s, id, botIds } = ctf('s-disk', [3, 3]);
+    let taken = 0;
+    for (let i = 0; i < 120 * 90 && !taken; i++) {
+      step(s, [cmdFor(s, id), ...botIds.map((b) => botInput(s, b))], s.tick);
+      for (const e of s.events) if (e.type === 'flag' && e.what === 'taken') taken++;
+    }
+    expect(taken).toBeGreaterThan(0);
+  }, 30000);
 });

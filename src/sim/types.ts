@@ -15,7 +15,10 @@ export interface SimConfig {
   world: 'ring' | 'planet' | 'disk'; // 'planet': on the OUTSIDE of a spinning ball of radius R, gravity g toward its centre; 'disk': on top of a spinning disk of radius R, gravity g straight down the axis
   planetSpin: number; // planet: how much of g the spin cancels at the equator; disk: the spin's outward push at the rim, as a multiple of g. Sets the spin rate
   teams: number; // 0 = everyone for themselves; 2-4 = teams (teammates can't hurt each other)
-  teamBases: boolean; // with teams: each team has a home (spawns, a flag stand) and the pickups are the same on every side
+  teamBases: boolean;
+  ctf: boolean; // capture the flag (with team bases)
+  ctfCaptures: number; // captures to win
+  flagReturnTime: number; // a dropped flag goes home by itself after this long (s) // with teams: each team has a home (spawns, a flag stand) and the pickups are the same on every side
   tower: number; // ring world: >0 = a spin tower through the axis instead of a ring: the top (hub) floor's least half-width round the spin (m); the floors below are bigger
   diskBowl: boolean; // disk: the surface curves up (a paraboloid, like water in a spinning bucket) so gravity is always straight into it
   outerShell: number; // planet: >0 = a hollow shell of this radius round the ball, walkable on its inside near its equator
@@ -188,7 +191,7 @@ export const BTN_USE = 256; // get on / off a vehicle
 // Weapons are addressed by a fixed slot index (also the number keys), in a
 // sensible order: rifles and sidearms, then the specialists, the explosives,
 // the superweapon and the melee weapon. The hover gun is debug-only.
-export const WEAPON_IDS = ['rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer', 'hover'] as const;
+export const WEAPON_IDS = ['rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer', 'hover', 'flag'] as const;
 export type WeaponId = (typeof WEAPON_IDS)[number];
 const wi = (id: WeaponId) => WEAPON_IDS.indexOf(id);
 export const WEAPON_RIFLE = wi('rifle');
@@ -204,10 +207,11 @@ export const WEAPON_SEEKER = wi('seeker');
 export const WEAPON_LACONIC = wi('laconic');
 export const WEAPON_HAMMER = wi('hammer');
 export const WEAPON_HOVER = wi('hover');
+export const WEAPON_FLAG = wi('flag');
 const NAMES: Record<WeaponId, string> = {
   rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', revolver: 'Revolver', redRifle: 'Overclocked Plasma Rifle', chaos: 'Roulette Repeater',
   scatter: 'Scattergun', cannon: 'Plasma Bolt Cannon', launcher: 'Fuel Rod Launcher', rocket: 'Torch Rocket', seeker: 'Seeker Swarm',
-  laconic: 'Laconic Laser', hammer: 'Grav Mallet', hover: 'Hover Gun (debug)',
+  laconic: 'Laconic Laser', hammer: 'Grav Mallet', hover: 'Hover Gun (debug)', flag: 'The Flag',
 };
 export const WEAPON_NAMES = WEAPON_IDS.map((id) => NAMES[id]);
 /** Keys 1-9, 0, - and = select the first N weapons; the hover gun is debug-panel only. */
@@ -332,6 +336,7 @@ export interface Player {
   prevButtons: number;
   lastInput: InputCmd;
   kills: number;
+  carrying: number; // capture the flag: the team whose flag you're carrying, or -1
   needles: number; // seeker hits taken recently (enough of them in a row supercombine)
   needleTick: number; // tick of the last one
   deaths: number;
@@ -495,6 +500,8 @@ export interface Tower {
   floors: TowerFloor[];
   /** Straight walls across the middle (planes at y = +-w, spinward and antispinward, |x| <= x, |z| <= d): near the axis the spin pulls you into them, so you walk on them. */
   walls?: { w: number; x: number; d: number };
+  /** The ramps (in the +x arm; the -x arm's are the same, half a turn round): storey k, from (a0, z0) on floor k up to (a1, z1) beside floor k + 1. */
+  ramps?: { k: number; a0: number; z0: number; a1: number; z1: number }[];
 }
 
 /** A rectangular opening in a floor or deck, centred at (angle, z): halfArc metres along the ring (at radius R), halfZ across. */
@@ -512,6 +519,25 @@ export interface Deck {
 }
 
 /** A Gaussian hill on the floor. */
+/**
+ * Capture the flag: a team's flag. At home it sits on its stand; carried, it
+ * goes with its carrier (who holds it as a weapon); dropped, it's a body that
+ * falls and rolls like anything else, until someone picks it up or it goes home.
+ */
+export interface Flag {
+  team: number;
+  home: Vec3; // where it sits on its stand
+  pos: Vec3;
+  vel: Vec3;
+  radius: number;
+  contactNormal: Vec3 | null;
+  state: 'home' | 'carried' | 'dropped';
+  carrier: number; // player id while carried
+  droppedTick: number;
+  noGrab: number; // a player who just dropped it can't take it straight back...
+  noGrabUntil: number; // ...until this tick
+}
+
 /** A team's home: where its players (re)spawn, and its flag stand (on the ground, for capture the flag). */
 export interface TeamBase { team: number; pos: Vec3; spawns: SpawnPoint[] }
 
@@ -565,6 +591,8 @@ export type SimEvent =
   | { type: 'kill'; killer: number; victim: number; cause: string }
   | { type: 'respawn'; id: number }
   | { type: 'outcome'; outcome: Outcome }
+  | { type: 'flag'; what: 'taken' | 'dropped' | 'returned' | 'captured'; flagTeam: number; by: number; pos: Vec3 }
+  | { type: 'ctfWin'; team: number }
   | { type: 'reload'; id: number }
   | { type: 'mount'; id: number; vehicle: number; on: boolean }
   | { type: 'vehicleHit'; id: number; damage: number; pos: Vec3 }
@@ -585,6 +613,10 @@ export interface SimState {
   mode: GameMode;
   levelId: string;
   outcome: Outcome; // campaign: won when every enemy is dead, lost when you die
+  /** Capture the flag: each team's flag, captures so far, and the winning team (-1 while playing). */
+  flags: Flag[];
+  captures: number[];
+  winner: number;
   /** Accumulated spin angle (= omega * t for constant omega). Inertial-frame things render at -frameAngle. */
   frameAngle: number;
   rng: number;

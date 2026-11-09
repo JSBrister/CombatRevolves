@@ -302,7 +302,8 @@ export class RingScene {
       flag.position.set(0.72, 3.5, 0);
       const glow = this.makeGlowSprite(col, 3);
       glow.position.y = 3.5;
-      holder.add(ring, disc, pole, flag, glow);
+      if (cfg.ctf) holder.add(ring, disc); // (capture the flag: the real flag stands here)
+      else holder.add(ring, disc, pole, flag, glow);
       this.level.add(holder);
     }
 

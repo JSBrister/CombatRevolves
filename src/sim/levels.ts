@@ -308,7 +308,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'tower', 'teams', 'teamBases', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'tower', 'teams', 'teamBases', 'ctf', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
@@ -339,6 +339,7 @@ export interface GameSetup {
   /** Bots: free-for-all, [count]; with teams, the count on each team. Default: the level's own number (split between the teams). */
   bots?: number[];
   bases?: boolean; // with teams, give each team a base (where the level allows); default true
+  ctf?: boolean; // capture the flag (teams with bases)
 }
 
 /**
@@ -356,7 +357,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}, s
   const teamPlay = teams >= 2;
   const state = createState({
     seed: def.seed,
-    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign && !teamPlay, teams: teamPlay ? teams : 0, teamBases: teamPlay && (setup.bases ?? true) },
+    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign && !teamPlay, teams: teamPlay ? teams : 0, teamBases: teamPlay && ((setup.bases ?? true) || !!setup.ctf), ctf: teamPlay && !!setup.ctf },
     variedWalls: def.variedWalls ?? true,
     props: def.props ?? true,
     pickups: def.pickups ?? true,

@@ -113,5 +113,8 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 .overlay .setup-bar button.swatch { width: 22px; height: 22px; padding: 0; border: 2px solid transparent; border-radius: 50%; }
 .overlay .setup-bar button.swatch.on { border-color: #f2c94c; box-shadow: 0 0 6px #f2c94c; }
 .setup-bar .small-note { width: 100%; font-size: 11px; opacity: 0.55; }
-#team-scores { position: absolute; top: 86px; left: 50%; transform: translateX(-50%); font: 600 15px ui-monospace, monospace; letter-spacing: 1px; }
+#team-scores { position: absolute; top: 86px; text-align: center; left: 50%; transform: translateX(-50%); font: 600 15px ui-monospace, monospace; letter-spacing: 1px; }
 #team-scores span { margin: 0 10px; }
+#team-scores .small { font-size: 11px; font-weight: 400; opacity: 0.6; text-align: center; }
+#objective .carry { font-size: 20px; font-weight: 700; letter-spacing: 2px; margin-bottom: 4px; text-shadow: 0 0 10px currentColor; animation: pulse 1.2s infinite; }
+#objective.ctf { top: 128px; text-align: center; width: max-content; max-width: calc(100% - 32px); color: #dff6ff; }

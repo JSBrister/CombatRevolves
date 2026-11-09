@@ -2,8 +2,8 @@
 // the previous and current tick.
 
 import * as THREE from 'three';
-import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, convertDir, convertPoint, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_HAMMER, WEAPON_LACONIC, WEAPON_PISTOL } from '../sim';
-import { makeBike, makeGun, makePickup } from './models';
+import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, convertDir, convertPoint, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_FLAG, WEAPON_HAMMER, WEAPON_LACONIC, WEAPON_PISTOL, TEAM_COLORS } from '../sim';
+import { makeBike, makeFlag, makeGun, makePickup, waveFlag } from './models';
 import { disposeTree } from './dispose';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
@@ -105,6 +105,7 @@ interface PlayerView {
   shell: THREE.Mesh; // shield bubble, a little outside the body
   shellGlow: number; // 0..1, decays
   prevShield: number;
+  carry: { team: number; flag: THREE.Group; beacon: THREE.Sprite } | null; // capture the flag: a big flag on their back, and a beacon over them
 }
 
 interface PickupView {
@@ -279,19 +280,61 @@ export class EntityViews {
     this.setChargeGlow(this.fpGlow, p, tick);
   }
 
-  setViewWeapon(weapon: number, visible: boolean) {
+  setViewWeapon(weapon: number, visible: boolean, flagTeam = -1) {
     this.viewModel.visible = visible;
-    if (weapon === this.viewWeapon) return;
+    const key = weapon * 10 + flagTeam + 1;
+    if (key === this.viewWeapon) { if (flagTeam >= 0) waveFlag(this.viewModel, performance.now() / 1000, 0.6); return; }
     for (const c of [...this.viewModel.children]) disposeTree(c, undefined, true);
-    const gun = makeGun(weapon);
+    const gun = makeGun(weapon, TEAM_COLORS[flagTeam] ?? 0xffffff);
     gun.traverse((o) => o.layers.set(LAYER_ROT_TRAILS)); // main camera only
     if (weapon === WEAPON_HAMMER) gun.position.x = 0.3; // pivot at the grip, so a swing sweeps the head
     this.viewModel.add(gun);
-    this.viewWeapon = weapon;
+    this.viewWeapon = key;
+  }
+
+  /** Capture the flag: flags at home (on their stands) and dropped ones; carried ones are drawn on their carriers. */
+  private flagViews = new Map<number, { flag: THREE.Group; beacon: THREE.Sprite }>();
+  private renderFlags(state: SimState, lerp: (id: number, p: Vec3) => Vec3) {
+    void lerp;
+    const t = performance.now() / 1000;
+    for (const f of state.flags) {
+      let v = this.flagViews.get(f.team);
+      if (!v) {
+        const col = TEAM_COLORS[f.team] ?? 0xffffff;
+        const flag = makeFlag(col, 3, 1.6);
+        const beacon = this.makeGlow(col, 5);
+        (beacon.material as THREE.SpriteMaterial).depthTest = false;
+        beacon.renderOrder = 10;
+        this.root.add(flag, beacon);
+        v = { flag, beacon };
+        this.flagViews.set(f.team, v);
+      }
+      const show = f.state !== 'carried';
+      v.flag.visible = show;
+      v.beacon.visible = show && f.state === 'dropped'; // (home flags: their base shows where)
+      if (!show) continue;
+      const pos = this.toView(f.pos);
+      const b = localBasis(pos);
+      const up = new THREE.Vector3(...b.up);
+      // at home it stands on its stand; dropped, it lies tilted where it fell
+      const base = new THREE.Vector3(...pos).addScaledVector(up, f.state === 'home' ? -1.0 : -0.3);
+      v.flag.position.copy(base);
+      const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...b.spin), up, new THREE.Vector3(...b.axial));
+      v.flag.quaternion.setFromRotationMatrix(m);
+      if (f.state === 'dropped') v.flag.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 1.1));
+      waveFlag(v.flag, t + f.team, f.state === 'home' ? 0.8 : 0.3);
+      if (v.beacon.visible) {
+        v.beacon.position.copy(new THREE.Vector3(...pos)).addScaledVector(up, 2.5);
+        const dCam = this.cameraPos.distanceTo(v.beacon.position);
+        v.beacon.scale.setScalar(Math.max(3, dCam * 0.05) * (0.8 + 0.2 * Math.sin(t * 6)));
+      }
+    }
   }
 
   reset() {
-    for (const v of this.players.values()) { disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); }
+    for (const v of this.flagViews.values()) { disposeTree(v.flag, undefined, true); disposeTree(v.beacon, undefined, true); }
+    this.flagViews.clear();
+    for (const v of this.players.values()) { if (v.carry) { disposeTree(v.carry.flag, undefined, true); disposeTree(v.carry.beacon, undefined, true); } disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); }
     for (const v of this.projs.values()) this.disposeProj(v);
     for (const v of this.props.values()) disposeTree(v, undefined, true);
     for (const v of this.explosions.values()) disposeTree(v, undefined, true, new Set([this.unitSphere]));
@@ -399,7 +442,7 @@ export class EntityViews {
     const chargeGlow = this.makeGlow(0xff2a1a, 1, pl.id === this.localId ? LAYER_SELF : 0);
     chargeGlow.visible = false;
     gunHolder.add(chargeGlow);
-    const v = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, wasAlive: pl.alive, chargeGlow, flame, shell, shellGlow: 0, prevShield: pl.shield };
+    const v: PlayerView = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, wasAlive: pl.alive, chargeGlow, flame, shell, shellGlow: 0, prevShield: pl.shield, carry: null };
     this.players.set(id, v);
     return v;
   }
@@ -460,22 +503,47 @@ export class EntityViews {
       v.group.position.set(pos[0], pos[1], pos[2]);
       v.group.scale.setScalar(p.size);
       v.marker.position.copy(v.group.position);
-      if (v.gunWeapon !== p.weapon) {
+      const gunKey = p.weapon * 10 + (p.carrying + 1);
+      if (v.gunWeapon !== gunKey) {
         for (const c of [...v.gunHolder.children]) if (c !== v.chargeGlow) disposeTree(c, undefined, true);
-        const gun = makeGun(p.weapon);
+        const gun = makeGun(p.weapon, TEAM_COLORS[p.carrying] ?? 0xffffff);
         if (p.id === this.localId) gun.traverse((o) => o.layers.set(LAYER_SELF));
         v.gunHolder.add(gun);
-        v.gunWeapon = p.weapon;
+        v.gunWeapon = gunKey;
       }
       v.gunHolder.rotation.z = p.pitch; // tip the gun up/down with the aim
       this.setChargeGlow(v.chargeGlow, p, state.tick);
       const sw = this.swingT.get(p.id);
-      if (sw !== undefined && p.weapon === WEAPON_HAMMER) {
+      if (sw !== undefined && (p.weapon === WEAPON_HAMMER || p.weapon === WEAPON_FLAG)) {
         // wind up over the right shoulder, then sweep across to the left
         const k = sw < 0.25 ? -sw / 0.25 : -1 + 2 * Math.sin(((sw - 0.25) / 0.75) * Math.PI / 2);
         v.gunHolder.rotation.y = 1.3 * k;
         v.gunHolder.rotation.x = -0.4 * (1 - Math.abs(k));
       } else { v.gunHolder.rotation.y = 0; v.gunHolder.rotation.x = 0; }
+      // carrying a flag: a big one on your back, a pulse of its colour, and a beacon over you seen from anywhere
+      if (v.carry && v.carry.team !== p.carrying) { disposeTree(v.carry.flag, undefined, true); disposeTree(v.carry.beacon, undefined, true); v.carry = null; }
+      if (!v.carry && p.carrying >= 0) {
+        const col = TEAM_COLORS[p.carrying] ?? 0xffffff;
+        const flag = makeFlag(col, 3.2, 1.8);
+        flag.position.set(-PLAYER_RADIUS - 0.15, 0.1, 0);
+        flag.rotation.z = 0.12;
+        if (p.id === this.localId) flag.traverse((o) => o.layers.set(LAYER_SELF));
+        v.group.add(flag);
+        const beacon = this.makeGlow(col, 6);
+        (beacon.material as THREE.SpriteMaterial).depthTest = false; // through walls
+        beacon.renderOrder = 10;
+        this.root.add(beacon);
+        v.carry = { team: p.carrying, flag, beacon };
+      }
+      if (v.carry) {
+        const t = performance.now() / 1000;
+        waveFlag(v.carry.flag, t, 1 + Math.min(2, Math.hypot(...p.vel) / 6));
+        const up = new THREE.Vector3(...b.up);
+        v.carry.beacon.position.copy(v.group.position).addScaledVector(up, 4.2 * p.size);
+        const dCam = this.cameraPos.distanceTo(v.carry.beacon.position);
+        v.carry.beacon.scale.setScalar(Math.max(3, dCam * 0.06) * (0.85 + 0.15 * Math.sin(t * 8)));
+        v.carry.beacon.visible = p.id !== this.localId || this.showSelf;
+      }
       v.flame.visible = p.jetting;
       if (p.jetting) v.flame.scale.setScalar(0.7 + Math.random() * 0.5);
       // Shields: the bubble flashes on hits, bursts when the shield breaks,
@@ -493,8 +561,13 @@ export class EntityViews {
       v.shell.visible = p.id !== this.localId || this.showSelf;
       const bare = p.shield <= 0 ? v.shieldFlash : 0;
       mat.emissive.setRGB(0.9 * bare, 0.1 * bare, 0.05 * bare);
+      if (v.carry && !bare) mat.emissive.setHex(TEAM_COLORS[v.carry.team] ?? 0xffffff).multiplyScalar(0.25 + 0.2 * Math.sin(performance.now() * 0.008));
     }
-    for (const [id, v] of this.players) if (!seenP.has(id)) { disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); this.players.delete(id); }
+    for (const [id, v] of this.players) {
+      if (v.carry && (!seenP.has(id) || !v.group.visible)) { disposeTree(v.carry.flag, undefined, true); disposeTree(v.carry.beacon, undefined, true); v.carry = null; }
+      if (!seenP.has(id)) { disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); this.players.delete(id); }
+    }
+    this.renderFlags(state, lerpPos);
 
     // projectiles
     const pulse = 0.85 + 0.15 * Math.sin(performance.now() * 0.03);

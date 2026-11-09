@@ -62,7 +62,9 @@ export function towerLayout(cfg: SimConfig): { floors: TowerFloor[]; storeys: To
     if (s.along === 'y') { d += STEP; w = Math.max(w, reach(k, s), reach(k, storeys[k - 1])); }
     else {
       // straight up a radial line that passes just outside the upper floor's edge
-      s.phi = Math.asin(Math.min(0.9, (w + RAMP_W / 2 + 0.1) / radii[k + 1]));
+      // (its width runs round the spin, at angle phi to "across": so its inner edge, half a width round, must just meet the floor's edge, or there's a crack you get stuck in)
+      const phi0 = Math.asin(Math.min(0.9, (w + RAMP_W / 2) / radii[k + 1]));
+      s.phi = Math.asin(Math.min(0.9, (w + (RAMP_W / 2) * Math.cos(phi0) - 0.05) / radii[k + 1]));
       w = radii[k] * Math.sin(s.phi) + RAMP_W / 2 + 2;
       d = Math.max(d, s.len / 2 + LAND + 2);
     }
@@ -83,11 +85,28 @@ export function towerSdf(T: Tower, p: Vec3, out: TowerHit) {
     // distances is a safe (never too big) estimate of the distance to it
     const half = f.thickness / 2;
     const dr = Math.abs(rho - (f.r + half)) - half, dy = Math.abs(y) - f.w, dz = Math.abs(z) - f.d;
-    let fd = dr, fn: Vec3 | null = null;
-    if (dy > fd) { fd = dy; fn = [0, Math.sign(y) || 1, 0]; }
-    if (dz > fd) { fd = dz; fn = [0, 0, Math.sign(z) || 1]; }
+    const sr = Math.sign(rho - (f.r + half)) || 1, sy = Math.sign(y) || 1, sz = Math.sign(z) || 1;
+    let fd: number, fn: Vec3;
+    if (dr > 0 && dy > 0) {
+      // beyond an edge along the axis (over or under it): the distance to the edge itself
+      // (the edge face is a plane across, not along the radius, so combining distances would be wrong)
+      const re = sr < 0 ? f.r : f.r + f.thickness;
+      const vx = x - Math.sqrt(Math.max(0, re * re - f.w * f.w)), vy = y - sy * f.w, vz = dz > 0 ? z - sz * f.d : 0;
+      fd = Math.hypot(vx, vy, vz) || 1e-9;
+      fn = [vx / fd, vy / fd, vz / fd];
+    } else if ((dr > 0 || dy > 0) && dz > 0) {
+      // beyond an end (round the spin): radius / across and along the axis are square to each other
+      const a = Math.max(dr, dy);
+      fd = Math.hypot(a, dz);
+      const na: Vec3 = dr > dy ? [sr * rx, sr * ry, 0] : [0, sy, 0];
+      fn = [(a * na[0]) / fd, (a * na[1]) / fd, (dz * sz) / fd];
+    } else {
+      // over, under or beside it (one distance positive), or inside (the nearest face)
+      fd = dr; fn = [sr * rx, sr * ry, 0];
+      if (dy > fd) { fd = dy; fn = [0, sy, 0]; }
+      if (dz > fd) { fd = dz; fn = [0, 0, sz]; }
+    }
     if (fd >= d) continue;
-    if (!fn) { const s = Math.sign(rho - (f.r + half)) || 1; fn = [s * rx, s * ry, 0]; }
     for (const h of f.holes) {
       const qy = Math.abs(y - h.y) - h.hy, qz = Math.abs(z - h.z) - h.hz;
       let hd: number, gy = 0, gz = 0;
@@ -145,7 +164,7 @@ export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacle
   const N = floors.length - 1;
   // straight walls across the middle, from the edges of one hub floor to the other's
   const hubF = floors[N];
-  const T: Tower = { floors, walls: { w: hubF.w, x: Math.sqrt(hubF.r * hubF.r - hubF.w * hubF.w), d: hubF.d } };
+  const T: Tower = { floors, walls: { w: hubF.w, x: Math.sqrt(hubF.r * hubF.r - hubF.w * hubF.w), d: hubF.d }, ramps: [] };
   const boxes: Box[] = [];
   const pads: Pad[] = [];
   const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
@@ -176,6 +195,7 @@ export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacle
    */
   const ramp = (k: number, a0: number, z0: number, a1: number, z1: number) => {
     const r0 = floors[k].r, r1 = floors[k + 1].r, segs = a0 === a1 ? 1 : 6;
+    T.ramps!.push({ k, a0, z0, a1, z1 });
     const pts: Vec3[] = [];
     for (let i = 0; i <= segs; i++) {
       const s = i / segs, r = r0 + (r1 - r0) * s, a = a0 + (a1 - a0) * s;
@@ -223,7 +243,7 @@ export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacle
     const st = storeys[k], up = floors[k + 1], L = st.len;
     for (const sg of [1, -1]) {
       if (st.along === 'y') {
-        const z = sg * (up.d + RAMP_W / 2 + 0.05), ha = st.halfAngle;
+        const z = sg * (up.d + RAMP_W / 2 - 0.02), ha = st.halfAngle;
         ramp(k, -sg * ha, z, sg * ha, z);
         const yTop = sg * up.r * Math.sin(ha), run = 0.45 * L;
         arrivals[k + 1].push({ edge: sg > 0 ? '+z' : '-z', a: Math.min(yTop + sg * LAND, yTop - sg * run), b: Math.max(yTop + sg * LAND, yTop - sg * run) });
@@ -338,4 +358,83 @@ export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacle
     pickupSpots.push({ pos: [0, 0, 0], item: 'cannon' }, { pos: [0, 0, -hub.d / 2], item: 'chaos' }, { pos: [0, 0, hub.d / 2], item: 'seeker' });
   }
   return { shape: 'tower', terrain: null, tower: T, boxes, stairTops: [], spawns, pickupSpots, vehicleSpots: [], wallPos: [], wallNeg: [], pads };
+}
+
+/**
+ * Where to head next, in a tower, on the way from `pos` to `goal` (for bots):
+ * up the ramps toward the hub, across on a launch pad, down the ramps on the
+ * other side; or straight there if it's on the same floor.
+ */
+export function towerWaypoint(level: Level, pos: Vec3, goal: Vec3, standH: number): Vec3 {
+  const T = level.tower!;
+  const ramps = T.ramps ?? [];
+  const armOf = (p: Vec3): 0 | 1 => (p[0] >= 0 ? 0 : 1);
+  const fold = (p: Vec3): Vec3 => (p[0] >= 0 ? p : [-p[0], -p[1], p[2]]);
+  const unfold = (p: Vec3, arm: 0 | 1): Vec3 => (arm ? [-p[0], -p[1], p[2]] : p);
+  /** Which floor a point is standing on (by radius), or -1 in between. */
+  const floorOf = (p: Vec3, h: number) => {
+    const rho = Math.hypot(p[0], p[1]) + h;
+    return T.floors.findIndex((f) => Math.abs(f.r - rho) < 2);
+  };
+  const N = T.floors.length - 1;
+  const arm = armOf(pos), q = fold(pos);
+  const rho = Math.hypot(q[0], q[1]), ang = Math.atan2(q[1], q[0]);
+  type Ramp = (typeof ramps)[number];
+  const isAlong = (rp: Ramp) => Math.abs(rp.a1 - rp.a0) < 1e-9; // (along the axis, at one angle)
+  /** A point on the ramp's centre line at parameter s (0 bottom, 1 top), `off` metres to one side, standing height over it (level with the floor past its ends). */
+  const at = (rp: Ramp, s: number, off = 0): Vec3 => {
+    const r = T.floors[rp.k].r + (T.floors[rp.k + 1].r - T.floors[rp.k].r) * Math.min(1, Math.max(0, s)) - standH;
+    let a = rp.a0 + (rp.a1 - rp.a0) * s, z = rp.z0 + (rp.z1 - rp.z0) * s;
+    if (isAlong(rp)) a += off / r; else z += off;
+    return unfold([r * Math.cos(a), r * Math.sin(a), z], arm);
+  };
+  /** Where we are relative to a ramp: how far along, how far to the side (signed), and its surface radius there. */
+  const rel = (rp: Ramp) => {
+    const span = isAlong(rp) ? (q[2] - rp.z0) / (rp.z1 - rp.z0) : (ang - rp.a0) / (rp.a1 - rp.a0);
+    const side = isAlong(rp) ? (ang - rp.a0) * rho : q[2] - rp.z0;
+    const surf = T.floors[rp.k].r + (T.floors[rp.k + 1].r - T.floors[rp.k].r) * Math.min(1, Math.max(0, span)) - standH;
+    return { span, side, surf };
+  };
+  /** Just past its low end (3 m: the floor reaches a bit further than that). */
+  const footS = (rp: Ramp) => -3 / (isAlong(rp) ? Math.abs(rp.z1 - rp.z0) : Math.abs(rp.a1 - rp.a0) * 0.5 * (T.floors[rp.k].r + T.floors[rp.k + 1].r));
+  const inward = (rp: Ramp) => (isAlong(rp) ? -Math.sign(rp.a0) : -Math.sign(rp.z0)); // toward the floor above's middle
+  const goalFloor = armOf(goal) === arm ? floorOf(goal, 0.5) : -2; // (-2: the other arm)
+  const mine = floorOf(pos, standH);
+  const goingUp = goalFloor === -2 || goalFloor > mine;
+  for (const rp of ramps) {
+    if (rho > T.floors[rp.k].r + 0.5 || rho < T.floors[rp.k + 1].r - standH - 1.5) continue; // (not between its floors)
+    const { span, side, surf } = rel(rp);
+    if (span < -0.4 || span > 1.3) continue;
+    // on it (level with its surface, within its width): keep going the way we're headed
+    if (Math.abs(side) < 2.7 && Math.abs(surf - rho) < 1 && span > -0.05 && span < 1.2) {
+      const up = goalFloor === -2 || goalFloor > rp.k;
+      if (up && span < 1.1) return span > 0.9 ? at(rp, 1.05, inward(rp) * 3.6) : at(rp, span + 0.3); // at the top: step across onto the floor
+      if (!up && span > 0.05) return at(rp, Math.max(-0.3, span - 0.3));
+      continue;
+    }
+    // underneath it: straight out sideways, toward whichever side is nearer
+    if (Math.abs(side) < 2.7 && rho > surf + 1 && span > -0.05 && span < 1) return at(rp, span, (Math.sign(side) || 1) * 3.6);
+    // the one we want to climb, and we're beside its low part: along beside it, past its low end, then onto it
+    if (goingUp && mine === rp.k && Math.abs(side) < 4.5 && span > -0.05 && span < 1) return at(rp, footS(rp), (Math.sign(side) || 1) * 3.6);
+  }
+  if (mine < 0) return goal; // (in the air: nothing to decide)
+  if (goalFloor === mine) return goal;
+  if (goalFloor === -2 && mine === N) {
+    // the hub: onto a launch pad, which throws us across
+    let best = goal, bd = Infinity;
+    for (const pd of level.pads ?? []) if (armOf(pd.pos) === arm) { const d = Math.hypot(pd.pos[0] - pos[0], pd.pos[1] - pos[1], pd.pos[2] - pos[2]); if (d < bd) { bd = d; best = pd.pos; } }
+    return best;
+  }
+  // the nearest ramp leaving this floor the right way: (up) its foot, from beyond its low end;
+  // (down) the floor beside its landing, then the landing
+  let best: Vec3 | null = null, bd = Infinity;
+  for (const rp of ramps) {
+    if (goingUp ? rp.k !== mine : rp.k !== mine - 1) continue;
+    let p = goingUp ? at(rp, footS(rp)) : at(rp, 1.05, inward(rp) * 3.6);
+    const d = Math.hypot(p[0] - pos[0], p[1] - pos[1], p[2] - pos[2]);
+    if (!goingUp && d < 1.5) p = at(rp, 1.05); // beside the landing: onto it
+    if (goingUp && d < 2.5) p = at(rp, 0.2); // at its foot: up it
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best ?? goal;
 }

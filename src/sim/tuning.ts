@@ -24,7 +24,10 @@ export const defaultConfig = (): SimConfig => ({
   planetSpin: 0.4, // planet: the spin cancels this much of g at the equator
   outerShell: 0, // planet: radius of a hollow shell round it (0 = none)
   teams: 0, // 0 = free-for-all; 2-4 teams
-  teamBases: false, // teams: give each a base (spawns, flag stand) and make the pickups even
+  teamBases: false,
+  ctf: false, // capture the flag (needs team bases)
+  ctfCaptures: 3,
+  flagReturnTime: 30, // teams: give each a base (spawns, flag stand) and make the pickups even
   tower: 0, // >0: a spin tower (its half-width round the spin) instead of a ring
   diskBowl: false, // disk world: curve the surface up into a paraboloid (gravity always straight into it)
   launchPads: true, // nested spheres: pads that throw you between ball and shell
@@ -221,6 +224,8 @@ export const defaultWeapons = (): Record<WeaponId, WeaponStats> => ({
   // novelty: fast fire, but every shot leaves at a random speed (coloured by it), so each one curves differently
   chaos: w({ muzzle: 220, muzzleMin: 15, damage: 6, shieldDamage: 6, interval: 0.06, heatPerShot: 0.035, coolRate: 0.45,
     overheatLock: 2.5, radius: 0.11, knockback: 0.4, spread: 0.6 }),
+  // the flag, held: swing it like the mallet, but it's only a flag
+  flag: w({ muzzle: 0, damage: 22, shieldDamage: 22, interval: 0.7, knockback: 9, blastRadius: 2.6, radius: 0 }),
   hover: w({ muzzle: 0, damage: 10, shieldDamage: 10, interval: 0.125, radius: 0.25, knockback: 1 }),
 });
 

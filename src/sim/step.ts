@@ -8,9 +8,9 @@ import { apart, convertBody, convertDir, frameOf, frameOmega } from './twin';
 import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setDisk, setPlanet, setSpinAlpha, viewVectors } from './physics';
 import { rngInt, rngNext } from './rng';
 import {
-  BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
+  BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_FLAG, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
   omegaOf, spinAt,
-  type Bolt, type BoltKind, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
+  type Bolt, type BoltKind, type Flag, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
   type Outcome, type Player, type Prop, type SimConfig, type SimState, type Vehicle, type WeaponId, type WeaponStats,
 } from './types';
 import { type Vec3, add, addScaled, clone, cross, dist, dot, len, norm, rhoOf, scale, sub } from './vec';
@@ -36,7 +36,7 @@ export const BOLT_WEAPON: Record<BoltKind, WeaponId> = {
   rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', overcharge: 'pistol', fuelRod: 'launcher', cannon: 'cannon', laconic: 'laconic',
   rocket: 'rocket', seeker: 'seeker', pellet: 'scatter', chaos: 'chaos', bullet: 'revolver', hover: 'hover',
 };
-const WEAPON_BOLT: Record<Exclude<WeaponId, 'hammer'>, BoltKind> = {
+const WEAPON_BOLT: Record<Exclude<WeaponId, 'hammer' | 'flag'>, BoltKind> = {
   rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', cannon: 'cannon', laconic: 'laconic', rocket: 'rocket', seeker: 'seeker', scatter: 'pellet', chaos: 'chaos', revolver: 'bullet', hover: 'hover',
 };
 /** Bolts that carry their own motor. */
@@ -161,6 +161,7 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   // 6. vitals / respawn, then item pickups
   for (const p of state.players) updateVitals(state, p);
   updatePickups(state);
+  if (state.flags.length) updateFlags(state, omega);
   if (state.mode === 'campaign') updateOutcome(state);
   for (const p of state.players) p.prevButtons = p.lastInput.buttons;
 
@@ -553,7 +554,7 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
   const bursting = tick < p.burstUntil;
 
   // Switch to the requested weapon if we own it (not mid-stream).
-  if (!bursting && inp.weapon !== p.weapon && inp.weapon >= 0 && inp.weapon < WEAPON_IDS.length && isOwned(cfg, p, inp.weapon)) {
+  if (!bursting && p.carrying < 0 && inp.weapon !== p.weapon && inp.weapon >= 0 && inp.weapon < WEAPON_IDS.length && isOwned(cfg, p, inp.weapon)) {
     p.weapon = inp.weapon;
     p.charge = 0;
     p.holdTicks = 0;
@@ -561,6 +562,7 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
     p.fireReadyTick = Math.max(p.fireReadyTick, tick + secs(0.25));
   }
   if (!isOwned(cfg, p, p.weapon)) p.weapon = p.owned[0] ?? 0;
+  if (p.carrying >= 0) p.weapon = WEAPON_FLAG; // (you hold the flag until you drop it)
 
   const wi = p.weapon;
   const id = WEAPON_IDS[wi];
@@ -645,6 +647,13 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
         p.holdTicks = 0;
       }
       break;
+    case 'flag':
+      // the flag: swung like the mallet, but much weaker
+      if (pressed & BTN_FIRE && ready) {
+        p.fireReadyTick = tick + Math.max(1, secs(st.interval));
+        swing(state, p, st.damage, st.knockback, st.blastRadius, 0.25, 'flag', true);
+      }
+      break;
     case 'hammer':
       // Swing: hits everyone in a wide arc in front of you.
       if (pressed & BTN_FIRE && ready) {
@@ -671,8 +680,9 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
       break;
   }
 
-  // Melee (any weapon): a short-range shove with a lot of knockback.
-  if (pressed & BTN_MELEE && tick >= p.meleeReadyTick && !bursting) melee(state, p);
+  // Melee (any weapon): a short-range shove with a lot of knockback. Holding the flag, Q tosses it instead.
+  if (pressed & BTN_MELEE && p.carrying >= 0) dropFlag(state, p, true);
+  else if (pressed & BTN_MELEE && tick >= p.meleeReadyTick && !bursting) melee(state, p);
 
   // Grenade: hold to aim (client shows preview), release to throw.
   if (released & BTN_GRENADE && p.grenades > 0 && tick >= p.grenadeReadyTick) {
@@ -1212,6 +1222,7 @@ export function damagePlayer(state: SimState, p: Player, attacker: number, damag
 
 function kill(state: SimState, p: Player, killer: number, cause: string) {
   if (p.vehicle >= 0) dismount(state, p);
+  if (p.carrying >= 0) dropFlag(state, p, false);
   p.alive = false;
   p.health = 0;
   p.deaths++;
@@ -1384,3 +1395,105 @@ function updateVitals(state: SimState, p: Player) {
   state.events.push({ type: 'respawn', id: p.id });
 }
 
+
+// =========================================================================== capture the flag
+
+const FLAG_REACH = 1.8; // touch a flag from this far (centre to centre)
+const CAPTURE_REACH = 4; // bring the enemy flag this close to your own (at home) to score
+
+/** The flag carried by `p` comes off: dropped where they are (they died), or tossed forward along their aim (Q). */
+export function dropFlag(state: SimState, p: Player, toss: boolean) {
+  const f = state.flags.find((x) => x.team === p.carrying);
+  p.carrying = -1;
+  p.owned = p.owned.filter((w) => w !== WEAPON_FLAG);
+  if (p.weapon === WEAPON_FLAG) p.weapon = p.owned[0] ?? 0;
+  if (!f) return;
+  const up = localBasis(p.pos).up;
+  f.state = 'dropped';
+  f.carrier = -1;
+  f.droppedTick = state.tick;
+  f.contactNormal = null;
+  f.pos = addScaled(p.pos, up, 0.6);
+  f.vel = clone(p.vel);
+  if (toss) {
+    // a gentle throw along your aim (a pass to a teammate, or over a gap)
+    const aim = viewVectors(p.pos, p.yaw, p.pitch).forward;
+    f.pos = addScaled(f.pos, aim, 0.8);
+    f.vel = addScaled(addScaled(f.vel, aim, 9), up, 2);
+  }
+  f.noGrab = p.id;
+  f.noGrabUntil = state.tick + secs(toss ? 1 : 0.5);
+  state.events.push({ type: 'flag', what: 'dropped', flagTeam: f.team, by: p.id, pos: clone(f.pos) });
+}
+
+function flagHome(state: SimState, f: Flag, by: number) {
+  f.state = 'home';
+  f.carrier = -1;
+  f.pos = clone(f.home);
+  f.vel = [0, 0, 0];
+  f.contactNormal = null;
+  state.events.push({ type: 'flag', what: 'returned', flagTeam: f.team, by, pos: clone(f.home) });
+}
+
+/**
+ * Flags: carried ones go with their carriers; dropped ones fall and roll, and
+ * go home after a while (or at once if lost to space). Touching the enemy's
+ * flag takes it; touching your own dropped flag sends it home; bringing the
+ * enemy's flag to your own, while yours is at home, scores.
+ */
+function updateFlags(state: SimState, omega: number) {
+  const cfg = state.config;
+  for (const f of state.flags) {
+    if (f.state === 'carried') {
+      const c = state.players.find((q) => q.id === f.carrier);
+      if (!c || !c.alive || c.carrying !== f.team) { f.state = 'dropped'; f.carrier = -1; f.droppedTick = state.tick; continue; }
+      f.pos = addScaled(c.pos, localBasis(c.pos).up, 0.9 * c.size);
+      f.vel = clone(c.vel);
+    } else if (f.state === 'dropped') {
+      inFrame(state, omega, f, (w) => moveSphereBody(state.level, cfg, w, f, 0.2));
+      if (distanceOffRing(cfg, f.pos) > cfg.fallKillDistance || state.tick - f.droppedTick > secs(cfg.flagReturnTime)) flagHome(state, f, -1);
+    }
+  }
+  if (state.winner >= 0) return; // (game over: the flags just sit there)
+  for (const p of state.players) {
+    if (!p.alive || p.kind === 'dummy') continue;
+    for (const f of state.flags) {
+      if (f.state === 'carried') continue;
+      if (dist(p.pos, f.pos) > FLAG_REACH + 0.5 * (p.size - 1)) continue;
+      if (f.team === p.team) {
+        if (f.state === 'dropped') flagHome(state, f, p.id); // saved it
+        continue;
+      }
+      if (p.carrying >= 0 || (f.noGrab === p.id && state.tick < f.noGrabUntil)) continue;
+      // take it: it's your weapon now, until you drop it
+      f.state = 'carried';
+      f.carrier = p.id;
+      p.carrying = f.team;
+      if (!p.owned.includes(WEAPON_FLAG)) p.owned.push(WEAPON_FLAG);
+      p.weapon = WEAPON_FLAG;
+      p.reloadUntil = 0;
+      p.charge = 0;
+      state.events.push({ type: 'flag', what: 'taken', flagTeam: f.team, by: p.id, pos: clone(f.pos) });
+    }
+    // home with the enemy's flag, and yours is there: a capture
+    if (p.carrying >= 0) {
+      const mine = state.flags.find((x) => x.team === p.team);
+      if (mine && mine.state === 'home' && dist(p.pos, mine.home) < CAPTURE_REACH) {
+        const theirs = state.flags.find((x) => x.team === p.carrying)!;
+        p.carrying = -1;
+        p.owned = p.owned.filter((w) => w !== WEAPON_FLAG);
+        p.weapon = p.owned[0] ?? 0;
+        state.captures[p.team] = (state.captures[p.team] ?? 0) + 1;
+        state.events.push({ type: 'flag', what: 'captured', flagTeam: theirs.team, by: p.id, pos: clone(p.pos) });
+        theirs.state = 'home';
+        theirs.carrier = -1;
+        theirs.pos = clone(theirs.home);
+        theirs.vel = [0, 0, 0];
+        if (state.captures[p.team] >= cfg.ctfCaptures) {
+          state.winner = p.team;
+          state.events.push({ type: 'ctfWin', team: p.team });
+        }
+      }
+    }
+  }
+}

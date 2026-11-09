@@ -11,7 +11,7 @@ import { Sfx } from './audio';
 import { CUSTOM_DEFAULTS, buildCustomForm, customLevel, decodeCustom, encodeCustom, randomCustom, type CustomSettings } from './custom';
 import { BOLT_COLORS, EntityViews, type PosMap } from './entities';
 import { Hud } from './hud';
-import { basesFor, buildMatchPanel, buildPlayerPanel, setupFor } from './setup';
+import { basesFor, buildMatchPanel, buildPlayerPanel, match, setupFor } from './setup';
 import { InputSampler } from './input';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, RingScene } from './scene';
 import './style.css';
@@ -184,12 +184,13 @@ const WEAPON_UI: Record<string, StatKey[]> = {
   chaos: ['muzzleMin', 'muzzle', 'spread', 'damage', 'interval', 'heatPerShot', 'coolRate', 'overheatLock'],
   seeker: ['muzzle', 'thrust', 'burnTime', 'turnRate', 'seekRange', 'seekAngle', 'damage', 'interval', 'magSize', 'ammoMax', 'reloadTime', 'blastRadius', 'blastDamage'],
   hover: ['damage', 'interval'],
+  flag: ['damage', 'knockback', 'blastRadius', 'interval'],
 };
 WEAPON_IDS.forEach((id, i) => {
   const f = fW.addFolder(WEAPON_NAMES[i]);
   for (const k of WEAPON_UI[id]) {
     const [label, lo, hi, stepv] = STAT_UI[k]!;
-    f.add(cfg.weapons[id], k, lo, hi, stepv).name(id === 'hammer' && k === 'blastRadius' ? 'reach (m)' : label);
+    f.add(cfg.weapons[id], k, lo, hi, stepv).name((id === 'hammer' || id === 'flag') && k === 'blastRadius' ? 'reach (m)' : label);
   }
   f.close();
 });
@@ -335,6 +336,12 @@ function handleEvent(e0: SimEvent) {
     case 'pickup': if (e.player === localId) sfx.pickup(); break;
     case 'mount': if (e.id === localId) sfx.pickup(); break;
     case 'vehicleHit': sfx.thud(d(e.pos)); break;
+    case 'flag': {
+      const col = sim.TEAM_COLORS[e.flagTeam] ?? 0xffffff;
+      views.burst(e.pos, col, e.what === 'captured' ? 6 : 3);
+      if (e.what === 'captured') { sfx.explode(d(e.pos)); views.explosionFlash(e.pos); } else sfx.pickup();
+      break;
+    }
   }
   hud.onEvent(state, e, localId);
 }
@@ -366,7 +373,7 @@ function previewKind(): BoltKind | ThrownKind | null {
   if (input.bounceHeld && me.bounceGrenades > 0) return 'bounceGrenade';
   if (!input.aiming) return null;
   const id = WEAPON_IDS[me.weapon];
-  if (id === 'hammer' || id === 'rocket' || id === 'seeker' || id === 'chaos') return null; // rockets steer and burn; the repeater's speed is a lottery
+  if (id === 'hammer' || id === 'flag' || id === 'rocket' || id === 'seeker' || id === 'chaos') return null; // rockets steer and burn; the repeater's speed is a lottery
   if (id === 'scatter') return 'pellet'; // the middle of the spray
   if (id === 'revolver') return 'bullet';
   if (id === 'pistol') return me.charge >= 1 ? 'overcharge' : 'pistol';
@@ -441,7 +448,7 @@ function frame(now: number) {
   const maxT = pk === 'laconic' ? cfg.weapons.laconic.lifetime : 22;
   views.setPreview(pk ? predictTrajectory(state, localId, pk, input.yaw, input.pitch, maxT) : null, BOLT_COLORS[pk ?? 'rifle']);
   // first-person gun, mouse slowdown while charging the laser, owned list for the wheel
-  views.setViewWeapon(me?.weapon ?? 0, !!me && me.alive && !view.freefly && me.vehicle < 0);
+  views.setViewWeapon(me?.weapon ?? 0, !!me && me.alive && !view.freefly && me.vehicle < 0, me?.carrying ?? -1);
   views.setViewCharge(me, state.tick);
   input.lookScale = me && isLaconicBusy(me, state.tick) ? cfg.weapons.laconic.chargeLookScale : 1;
   views.reloadDip = me && me.reloadUntil > state.tick && me.reloadWeapon === me.weapon ? Math.min(1, views.reloadDip + dtReal * 6) : Math.max(0, views.reloadDip - dtReal * 6);
@@ -530,7 +537,7 @@ function requestPlay() {
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
   if (locked) show('playing');
-  else if (screen === 'playing') show(state.outcome !== 'playing' && outcomeAt ? 'outcome' : 'paused');
+  else if (screen === 'playing') show((state.outcome !== 'playing' || state.winner >= 0) && outcomeAt ? 'outcome' : 'paused');
 });
 
 const fmtSpin = (R: number) => `${((2 * Math.PI) / Math.sqrt(cfg.g / R)).toFixed(1)} s spin`;
@@ -566,7 +573,8 @@ function showLevels(mode: GameMode) {
     }
     const card = document.createElement('div');
     card.className = 'level-card';
-    const who = mode === 'campaign' ? `${def.enemies?.length ?? 0} enemies` : `${def.bots ?? 0} bots${basesFor(def, sim.defaultConfig()) ? ' · team bases' : ''}`;
+    const bases = basesFor(def, sim.defaultConfig());
+    const who = mode === 'campaign' ? `${def.enemies?.length ?? 0} enemies` : `${def.bots ?? 0} bots${bases ? (match.ctf ? ' · capture the flag' : ' · team bases') : match.ctf && match.teams >= 2 ? ' · no bases here: team deathmatch' : ''}`;
     card.innerHTML = `<h3>${def.name}</h3><div class="stats">${def.config.spin === false ? "flat ground · no spin" : `R ${def.config.R} m · ${fmtSpin(def.config.R ?? 100)}`} · ${who}</div><p>${def.blurb}</p>`;
     card.addEventListener('click', () => {
       rOverride = null;
@@ -631,17 +639,35 @@ function nextCampaignLevel(): LevelDef | undefined {
 
 /** Campaign over: give it a moment, then release the mouse and show the result. */
 function checkOutcome(now: number) {
+  if (state.winner >= 0) return ctfOutcome(now);
   if (state.mode !== 'campaign' || state.outcome === 'playing') return;
   // only while you're in the level: once you've gone back to the menus, leave them be
   if (screen !== 'playing' && screen !== 'paused') return;
   if (!outcomeAt) outcomeAt = now;
   if (now - outcomeAt < 1500) return;
   const won = state.outcome === 'won';
+  ($('outcome-title') as HTMLElement).style.color = '';
   $('outcome-title').textContent = won ? 'LEVEL CLEAR' : 'YOU DIED';
   const next = nextCampaignLevel();
   $('outcome-sub').textContent = won ? (next ? `Next: ${next.name}` : 'That was the last level. For now.') : currentLevel.name;
   $('btn-next').classList.toggle('hidden', !won || !next);
   if (document.pointerLockElement === canvas) document.exitPointerLock(); // -> pointerlockchange -> outcome
+  else show('outcome');
+}
+
+/** Capture the flag: a team has won. */
+function ctfOutcome(now: number) {
+  if (screen !== 'playing' && screen !== 'paused') return;
+  if (!outcomeAt) outcomeAt = now;
+  if (now - outcomeAt < 2500) return;
+  const me = state.players.find((p) => p.id === localId);
+  const t = state.winner;
+  $('outcome-title').textContent = `${sim.TEAM_NAMES[t].toUpperCase()} WINS`;
+  ($('outcome-title') as HTMLElement).style.color = `#${sim.TEAM_COLORS[t].toString(16).padStart(6, '0')}`;
+  $('outcome-sub').textContent = (me && me.team === t ? 'Your team took it. ' : 'Not this time. ') +
+    state.captures.map((c, i) => `${sim.TEAM_NAMES[i]} ${c}`).join(' · ');
+  $('btn-next').classList.add('hidden');
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
   else show('outcome');
 }
 

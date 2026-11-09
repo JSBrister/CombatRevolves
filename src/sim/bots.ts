@@ -7,11 +7,11 @@ import { advanceFree, localBasis, planetPullAt, setSpinAlpha, viewVectors } from
 import { diskHeight, levelSdf, setSdfFrame } from './level';
 import { convertBody, frameOf, frameOmega } from './twin';
 import { floorRadius, planetBumpsAt, terrainAt } from './terrain';
-import { towerFloorBelow } from './tower';
+import { towerFloorBelow, towerWaypoint } from './tower';
 import { boltStats, launchVelocity, muzzlePoint } from './step';
 import { hash01 } from './rng';
 import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_SPRINT, DT, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_IDS, spinAt, type BoltKind, type InputCmd, type Player, type SimState } from './types';
-import { type Vec3, addScaled, clone, cross, dot, len, norm, scale, sub } from './vec';
+import { type Vec3, addScaled, clone, cross, dot, len, norm, scale, sub, dist } from './vec';
 import { ENEMY_TYPES } from './tuning';
 import { eyeOffset, standHeight } from './world';
 
@@ -102,7 +102,10 @@ function keepFooting(state: SimState, me: Player, cmd: InputCmd): InputCmd {
   const ahead = addScaled(me.pos, d, 1.2);
   const probe = addScaled(ahead, vv.up, -(standHeight(me.size) + 2));
   // a drop of more than 2 m (ledge, hole, the edge of the world)...
-  if (levelSdf(state.level, state.config, probe).d > 0.25) { cmd.moveX = 0; cmd.moveY = 0; return cmd; }
+  // (look for ground at a few depths down to 2 m: a thin ramp would hide from a single deep probe, which lands under it)
+  let ground = levelSdf(state.level, state.config, probe).d <= 0.25;
+  for (const h of [0.3, 0.9, 1.5]) if (!ground) ground = levelSdf(state.level, state.config, addScaled(ahead, vv.up, -(standHeight(me.size) + h))).d < 0.3;
+  if (!ground) { cmd.moveX = 0; cmd.moveY = 0; return cmd; }
   // ...or floor ahead too steep to stand on (you'd slide off)
   if (state.level.terrain && heightAboveFloor(state, me) < 0.5) {
     const t = terrainAt(state.level, state.config, Math.atan2(ahead[1], ahead[0]), ahead[2]);
@@ -227,6 +230,27 @@ export function botInput(state: SimState, playerId: number): InputCmd {
   }
   if (hash01(playerId, epoch, 3) < 0.3) cmd.buttons |= BTN_SPRINT;
 
+  // Capture the flag: somewhere to be (overrides wandering, and steers while fighting)
+  let goal = state.flags.length && state.winner < 0 ? ctfGoal(state, me) : null;
+  if (goal && state.level.tower) goal = towerWaypoint(state.level, me.pos, goal, standHeight(me.size)); // (the way there, by ramps and pads)
+  const towardGoal = () => {
+    if (!goal) return;
+    const b = localBasis(me.pos);
+    const d = sub(goal, me.pos);
+    const flat = sub(d, scale(b.up, dot(d, b.up)));
+    if (len(flat) < 1.5) { cmd.moveX = 0; cmd.moveY = 0; return; }
+    const vv = viewVectors(me.pos, cmd.yaw, 0);
+    const f = dot(flat, vv.forward), r = dot(flat, vv.right), m = Math.max(1e-6, Math.hypot(f, r));
+    cmd.moveY = f / m;
+    cmd.moveX = r / m;
+    cmd.buttons |= BTN_SPRINT;
+  };
+  if (goal) {
+    cmd.yaw = aimAt(me.pos, goal).yaw;
+    cmd.pitch = 0;
+    towardGoal();
+  }
+
   let navigating = false;
   // Target: nearest living opponent (other team, not a dummy) within range.
   let target = null as (typeof state.players)[number] | null;
@@ -235,8 +259,10 @@ export function botInput(state: SimState, playerId: number): InputCmd {
     if (p0.id === playerId || !p0.alive || p0.kind === 'dummy' || p0.team === me.team) continue;
     const p = seenFrom(state, me, p0);
     const d = len(sub(p.pos, me.pos));
-    if (d < best) { best = d; target = p; }
+    const k = p0.carrying >= 0 ? 0.4 : 1; // (a flag carrier is the one to stop, from much further off)
+    if (d * k < best) { best = d * k; target = p; }
   }
+  if (target) best = len(sub(target.pos, me.pos));
   if (target) {
     const eye: Vec3 = [...me.pos] as Vec3;
     const up = localBasis(me.pos).up;
@@ -246,17 +272,18 @@ export function botInput(state: SimState, playerId: number): InputCmd {
       cmd.weapon = WEAPON_IDS.indexOf(type.weapon);
     } else {
       // Pick one of the weapons we own for a few seconds at a time; prefer the new toys.
-      const options = me.owned.filter((w) => w !== WEAPON_HOVER && (w !== WEAPON_HAMMER || best < 4));
+      const options = me.owned.filter((w) => w !== WEAPON_HOVER && WEAPON_IDS[w] !== 'flag' && (w !== WEAPON_HAMMER || best < 4));
       const special = options.filter((w) => w > 1 && (state.config.weapons[WEAPON_IDS[w]].magSize === 0 || me.mag[w] + me.ammo[w] > 0));
       const pool = special.length && hash01(playerId, tick >> 10, 10) < 0.6 ? special : options;
       cmd.weapon = pool[Math.floor(hash01(playerId, tick >> 10, 7) * pool.length)] ?? 0;
     }
+    if (me.carrying >= 0) cmd.weapon = WEAPON_IDS.indexOf('flag'); // (holding the flag: that's all you've got)
     const id = WEAPON_IDS[cmd.weapon];
     // Straight at you, or (with aim skill) a solved shot that leads you and allows for the spin.
     const straight = aimAt(eye, target.pos);
     const skill = type?.aimSkill ?? 0.3;
     let aim = straight;
-    if (skill > 0 && id !== 'hammer' && id !== 'rocket' && id !== 'seeker' && id !== 'chaos') { // rockets: no solver (they steer and burn)
+    if (skill > 0 && id !== 'hammer' && id !== 'flag' && id !== 'rocket' && id !== 'seeker' && id !== 'chaos') { // rockets: no solver (they steer and burn)
       const kind: BoltKind = id === 'launcher' ? 'fuelRod' : id === 'scatter' ? 'pellet' : id === 'revolver' ? 'bullet' : id === 'pistol' ? 'pistol' : (id as BoltKind);
       const solved = solveAim(state, me, target, kind);
       const dyaw = Math.atan2(Math.sin(solved.yaw - straight.yaw), Math.cos(solved.yaw - straight.yaw));
@@ -303,6 +330,8 @@ export function botInput(state: SimState, playerId: number): InputCmd {
       if ((tick >> 8) % 2 === 0) cmd.buttons |= BTN_FIRE; // hold to charge; it streams by itself
     } else if (id === 'cannon') {
       if ((tick >> 4) % 4 === 0) cmd.buttons |= BTN_FIRE; // one careful shot at a time
+    } else if (id === 'flag') {
+      if (best < 3) cmd.buttons |= (tick >> 3) % 4 === 0 ? BTN_FIRE : 0; // a swat, without stopping
     } else if (id === 'hammer') {
       if (best < 3.5 && (tick >> 3) % 4 === 0) cmd.buttons |= BTN_FIRE;
       cmd.moveY = 1; // close in
@@ -317,6 +346,33 @@ export function botInput(state: SimState, playerId: number): InputCmd {
       cmd.buttons |= sticky ? BTN_GRENADE : BTN_GRENADE2;
     }
   }
+  if (goal && !navigating) towardGoal(); // keep going where the flag game needs you, shooting as you go
+  if (me.carrying >= 0) cmd.buttons &= ~BTN_MELEE; // (Q would toss the flag)
   if (behaviour !== 'hold' && !navigating && me.apparentG > 0.6 && heightAboveFloor(state, me) < 0.5 && hash01(playerId, tick >> 6, 8) < 0.06) cmd.buttons |= BTN_JUMP;
   return keepFooting(state, me, cmd);
+}
+
+/**
+ * Where a bot should be in capture the flag: carrying, home; otherwise half
+ * the bots attack (go for the enemy flag, or stay by whoever of us has it) and
+ * half defend (get our flag back, or stay near home).
+ */
+function ctfGoal(state: SimState, me: Player): Vec3 | null {
+  const mine = state.flags.find((f) => f.team === me.team);
+  if (!mine) return null;
+  if (me.carrying >= 0) return mine.home;
+  const enemyFlags = state.flags.filter((f) => f.team !== me.team);
+  const attacker = hash01(me.id, 0, 11) < 0.5;
+  // our flag's been taken or dropped: whoever's near goes for it (defenders always)
+  if (mine.state !== 'home' && (!attacker || dist(me.pos, mine.pos) < 40)) return mine.pos;
+  if (!attacker) return dist(me.pos, mine.home) > 12 ? mine.home : null;
+  // attack: the nearest enemy flag not already in our hands, or escort whoever has one
+  let best: Vec3 | null = null, bd = Infinity;
+  for (const f of enemyFlags) {
+    const carrier = f.state === 'carried' ? state.players.find((q) => q.id === f.carrier) : undefined;
+    const at = carrier && carrier.team === me.team ? carrier.pos : f.pos;
+    const d = dist(me.pos, at);
+    if (d < bd) { bd = d; best = at; }
+  }
+  return best;
 }

@@ -6,7 +6,7 @@ import { applyTeamBases } from './teams';
 import { rngRange } from './rng';
 import { defaultConfig } from './tuning';
 import { DT, STARTING_WEAPONS, WEAPON_IDS, neutralInput, omegaOf, type GameMode, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
-import type { Vec3 } from './vec';
+import { type Vec3, addScaled, clone } from './vec';
 
 export const PLAYER_RADIUS = 0.4;
 export const PLAYER_HALF_SEG = 0.5; // capsule segment half-length; total height 1.8 m
@@ -46,6 +46,9 @@ export function createState(opts: WorldOptions = {}): SimState {
     mode: opts.mode ?? 'sandbox',
     levelId: opts.levelId ?? 'custom',
     outcome: 'playing',
+    flags: [],
+    captures: [],
+    winner: -1,
     frameAngle: 0,
     rng: (opts.seed ?? 1234) >>> 0,
     nextId: 1,
@@ -70,6 +73,14 @@ export function createState(opts: WorldOptions = {}): SimState {
     ? generateDisk(config, state, opts.obstacles ?? true, () => allocId(state))
     : generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true, opts.vehicles ?? -1);
   applyTeamBases(config, state.level);
+  // capture the flag: a flag on each base's stand
+  if (config.ctf && state.level.bases) {
+    for (const b of state.level.bases) {
+      const home = addScaled(b.pos, localBasis(b.pos).up, 1.0);
+      state.flags.push({ team: b.team, home, pos: clone(home), vel: [0, 0, 0], radius: 0.35, contactNormal: null, state: 'home', carrier: -1, droppedTick: 0, noGrab: -1, noGrabUntil: 0 });
+      state.captures[b.team] = 0;
+    }
+  }
   for (const spot of state.level.vehicleSpots) addVehicle(state, spot.pos, spot.yaw);
   if (opts.pickups ?? opts.obstacles ?? true) {
     for (const spot of state.level.pickupSpots) addPickup(state, spot.item, spot.pos, -1, Math.round(config.pickupRespawn / DT), -1);
@@ -127,7 +138,7 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
     fireReadyTick: 0, hasJetpack: false, jetFuel: 0, jetting: false, lastGroundTick: -1e9, lastJumpTick: -1e9,
     grenades: MAX_GRENADES, bounceGrenades: MAX_GRENADES, grenadeReadyTick: 0,
     prevButtons: 0, lastInput: neutralInput(id, 0),
-    kills: 0, deaths: 0, needles: 0, needleTick: -1e9,
+    kills: 0, deaths: 0, carrying: -1, needles: 0, needleTick: -1e9,
   };
   state.players.push(p);
   return id;

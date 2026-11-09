@@ -67,15 +67,33 @@ export class Hud {
       const rows = state.players.filter((p) => p.kind !== 'dummy').sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
       const line = (p: Player) => `${p.id === me.id ? '&gt; ' : '  '}<span style="color:${p.color >= 0 ? hex(p.color) : 'inherit'}">${esc(p.name.padEnd(16))}</span>${String(p.kills).padStart(5)}  ${String(p.deaths).padStart(6)}`;
       if (cfg.teams >= 2) {
-        // by team, best team first
-        const teams = Array.from({ length: cfg.teams }, (_, t) => t).sort((a, b) => teamKills(state, b) - teamKills(state, a));
-        sc.innerHTML = teams.map((t) => `<span style="color:${hex(TEAM_COLORS[t])}">${TEAM_NAMES[t].toUpperCase().padEnd(18)}${String(teamKills(state, t)).padStart(5)}</span>\n` +
+        // by team, best team first (by captures, in capture the flag)
+        const score = (t: number) => (state.flags.length ? (state.captures[t] ?? 0) * 1000 : 0) + teamKills(state, t);
+        const teams = Array.from({ length: cfg.teams }, (_, t) => t).sort((a, b) => score(b) - score(a));
+        sc.innerHTML = teams.map((t) => `<span style="color:${hex(TEAM_COLORS[t])}">${(TEAM_NAMES[t].toUpperCase() + (state.flags.length ? `  ⚑ ${state.captures[t] ?? 0}` : '')).padEnd(18)}${String(teamKills(state, t)).padStart(5)}</span>\n` +
           rows.filter((p) => p.team === t).map(line).join('\n')).join('\n\n');
       } else sc.innerHTML = 'NAME              KILLS  DEATHS\n' + rows.map(line).join('\n');
     }
+    const ctf = state.flags.length > 0;
     $('team-scores').innerHTML = cfg.teams >= 2
-      ? Array.from({ length: cfg.teams }, (_, t) => `<span style="color:${hex(TEAM_COLORS[t])}">${TEAM_NAMES[t].toUpperCase()} ${teamKills(state, t)}</span>`).join('')
+      ? Array.from({ length: cfg.teams }, (_, t) => `<span style="color:${hex(TEAM_COLORS[t])}">${TEAM_NAMES[t].toUpperCase()} ${ctf ? `⚑ ${state.captures[t] ?? 0}` : teamKills(state, t)}</span>`).join('') +
+        (ctf ? `<div class="small">first to ${cfg.ctfCaptures} captures</div>` : '')
       : '';
+    if (ctf) {
+      // the flags: where each one is, and (if you've got one) what to do
+      const where = (f: (typeof state.flags)[number]) => {
+        if (f.state === 'home') return 'at home';
+        if (f.state === 'dropped') return `dropped · home in ${Math.max(0, cfg.flagReturnTime - (state.tick - f.droppedTick) * DT).toFixed(0)} s`;
+        const c = state.players.find((q) => q.id === f.carrier);
+        return `TAKEN by ${tag(c)}`;
+      };
+      const lines = state.flags.map((f) => `<span style="color:${hex(TEAM_COLORS[f.team])}">${f.team === me.team ? 'Your flag' : `${TEAM_NAMES[f.team]} flag`}</span>: ${where(f)}`);
+      const carrying = me.carrying >= 0
+        ? `<div class="carry" style="color:${hex(TEAM_COLORS[me.carrying])}">YOU HAVE THE ${TEAM_NAMES[me.carrying].toUpperCase()} FLAG · take it home to your own flag · Q tosses it</div>`
+        : '';
+      $('objective').innerHTML = carrying + lines.join(' &nbsp;·&nbsp; ');
+    }
+    $('objective').classList.toggle('ctf', ctf);
     // hover-bike: health and a prompt when one is in reach
     const bike = state.vehicles.find((v) => v.id === me.vehicle);
     const near = !bike && me.alive && state.vehicles.some((v) => v.alive && v.driver < 0 && Math.hypot(v.pos[0] - me.pos[0], v.pos[1] - me.pos[1], v.pos[2] - me.pos[2]) < 2.6);
@@ -83,7 +101,7 @@ export class Hud {
       ? `HOVER-BIKE ${Math.ceil(bike.health)} / ${bike.maxHealth} · ${Math.hypot(...bike.vel).toFixed(0)} m/s · <b>E</b> get off`
       : near ? '<b>E</b> ride hover-bike' : '';
     const enemies = state.players.filter((p) => p.enemyType !== '');
-    $('objective').textContent = state.mode === 'campaign' && state.outcome === 'playing'
+    if (!state.flags.length) $('objective').textContent = state.mode === 'campaign' && state.outcome === 'playing'
       ? `Enemies left: ${enemies.filter((p) => p.alive).length} / ${enemies.length}` : '';
     ($('shield-fill').parentElement as HTMLElement).style.borderColor = me.shield <= 0 ? '#ff6a3d' : '';
     $('weight').textContent = me.apparentG.toFixed(2);
@@ -133,6 +151,15 @@ export class Hud {
         : `${name(e.killer)} <i>[${how}]</i> ${name(e.victim)}`;
       this.push(text);
     }
+    if (e.type === 'flag') {
+      const flag = `<span style="color:${hex(TEAM_COLORS[e.flagTeam])}">${TEAM_NAMES[e.flagTeam]} flag</span>`;
+      const who = e.by >= 0 ? name(e.by) : '';
+      this.push(e.what === 'taken' ? `${who} took the ${flag}`
+        : e.what === 'dropped' ? `${who} dropped the ${flag}`
+        : e.what === 'returned' ? (who ? `${who} returned the ${flag}` : `The ${flag} went home`)
+        : `<b>${who} CAPTURED the ${flag}!</b>`);
+    }
+    if (e.type === 'ctfWin') this.push(`<b style="color:${hex(TEAM_COLORS[e.team])}">${TEAM_NAMES[e.team].toUpperCase()} WINS</b>`);
     if (e.type === 'stick' && e.target === localId) this.push('<span style="color:#ff6a3d">YOU ARE STUCK</span>');
     if (e.type === 'pickup' && e.player === localId) this.push(`<span style="color:#9dff7a">+ ${ITEM_NAMES[e.item]}</span>`);
   }

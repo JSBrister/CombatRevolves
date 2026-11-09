@@ -20,8 +20,42 @@ const tube = (r: number, length: number, m: THREE.Material, px = 0, py = 0, pz =
   return c;
 };
 
-/** Gun model for weapon slot index (see WEAPON_IDS). */
-export function makeGun(weapon: number): THREE.Group {
+/**
+ * A flag on a pole (the pole along +Y from the origin), in a team's colour, glowing a little.
+ * The cloth is the child named 'cloth' (wave it by turning it about the pole).
+ */
+export function makeFlag(color: number, poleH = 2.6, clothW = 1.3): THREE.Group {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, poleH, 10), mat(0xe0e4ea, 0x202020, 0.8));
+  pole.position.y = poleH / 2;
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 8), mat(0xffe680, 0x6a5a10, 0.9));
+  knob.position.y = poleH + 0.06;
+  // the cloth, hinged at the pole: a few segments so it can ripple
+  const cloth = new THREE.Group();
+  cloth.name = 'cloth';
+  cloth.position.y = poleH - 0.4;
+  const geo = new THREE.PlaneGeometry(clothW, clothW * 0.62, 8, 1);
+  geo.translate(clothW / 2, 0, 0);
+  const sheet = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.45, side: THREE.DoubleSide, roughness: 0.6 }));
+  sheet.name = 'sheet';
+  cloth.add(sheet);
+  g.add(pole, knob, cloth);
+  return g;
+}
+
+/** Ripple a flag made by makeFlag (t in seconds). */
+export function waveFlag(flag: THREE.Object3D, t: number, amount = 1) {
+  const cloth = flag.getObjectByName('cloth');
+  const sheet = flag.getObjectByName('sheet') as THREE.Mesh | undefined;
+  if (!cloth || !sheet) return;
+  cloth.rotation.y = 0.25 * amount * Math.sin(t * 2.1);
+  const pa = sheet.geometry.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < pa.count; i++) { const x = pa.getX(i); pa.setZ(i, 0.12 * amount * x * Math.sin(t * 6 - x * 4)); }
+  pa.needsUpdate = true;
+}
+
+/** Gun model for weapon slot index (see WEAPON_IDS); `flagColor`: the flag's colour when the weapon is the flag. */
+export function makeGun(weapon: number, flagColor = 0xffffff): THREE.Group {
   const g = new THREE.Group();
   const dark = mat(0x2a2f3a);
   switch (WEAPON_IDS[weapon] as WeaponId) {
@@ -56,6 +90,14 @@ export function makeGun(weapon: number): THREE.Group {
       const glow = mat(0xff5a4a, 0xff1a0a);
       g.add(box(1.0, 0.22, 0.2, body, 0.15), tube(0.12, 0.5, glow, 0.8), tube(0.05, 0.9, glow, 0.2, 0.16),
         box(0.2, 0.2, 0.08, dark, -0.15, -0.18));
+      break;
+    }
+    case 'flag': { // the flag, held up and leaning forward over your shoulder
+      const f = makeFlag(flagColor, 2.2, 1.1);
+      f.scale.setScalar(0.5);
+      f.rotation.z = -0.5;
+      f.position.set(-0.05, -0.3, 0.08);
+      g.add(f);
       break;
     }
     case 'hammer': { // Grav Mallet: a long handle and a heavy glowing head

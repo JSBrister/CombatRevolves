@@ -5,7 +5,7 @@
 import { TEAM_COLORS, TEAM_NAMES, maxTeamBases, splitBots, type GameSetup, type LevelDef, type SimConfig } from '../sim';
 
 export interface PlayerPrefs { name: string; color: number } // color -1 = default blue
-export interface MatchPrefs { teams: number; myTeam: number; bots: (number | null)[]; bases: boolean } // bots: null = the level's own number
+export interface MatchPrefs { teams: number; myTeam: number; bots: (number | null)[]; bases: boolean; ctf: boolean } // bots: null = the level's own number
 
 export const PLAYER_COLORS = [-1, 0x2fb8c8, 0xe07a2a, 0xd84aa0, 0x8a5ad8, 0xe8e6dc, 0x40c080, 0xc8a040];
 
@@ -15,7 +15,7 @@ const load = <T,>(key: string, fallback: T): T => {
 const save = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* not remembered: fine for now */ } };
 
 export const player: PlayerPrefs = load('cr-player', { name: '', color: -1 });
-export const match: MatchPrefs = load('cr-match', { teams: 0, myTeam: 0, bots: [null, null, null, null], bases: true });
+export const match: MatchPrefs = load('cr-match', { teams: 0, myTeam: 0, bots: [null, null, null, null], bases: true, ctf: false });
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 
@@ -72,7 +72,12 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
     s.addEventListener('change', () => { set(s.value); save('cr-match', match); buildMatchPanel(el, onChange); onChange(); });
     return s;
   };
-  row('Mode', select([['0', 'Free-for-all'], ['2', '2 teams'], ['3', '3 teams'], ['4', '4 teams']], String(match.teams), (v) => { match.teams = +v; match.myTeam = Math.min(match.myTeam, Math.max(0, match.teams - 1)); }));
+  const modeVal = match.teams >= 2 && match.ctf ? `ctf${match.teams}` : String(match.teams);
+  row('Mode', select([['0', 'Free-for-all'], ['2', '2 teams'], ['3', '3 teams'], ['4', '4 teams'], ['ctf2', 'Capture the flag (2 teams)'], ['ctf3', 'Capture the flag (3 teams)'], ['ctf4', 'Capture the flag (4 teams)']], modeVal, (v) => {
+    match.ctf = v.startsWith('ctf');
+    match.teams = +v.replace('ctf', '');
+    match.myTeam = Math.min(match.myTeam, Math.max(0, match.teams - 1));
+  }));
   const n = Math.max(1, match.teams);
   if (match.teams >= 2) {
     row('Your team', select(TEAM_NAMES.slice(0, n).map((t, i) => [String(i), t]), String(match.myTeam), (v) => { match.myTeam = +v; }));
@@ -97,7 +102,7 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
     bots.appendChild(inp);
   }
   if (match.teams >= 2) el.appendChild(bots); else row('Bots', bots);
-  if (match.teams >= 2) {
+  if (match.teams >= 2 && !match.ctf) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = match.bases;
@@ -108,7 +113,7 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
 
 /** Does this level give each team a base, with the current setup? */
 export function basesFor(def: LevelDef, defaults: SimConfig): boolean {
-  return match.teams >= 2 && match.bases && maxTeamBases({ ...defaults, ...def.config } as SimConfig) >= match.teams;
+  return match.teams >= 2 && (match.bases || match.ctf) && maxTeamBases({ ...defaults, ...def.config } as SimConfig) >= match.teams;
 }
 
 /** The setup to start `def` with. */
@@ -118,7 +123,7 @@ export function setupFor(def: LevelDef): GameSetup {
   const teams = match.teams >= 2 ? match.teams : 0;
   if (teams) {
     const auto = splitBots(def.bots ?? 0, teams, match.myTeam);
-    return { ...s, teams, myTeam: match.myTeam, bases: match.bases, bots: auto.map((a, t) => match.bots[t] ?? a) };
+    return { ...s, teams, myTeam: match.myTeam, bases: match.bases || match.ctf, ctf: match.ctf, bots: auto.map((a, t) => match.bots[t] ?? a) };
   }
   return { ...s, ...(match.bots[0] !== null && match.bots[0] !== undefined ? { bots: [match.bots[0]] } : {}) };
 }
