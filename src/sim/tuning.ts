@@ -23,6 +23,7 @@ export const defaultConfig = (): SimConfig => ({
   world: 'ring', // 'planet' = stand on the outside of a spinning ball (radius R, surface gravity g)
   planetSpin: 0.4, // planet: the spin cancels this much of g at the equator
   outerShell: 0, // planet: radius of a hollow shell round it (0 = none)
+  tower: 0, // >0: a spin tower (its half-width round the spin) instead of a ring
   diskBowl: false, // disk world: curve the surface up into a paraboloid (gravity always straight into it)
   launchPads: true, // nested spheres: pads that throw you between ball and shell
   twin: false, // two counter-rotating rings side by side

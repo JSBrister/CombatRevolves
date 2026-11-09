@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  towerPoint, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -1858,7 +1858,7 @@ describe('35. scattergun and Roulette Repeater', () => {
 describe('36. custom levels', () => {
   it('every shape the builder offers makes a working level; links round-trip', async () => {
     const { CUSTOM_DEFAULTS, customLevel, encodeCustom, decodeCustom } = await import('../src/client/custom');
-    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'nested', 'twin', 'disk', 'bucket'] as const) {
+    for (const shape of ['ring', 'band', 'sphere', 'ridge', 'torus', 'halfpipe', 'log', 'planet', 'nested', 'twin', 'disk', 'bucket', 'tower'] as const) {
       const set = { ...CUSTOM_DEFAULTS, shape, R: 200, width: shape === 'log' ? 12 : 30, hills: 6, bases: 1, holes: 4, deck: 9, bots: 2 };
       const { state, localId, botIds } = startLevel(customLevel(set));
       expect(botIds.length).toBe(2);
@@ -2348,5 +2348,68 @@ describe('45. Disk World', () => {
       const r = Math.hypot(p.pos[0], p.pos[1]);
       expect(p.apparentG).toBeCloseTo(Math.sqrt(1 + ((w * w * r) / g) ** 2), 1);
     }
+  });
+});
+
+describe('46. spin tower', () => {
+  const tower = () => {
+    const { state, localId, botIds } = startLevel(levelById('s-tower')!);
+    const me = state.players.find((p) => p.id === localId)!;
+    return { s: state, id: localId, p: me, botIds };
+  };
+  const solo = () => { const t = tower(); t.s.players = [t.p]; return t; };
+  const rhoP = (p: { pos: Vec3 }) => Math.hypot(p.pos[0], p.pos[1]);
+  it('the hollow is the same in both arms (half a turn apart), and you can stand on every floor', () => {
+    const { s, id, p } = solo();
+    for (let i = 0; i < 400; i++) {
+      const q: Vec3 = [(hash01(i, 1, 46) * 2 - 1) * 100, (hash01(i, 2, 46) * 2 - 1) * 12, (hash01(i, 3, 46) * 2 - 1) * 22];
+      expect(levelSdf(s.level, s.config, q).d).toBeCloseTo(levelSdf(s.level, s.config, [-q[0], -q[1], q[2]]).d, 9);
+    }
+    for (const r of [100, ...s.level.tower!.floors.map((f) => f.r)]) for (const arm of [0, 1] as const) {
+      p.pos = towerPoint(r - standHeight(1), -8, -5, arm);
+      p.vel = [0, 0, 0];
+      run(s, 240, () => [cmdFor(s, id)]);
+      expect(p.grounded).toBe(true);
+      expect(Math.abs(rhoP(p) - (r - standHeight(1)))).toBeLessThan(0.05);
+      expect(Math.hypot(...p.vel)).toBeLessThan(0.01);
+    }
+  });
+  it('a ramp takes you up from the end wall to the first floor, and a lift up to the next', () => {
+    const { s, id, p } = solo();
+    const R = s.config.R, f1 = s.level.tower!.floors[0].r;
+    p.pos = towerPoint(R - standHeight(1), 5, -14, 0);
+    p.vel = [0, 0, 0];
+    run(s, 120, () => [cmdFor(s, id)]);
+    run(s, 120 * 8, () => [cmdFor(s, id, { moveY: 1, yaw: Math.PI / 2 })]);
+    expect(p.grounded).toBe(true);
+    expect(Math.abs(rhoP(p) - (f1 - standHeight(1)))).toBeLessThan(0.1);
+    // stand on the lift from the first floor (it goes up and comes back down)
+    const lift = s.level.boxes.find((b) => b.lift && b.center[0] > 0 && Math.abs(Math.hypot(b.lift.base[0], b.lift.base[1]) - f1) < 1)!;
+    p.pos = [lift.center[0] - 0.2 - standHeight(1), lift.center[1], lift.center[2]];
+    p.vel = [0, 0, 0];
+    let minRho = Infinity;
+    for (let i = 0; i < 120 * 16; i++) { step(s, [cmdFor(s, id)], s.tick); minRho = Math.min(minRho, rhoP(p)); }
+    expect(minRho).toBeLessThan(lift.lift!.base[0] - lift.lift!.travel); // it rose above the next floor's surface
+    expect(p.alive).toBe(true);
+  });
+  it('a launch pad on the hub floor throws you across the axis onto the other arm, unhurt', () => {
+    const { s, id, p } = solo();
+    const top = s.level.tower!.floors.at(-1)!.r;
+    const pad = s.level.pads!.find((pd) => pd.pos[0] > 0)!;
+    p.pos = towerPoint(top - standHeight(1), 0, pad.pos[2] + 4, 0);
+    p.vel = [0, 0, 0];
+    run(s, 60, () => [cmdFor(s, id)]);
+    p.pos = towerPoint(top - standHeight(1), 0, pad.pos[2], 0);
+    let left = false;
+    for (let i = 0; i < 120 * 8; i++) { step(s, [cmdFor(s, id)], s.tick); if (!p.grounded) left = true; if (left && p.grounded) break; }
+    expect(p.pos[0]).toBeLessThan(0); // the other arm
+    expect(Math.abs(rhoP(p) - (top - standHeight(1)))).toBeLessThan(0.2); // on its hub floor
+    expect(p.health + p.shield).toBe(p.maxHealth + p.maxShield);
+  });
+  it('bots find each other and fight', () => {
+    const { s, id, botIds } = tower();
+    let hits = 0;
+    for (let i = 0; i < 120 * 45; i++) { step(s, [cmdFor(s, id), ...botIds.map((b) => botInput(s, b))], s.tick); hits += s.events.filter((e) => e.type === 'hit').length; }
+    expect(hits).toBeGreaterThan(10);
   });
 });

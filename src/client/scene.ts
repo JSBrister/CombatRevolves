@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { disposeTree } from './dispose';
-import { DISK_THICKNESS, diskSurface, floorRadius, type Hole, type Level, type SimConfig } from '../sim';
+import { DISK_THICKNESS, diskSurface, floorRadius, towerPoint, type Hole, type Level, type SimConfig, type TowerFloor } from '../sim';
 import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, rockTexture, sandTexture, snowTexture, wallTexture } from './textures';
 
 export const LAYER_ROT_TRAILS = 1;
@@ -72,6 +72,7 @@ export class RingScene {
     if (sky === 'earth') return this.buildEarth(cfg, level);
     if (level.shape === 'planet') return this.buildPlanet(cfg, level);
     if (level.shape === 'disk') return this.buildDisk(cfg, level);
+    if (level.shape === 'tower') return this.buildTower(cfg, level);
     this.scene.background = new THREE.Color(0x02030a);
     this.ambient.intensity = 0.6;
     this.axisLight.intensity = 0.85;
@@ -461,12 +462,15 @@ export class RingScene {
     // a soft glow from the ball lights the inside
     const glow = new THREE.PointLight(0xfff2dd, 1.4, 0, 0);
     this.level.add(glow);
-    // launch pads: a glowing disc and an arrow the way it throws you
+    this.buildPads(level, (pos) => { const r = Math.hypot(...pos); return new THREE.Vector3(...pos).divideScalar(r).multiplyScalar(r > cfg.R + 1 ? -1 : 1); });
+  }
+
+  /** Launch pads: a glowing disc and an arrow the way it throws you. `normalAt` points out of the ground. */
+  private buildPads(level: Level, normalAt: (pos: [number, number, number]) => THREE.Vector3) {
     const padMat = new THREE.MeshBasicMaterial({ color: 0x3affc0, transparent: true, opacity: 0.75, side: THREE.DoubleSide });
     const arrowMat = new THREE.MeshBasicMaterial({ color: 0xbfffe8 });
     for (const pad of level.pads ?? []) {
-      const r = Math.hypot(...pad.pos);
-      const n = new THREE.Vector3(...pad.pos).divideScalar(r).multiplyScalar(r > cfg.R + 1 ? -1 : 1); // out of the ground
+      const n = normalAt(pad.pos);
       const disc = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), padMat);
       disc.position.set(...pad.pos).addScaledVector(n, 0.05);
       disc.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
@@ -476,6 +480,120 @@ export class RingScene {
       arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
       this.level.add(disc, arrow);
     }
+  }
+
+  /**
+   * Spin Tower: the hollow box through the axis, seen from inside. Floors are
+   * curved (each at one radius) and tinted from warm at the heavy ends to cool
+   * near the weightless middle, with their weight painted on the end walls.
+   */
+  private buildTower(cfg: SimConfig, level: Level) {
+    const T = level.tower!, R = cfg.R, W = T.halfWidth, hw = cfg.halfWidth;
+    this.scene.background = new THREE.Color(0x02030a);
+    this.sunLight.intensity = 0;
+    this.sunLight.castShadow = false;
+    this.ambient.intensity = 1.25;
+    this.axisLight.intensity = 1.4;
+    this.starRadius = Math.max(4000, R * 12);
+    this.scene.fog = new THREE.Fog(0x0b1020, R * 1.2, R * 4);
+    const xe = Math.sqrt(R * R - W * W);
+    const tint = (r: number) => new THREE.Color(0x6ab0e8).lerp(new THREE.Color(0xe0a070), r / R);
+    // floors (and the end walls, which are the bottom floors): curved surfaces with their openings left out
+    const surface = (f: TowerFloor, arm: 0 | 1) => {
+      const ys = new Set<number>(), zs = new Set<number>();
+      for (let i = 0; i <= 20; i++) ys.add(-W + (2 * W * i) / 20);
+      for (let i = 0; i <= 8; i++) zs.add(-hw + (2 * hw * i) / 8);
+      for (const h of f.holes) { ys.add(h.y - h.hy); ys.add(h.y + h.hy); zs.add(h.z - h.hz); zs.add(h.z + h.hz); }
+      const Y = [...ys].filter((y) => y >= -W && y <= W).sort((a, b) => a - b), Z = [...zs].filter((z) => z >= -hw && z <= hw).sort((a, b) => a - b);
+      const pos: number[] = [], uv: number[] = [];
+      for (let i = 0; i + 1 < Y.length; i++) for (let j = 0; j + 1 < Z.length; j++) {
+        const yc = (Y[i] + Y[i + 1]) / 2, zc = (Z[j] + Z[j + 1]) / 2;
+        if (f.holes.some((h) => Math.abs(yc - h.y) < h.hy && Math.abs(zc - h.z) < h.hz)) continue;
+        const q = [[Y[i], Z[j]], [Y[i + 1], Z[j]], [Y[i + 1], Z[j + 1]], [Y[i], Z[j]], [Y[i + 1], Z[j + 1]], [Y[i], Z[j + 1]]];
+        for (const [y, z] of q) { pos.push(...towerPoint(f.r - 0.02, y, z, arm)); uv.push(y / 4, z / 4); }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.computeVertexNormals();
+      return g;
+    };
+    const tex = this.floorTex('deck');
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    const all: TowerFloor[] = [{ r: R, thickness: 0, holes: [] }, ...T.floors];
+    for (const f of all) {
+      const mat = new THREE.MeshStandardMaterial({ map: tex, color: tint(f.r), side: THREE.DoubleSide, roughness: 0.8, metalness: 0.2 });
+      for (const arm of [0, 1] as const) {
+        const m = new THREE.Mesh(surface(f, arm), mat);
+        m.receiveShadow = true;
+        this.level.add(m);
+        // a thin dark edge under it: the slab's thickness, seen from below
+        if (f.thickness) this.level.add(new THREE.Mesh(surface({ ...f, r: f.r + f.thickness }, arm), new THREE.MeshStandardMaterial({ color: 0x2a2f38, side: THREE.DoubleSide, roughness: 0.9 })));
+      }
+    }
+    // side walls (round the spin) and the two faces (along the axis)
+    const wallTex = this.textures.wall.clone();
+    wallTex.needsUpdate = true;
+    wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+    wallTex.repeat.set((2 * xe) / 6, (2 * hw) / 6);
+    const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, color: 0xc4ccd8, side: THREE.DoubleSide, roughness: 0.75, metalness: 0.2 });
+    for (const sy of [-1, 1]) {
+      const g = new THREE.PlaneGeometry(2 * xe, 2 * hw);
+      g.rotateX(Math.PI / 2);
+      g.translate(0, sy * W, 0);
+      this.level.add(new THREE.Mesh(g, wallMat));
+    }
+    const outline = new THREE.Shape();
+    const a = Math.asin(W / R);
+    outline.moveTo(xe, -W);
+    outline.absarc(0, 0, R, -a, a, false);
+    outline.lineTo(-xe, W);
+    outline.absarc(0, 0, R, Math.PI - a, Math.PI + a, false);
+    outline.lineTo(xe, -W);
+    const faceMat = new THREE.MeshStandardMaterial({ color: 0x5e6878, side: THREE.DoubleSide, roughness: 0.85, metalness: 0.2 });
+    for (const sz of [-1, 1]) {
+      const g = new THREE.ShapeGeometry(outline, 48);
+      g.translate(0, 0, sz * hw);
+      this.level.add(new THREE.Mesh(g, faceMat));
+    }
+    // each floor's weight, painted on both faces of both arms, and a stripe where it meets them
+    const w2 = cfg.g / R;
+    for (const f of all) {
+      const label = this.textPlane(`${((w2 * f.r) / 9.81).toFixed(2)} g`, '#ffe9b0');
+      for (const arm of [0, 1] as const) for (const sz of [-1, 1]) {
+        const m = label.clone();
+        const p = towerPoint(f.r - 2.2, 0, sz * (hw - 0.05), arm);
+        m.position.set(...p);
+        // upright: the floor's "up" (toward the axis) is the label's up
+        const up = new THREE.Vector3(-p[0], -p[1], 0).normalize();
+        const n = new THREE.Vector3(0, 0, -sz);
+        m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(up, n), up, n));
+        this.level.add(m);
+      }
+    }
+    // the axis: a ring of light round it on each face
+    for (const sz of [-1, 1]) {
+      const lamp = this.makeGlowSprite(0x7fd8ff, 4);
+      lamp.position.set(0, 0, sz * (hw - 1));
+      this.level.add(lamp);
+    }
+    this.buildPads(level, (pos) => new THREE.Vector3(-pos[0], -pos[1], 0).normalize());
+    this.buildBoxes(cfg, level);
+    this.buildSky(cfg);
+  }
+
+  /** A flat plane with some text on it (2 m tall). */
+  private textPlane(text: string, color: string): THREE.Mesh {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 64;
+    const ctx = c.getContext('2d')!;
+    ctx.font = 'bold 44px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    ctx.fillText(text, 128, 34);
+    const tex = new THREE.CanvasTexture(c);
+    return new THREE.Mesh(new THREE.PlaneGeometry(8, 2), new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
   }
 
   private makeGlowSprite(color: number, size: number) {

@@ -1,6 +1,7 @@
 import { BIKE_RADIUS, generateDisk, generateLevel, generatePlanet, levelSdf, spawnPosition } from './level';
 import { setDisk, setPlanet } from './physics';
 import { localBasis } from './physics';
+import { generateTower } from './tower';
 import { rngRange } from './rng';
 import { defaultConfig } from './tuning';
 import { DT, STARTING_WEAPONS, WEAPON_IDS, neutralInput, omegaOf, type GameMode, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
@@ -62,6 +63,8 @@ export function createState(opts: WorldOptions = {}): SimState {
   setDisk(config.world === 'disk' ? config.g : 0, omegaOf(config));
   state.level = config.world === 'planet'
     ? generatePlanet(config, state, opts.obstacles ?? true, () => allocId(state))
+    : config.tower > 0
+    ? generateTower(config, state, opts.obstacles ?? true, () => allocId(state))
     : config.world === 'disk'
     ? generateDisk(config, state, opts.obstacles ?? true, () => allocId(state))
     : generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true, opts.vehicles ?? -1);

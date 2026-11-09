@@ -14,6 +14,7 @@ export interface SimConfig {
   spin: boolean; // false: the world doesn't rotate at all (Earth)
   world: 'ring' | 'planet' | 'disk'; // 'planet': on the OUTSIDE of a spinning ball of radius R, gravity g toward its centre; 'disk': on top of a spinning disk of radius R, gravity g straight down the axis
   planetSpin: number; // planet: how much of g the spin cancels at the equator; disk: the spin's outward push at the rim, as a multiple of g. Sets the spin rate
+  tower: number; // ring world: >0 = a closed tower through the axis instead of a ring: its half-width round the spin (m); halfWidth is its half-depth along the axis
   diskBowl: boolean; // disk: the surface curves up (a paraboloid, like water in a spinning bucket) so gravity is always straight into it
   outerShell: number; // planet: >0 = a hollow shell of this radius round the ball, walkable on its inside near its equator
   launchPads: boolean; // nested spheres: launch pads between ball and shell
@@ -464,6 +465,7 @@ export interface SpawnPoint {
   angle: number;
   z: number;
   outer?: boolean; // planet with an outer shell: on the inside of the shell rather than on the ball
+  floor?: number; // spin tower: the radius of the floor it's on (default: the end wall, R)
 }
 
 /** A launch pad: step on it and it throws you along `up` at `speed` (relative to the ground). */
@@ -478,7 +480,12 @@ export interface Pad {
  * (level.ts: levelSdf), the force field (physics.ts) and the renderer
  * (client/scene.ts) switch on it. Only the spinning 'ring' exists so far.
  */
-export type LevelShape = 'ring' | 'planet' | 'disk';
+export type LevelShape = 'ring' | 'planet' | 'disk' | 'tower';
+
+/** A spin tower's floor: a curved slab whose walking surface is at radius r (on both arms), with openings (in the arm's own (across, along-axis) coordinates). */
+export interface TowerFloor { r: number; thickness: number; holes: { y: number; z: number; hy: number; hz: number }[] }
+/** A spin tower: a hollow box through the axis, two arms long, `halfWidth` across (round the spin). */
+export interface Tower { halfWidth: number; floors: TowerFloor[] }
 
 /** A rectangular opening in a floor or deck, centred at (angle, z): halfArc metres along the ring (at radius R), halfZ across. */
 export interface Hole {
@@ -516,6 +523,8 @@ export interface Level {
   decks?: Deck[];
   /** Launch pads. */
   pads?: Pad[];
+  /** Spin tower geometry. */
+  tower?: Tower;
   boxes: Box[];
   stairTops: Vec3[]; // a floor point on each staircase's lookout (add stand height to place a player)
   spawns: SpawnPoint[];

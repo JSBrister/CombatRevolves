@@ -7,6 +7,7 @@ import { advanceFree, localBasis, planetPullAt, setSpinAlpha, viewVectors } from
 import { diskSurface, levelSdf, setSdfFrame } from './level';
 import { convertBody, frameOf, frameOmega } from './twin';
 import { floorRadius, terrainAt } from './terrain';
+import { towerFloorBelow } from './tower';
 import { boltStats, launchVelocity, muzzlePoint } from './step';
 import { hash01 } from './rng';
 import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_SPRINT, DT, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_IDS, spinAt, type BoltKind, type InputCmd, type Player, type SimState } from './types';
@@ -81,6 +82,7 @@ function heightAboveFloor(state: SimState, p: Player): number {
     const r = Math.hypot(p.pos[0], p.pos[1], p.pos[2]), c = state.config;
     return Math.min(r - c.R, c.outerShell > 0 ? c.outerShell - r : Infinity) - standHeight(p.size);
   }
+  if (state.level.tower) return towerFloorBelow(state.level.tower, state.config, p.pos) - Math.hypot(p.pos[0], p.pos[1]) - standHeight(p.size);
   const ang = Math.atan2(p.pos[1], p.pos[0]);
   return floorRadius(state.level, state.config, ang, p.pos[2]) - Math.hypot(p.pos[0], p.pos[1]) - standHeight(p.size);
 }

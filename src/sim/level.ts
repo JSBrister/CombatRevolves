@@ -5,6 +5,7 @@
 import { rngNext, rngRange } from './rng';
 import type { Box, Deck, Hole, ItemKind, Level, Pad, SimConfig, SpawnPoint } from './types';
 import { type Vec3, rhoOf } from './vec';
+import { towerSdf } from './tower';
 import { type ClearZone, edgeHeight, floorRadius, makeHills, makeMountains, terrainAt } from './terrain';
 
 export interface SdfHit {
@@ -278,6 +279,12 @@ export function levelSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
       return planetSdf(level, cfg, p);
     case 'disk':
       return diskSdf(level, cfg, p);
+    case 'tower': {
+      const out: SdfHit = { d: Infinity, n: [0, 0, 1] };
+      towerSdf(level.tower!, cfg, p, out);
+      for (const b of level.boxes) boxSdf(p, b, out);
+      return out;
+    }
   }
 }
 
@@ -1016,6 +1023,6 @@ export function spawnPosition(cfg: SimConfig, s: SpawnPoint, heightAboveFloor: n
     const r = cfg.R + heightAboveFloor;
     return [d[0] * r, d[1] * r, d[2] * r];
   }
-  const r = (level ? floorRadius(level, cfg, s.angle, s.z) : cfg.R) - heightAboveFloor;
+  const r = (s.floor ?? (level ? floorRadius(level, cfg, s.angle, s.z) : cfg.R)) - heightAboveFloor;
   return [r * Math.cos(s.angle), r * Math.sin(s.angle), s.z];
 }

@@ -33,7 +33,11 @@ export class Hud {
         (cfg.diskBowl ? `curved: gravity always straight into the ground (${Math.sqrt(1 + cfg.planetSpin ** 2).toFixed(2)} g at the rim)<br/>`
           : `too steep to stand beyond ${Math.min(cfg.R, ((4 / 3) * cfg.R) / cfg.planetSpin).toFixed(0)} m from the middle<br/>`)
       : '';
-    $('ringinfo').innerHTML = planet ? planet + change : disk ? disk + change : twin +
+    const tower = cfg.tower > 0
+      ? `Spin tower · ${(cfg.g / 9.81).toFixed(2)} Earth g at the ends, weightless at the axis · period ${((2 * Math.PI) / Math.max(1e-6, Math.abs(w))).toFixed(1)} s<br/>` +
+        (me ? `the spin pulls ${((w * w * Math.hypot(me.pos[0], me.pos[1])) / 9.81).toFixed(2)} Earth g here<br/>` : '')
+      : '';
+    $('ringinfo').innerHTML = planet ? planet + change : tower ? tower + change : disk ? disk + change : twin +
       (cfg.spin
         ? `R ${cfg.R.toFixed(0)} m · g ${cfg.g.toFixed(2)}<br/>` +
           `ω ${w.toFixed(4)} rad/s · period ${Math.abs(w) > 1e-6 ? ((2 * Math.PI) / Math.abs(w)).toFixed(1) + ' s' : '∞'}<br/>` +
