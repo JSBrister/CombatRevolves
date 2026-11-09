@@ -473,6 +473,7 @@ export interface Pad {
   pos: Vec3; // centre, on the ground
   up: Vec3;
   speed: number;
+  exact?: boolean; // throw at exactly up * speed (forgetting how you were moving), not just set the speed along up
 }
 
 /**
@@ -488,7 +489,11 @@ export type LevelShape = 'ring' | 'planet' | 'disk' | 'tower';
  */
 export interface TowerFloor { r: number; thickness: number; w: number; d: number; holes: { y: number; z: number; hy: number; hz: number }[] }
 /** A spin tower: two arms of floors stepping in toward the axis, the bottom (biggest) one first. */
-export interface Tower { floors: TowerFloor[] }
+export interface Tower {
+  floors: TowerFloor[];
+  /** Straight walls across the middle (planes at y = +-w, spinward and antispinward, |x| <= x, |z| <= d): near the axis the spin pulls you into them, so you walk on them. */
+  walls?: { w: number; x: number; d: number };
+}
 
 /** A rectangular opening in a floor or deck, centred at (angle, z): halfArc metres along the ring (at radius R), halfZ across. */
 export interface Hole {

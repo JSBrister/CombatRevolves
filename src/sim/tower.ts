@@ -24,6 +24,7 @@ export interface TowerHit { d: number; n: Vec3 }
 export const TOWER_RAMP_SLOPE = 0.6; // rise per metre (31 degrees)
 const RAMP_W = 5; // ramp width
 const STEP = RAMP_W + 2; // how much bigger each floor is than the one above, on the ramps' sides
+const LAND = 4; // the landing at a ramp's top, beside the floor it arrives at
 
 /**
  * How a storey is climbed: two ramps, either round the spin ('y': beside the
@@ -52,7 +53,7 @@ export function towerLayout(cfg: SimConfig): { floors: TowerFloor[]; storeys: To
     storeys.push({ along: radii[k + 1] < 0.7 * R ? 'y' : 'z', rise, len, halfAngle: len / (radii[k] + radii[k + 1]), phi: 0 });
   }
   // a floor must reach past both ends of round-the-spin ramps that start on it or arrive beside it
-  const reach = (k: number, s: TowerStorey | undefined) => (s && s.along === 'y' ? radii[k] * Math.sin(s.halfAngle) + 1.5 : 0);
+  const reach = (k: number, s: TowerStorey | undefined) => (s && s.along === 'y' ? radii[k] * Math.sin(s.halfAngle) + LAND + 1.5 : 0);
   let w = Math.max(cfg.tower, reach(n, storeys[n - 1])), d = Math.max(12, 0.12 * R);
   const floors: TowerFloor[] = [];
   floors[n] = { r: radii[n], thickness: 0.8, w, d, holes: [] };
@@ -63,7 +64,7 @@ export function towerLayout(cfg: SimConfig): { floors: TowerFloor[]; storeys: To
       // straight up a radial line that passes just outside the upper floor's edge
       s.phi = Math.asin(Math.min(0.9, (w + RAMP_W / 2 + 0.1) / radii[k + 1]));
       w = radii[k] * Math.sin(s.phi) + RAMP_W / 2 + 2;
-      d = Math.max(d, s.len / 2 + 2);
+      d = Math.max(d, s.len / 2 + LAND + 2);
     }
     floors[k] = { r: radii[k], thickness: k === 0 ? 3 : 0.8, w, d, holes: [] };
   }
@@ -99,6 +100,21 @@ export function towerSdf(T: Tower, p: Vec3, out: TowerHit) {
     }
     if (fd < d) { d = fd; n = fn; }
   }
+  if (T.walls) {
+    // a slab beyond |y| = w, |x| <= x (both arms: folded, x >= 0), |z| <= d: a box
+    const W = T.walls, th = 0.5;
+    const qx = x - W.x, qy = Math.abs(Math.abs(y) - (W.w + th / 2)) - th / 2, qz = Math.abs(z) - W.d;
+    let wd: number, wn: Vec3;
+    if (qx > 0 || qy > 0 || qz > 0) {
+      const ux = Math.max(qx, 0), uy = Math.max(qy, 0), uz = Math.max(qz, 0);
+      wd = Math.hypot(ux, uy, uz);
+      wn = [ux / wd, (uy / wd) * Math.sign(Math.abs(y) - (W.w + th / 2)) * (Math.sign(y) || 1), (uz / wd) * (Math.sign(z) || 1)];
+    } else {
+      wd = Math.max(qx, qy, qz);
+      wn = wd === qx ? [1, 0, 0] : wd === qy ? [0, (Math.sign(Math.abs(y) - (W.w + th / 2)) || 1) * (Math.sign(y) || 1), 0] : [0, 0, Math.sign(z) || 1];
+    }
+    if (wd < d) { d = wd; n = wn; }
+  }
   if (n) { out.d = d; out.n = flip ? [-n[0], -n[1], n[2]] : n; }
 }
 
@@ -127,7 +143,9 @@ export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacle
   const R = cfg.R;
   const { floors, storeys } = towerLayout(cfg);
   const N = floors.length - 1;
-  const T: Tower = { floors };
+  // straight walls across the middle, from the edges of one hub floor to the other's
+  const hubF = floors[N];
+  const T: Tower = { floors, walls: { w: hubF.w, x: Math.sqrt(hubF.r * hubF.r - hubF.w * hubF.w), d: hubF.d } };
   const boxes: Box[] = [];
   const pads: Pad[] = [];
   const pickupSpots: { pos: Vec3; item: ItemKind }[] = [];
@@ -154,7 +172,7 @@ export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacle
   /**
    * A ramp from floor k up to floor k + 1, along a path in (angle, z) while
    * climbing evenly: in a few flat pieces, each tilted to the "up" (radial)
-   * where it is, so it never leans across. A low stop across its top end.
+   * where it is, so it never leans across. A landing at the top, beside the floor above, with a rail across its end.
    */
   const ramp = (k: number, a0: number, z0: number, a1: number, z1: number) => {
     const r0 = floors[k].r, r1 = floors[k + 1].r, segs = a0 === a1 ? 1 : 6;
@@ -183,11 +201,15 @@ export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacle
         boxes.push({ id: nextId(), type: 'box', kind: 'ramp', angle: Math.atan2(cc[1], cc[0]), tilt: 0, center: cc, half: [len / 2 + (segs > 1 ? 0.12 : 0), hy, RAMP_W / 2], axes: [rot(X, arm), rot(Nn, arm), rot(Z, arm)] });
       }
     }
-    // the stop across its top end (you step off sideways onto the floor)
-    const ae = a1 + Math.sign(a1 - a0) * (0.3 / r1), ze = z1 + Math.sign(z1 - z0) * 0.3;
+    // the landing at the top (level with the floor beside it), and a rail across its far end
+    const along = a0 === a1; // (along the axis)
+    const da = Math.sign(a1 - a0) / r1, dzs = Math.sign(z1 - z0);
+    const at = (s: number, rc: number): Vec3 => { const a = along ? a1 : a1 + da * s, z = along ? z1 + dzs * s : z1; return [rc * Math.cos(a), rc * Math.sin(a), z]; };
     for (const arm of [0, 1] as const) {
-      const rc = r1 - 0.55 + 0.1, c = rot([rc * Math.cos(ae), rc * Math.sin(ae), ze], arm);
-      boxes.push({ id: nextId(), type: 'box', kind: 'wall', angle: Math.atan2(c[1], c[0]), tilt: 0, center: c, half: a0 === a1 ? [RAMP_W / 2, 0.65, 0.25] : [0.25, 0.65, RAMP_W / 2] });
+      const lc = rot(at(LAND / 2, r1 + 0.35), arm);
+      boxes.push({ id: nextId(), type: 'box', kind: 'ramp', angle: Math.atan2(lc[1], lc[0]), tilt: 0, center: lc, half: along ? [RAMP_W / 2, 0.35, LAND / 2] : [LAND / 2, 0.35, RAMP_W / 2] });
+      const rc = rot(at(LAND - 0.25, r1 - 0.5), arm);
+      boxes.push({ id: nextId(), type: 'box', kind: 'wall', angle: Math.atan2(rc[1], rc[0]), tilt: 0, center: rc, half: along ? [RAMP_W / 2, 0.55, 0.25] : [0.25, 0.55, RAMP_W / 2] });
     }
     const ys = [r0 * Math.sin(a0), r0 * Math.sin(a1), r1 * Math.sin(a0), r1 * Math.sin(a1)];
     const yLo = Math.min(...ys), yHi = Math.max(...ys);
@@ -204,10 +226,10 @@ export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacle
         const z = sg * (up.d + RAMP_W / 2 + 0.05), ha = st.halfAngle;
         ramp(k, -sg * ha, z, sg * ha, z);
         const yTop = sg * up.r * Math.sin(ha), run = 0.45 * L;
-        arrivals[k + 1].push({ edge: sg > 0 ? '+z' : '-z', a: Math.min(yTop, yTop - sg * run), b: Math.max(yTop, yTop - sg * run) });
+        arrivals[k + 1].push({ edge: sg > 0 ? '+z' : '-z', a: Math.min(yTop + sg * LAND, yTop - sg * run), b: Math.max(yTop + sg * LAND, yTop - sg * run) });
       } else {
         ramp(k, sg * st.phi, -sg * L / 2, sg * st.phi, sg * L / 2);
-        arrivals[k + 1].push({ edge: sg > 0 ? '+y' : '-y', a: sg > 0 ? L / 2 - 0.45 * L : -L / 2, b: sg > 0 ? L / 2 : -L / 2 + 0.45 * L });
+        arrivals[k + 1].push({ edge: sg > 0 ? '+y' : '-y', a: sg > 0 ? L / 2 - 0.45 * L : -L / 2 - LAND, b: sg > 0 ? L / 2 + LAND : -L / 2 + 0.45 * L });
       }
     }
   }
@@ -253,7 +275,8 @@ export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacle
         } else stand(k, s, sg * (f.d - 0.25), segL / 2 - 0.05, 0.55, 0.25, 'wall', false);
       }
     };
-    run('+y', f.d); run('-y', f.d); run('+z', f.w); run('-z', f.w);
+    if (k < N) { run('+y', f.d); run('-y', f.d); } // (the hub floor's sides open onto the middle walls)
+    run('+z', f.w); run('-z', f.w);
   }
 
   // The hub floor: launch pads that throw you across the axis onto the other arm's hub floor.
@@ -266,7 +289,7 @@ export function generateTower(cfg: SimConfig, rng: { rng: number }, withObstacle
       const pos = towerPoint(hub.r, 0, z, arm);
       const up: Vec3 = rot([-1, 0, 0], arm), spin: Vec3 = rot([0, 1, 0], arm);
       const ct = Math.cos(padTilt), st = Math.sin(padTilt);
-      pads.push({ pos, up: [up[0] * ct - spin[0] * st, up[1] * ct - spin[1] * st, 0], speed: padSpeed });
+      pads.push({ pos, up: [up[0] * ct - spin[0] * st, up[1] * ct - spin[1] * st, 0], speed: padSpeed, exact: true });
     }
     used[N].push({ y: 0, z, hy: 1.5, hz: 1.5 });
   }

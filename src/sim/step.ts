@@ -202,7 +202,7 @@ function movePlayer(state: SimState, p: Player, omega: number) {
   if (p.grounded && state.level.pads) {
     for (const pad of state.level.pads) {
       if (dist(p.pos, pad.pos) > 1.2 + standHeight(p.size)) continue;
-      p.vel = addScaled(sub(p.vel, scale(pad.up, dot(p.vel, pad.up))), pad.up, pad.speed);
+      p.vel = pad.exact ? scale(pad.up, pad.speed) : addScaled(sub(p.vel, scale(pad.up, dot(p.vel, pad.up))), pad.up, pad.speed);
       p.grounded = false;
       p.groundNormal = null;
       p.lastJumpTick = tick;

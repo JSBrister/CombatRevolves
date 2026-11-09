@@ -2414,6 +2414,36 @@ describe('46. spin tower', () => {
     expect(Math.abs(rhoP(p) - (top - standHeight(1)))).toBeLessThan(0.2); // on its hub floor
     expect(p.health + p.shield).toBe(p.maxHealth + p.maxShield);
   });
+  it('the pads throw you to the far hub floor however you run onto them', () => {
+    for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2, 0.8]) {
+      const { s, id, p } = solo();
+      const hub = s.level.tower!.floors.at(-1)!;
+      const pz = hub.d / 2;
+      p.pos = towerPoint(hub.r - standHeight(1), -Math.cos(yaw) * 5, pz - Math.sin(yaw) * 5, 0);
+      p.vel = [0, 0, 0];
+      run(s, 60, () => [cmdFor(s, id)]);
+      let left = false;
+      for (let i = 0; i < 120 * 10; i++) { step(s, [cmdFor(s, id, { moveY: left ? 0 : 1, yaw })], s.tick); if (!p.grounded) left = true; if (left && p.grounded) break; }
+      expect(p.pos[0]).toBeLessThan(0);
+      expect(Math.abs(rhoP(p) - (hub.r - standHeight(1)))).toBeLessThan(0.2);
+      expect(p.health + p.shield).toBe(p.maxHealth + p.maxShield);
+    }
+  });
+  it('walk spinward up the middle wall, over the axis and down onto the other arm', () => {
+    const { s, id, p } = solo();
+    const hub = s.level.tower!.floors.at(-1)!;
+    p.pos = towerPoint(hub.r - standHeight(1), 6, 0, 0);
+    p.vel = [0, 0, 0];
+    run(s, 60, () => [cmdFor(s, id)]);
+    let crossed = false, airborne = 0;
+    for (let i = 0; i < 120 * 6; i++) {
+      step(s, [cmdFor(s, id, { moveY: 1, yaw: 0 })], s.tick);
+      if (!p.grounded) airborne++;
+      if (p.pos[0] < -10 && Math.abs(rhoP(p) - (hub.r - standHeight(1))) < 0.3) crossed = true;
+    }
+    expect(crossed).toBe(true);
+    expect(airborne).toBeLessThan(20); // on your feet all the way
+  });
   it('off the edge of the bottom floor is space: you go, and you die', () => {
     const { s, id, p } = solo();
     const f0 = s.level.tower!.floors[0];

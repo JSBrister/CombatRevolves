@@ -566,6 +566,22 @@ export class RingScene {
         }
       }
     }
+    // the straight walls across the middle (spinward and antispinward)
+    if (T.walls) {
+      const W = T.walls;
+      const wt = this.textures.wall.clone();
+      wt.needsUpdate = true;
+      wt.wrapS = wt.wrapT = THREE.RepeatWrapping;
+      wt.repeat.set((2 * W.x) / 4, (2 * W.d) / 4);
+      const wm = new THREE.MeshStandardMaterial({ map: wt, color: 0xb8c4d4, side: THREE.DoubleSide, roughness: 0.75, metalness: 0.25 });
+      for (const sy of [-1, 1]) {
+        const g = new THREE.BoxGeometry(2 * W.x, 0.5, 2 * W.d);
+        const m = new THREE.Mesh(g, wm);
+        m.position.set(0, sy * (W.w + 0.25), 0);
+        m.receiveShadow = true;
+        this.level.add(m);
+      }
+    }
     // the axis: a beacon at the middle
     const lamp = this.makeGlowSprite(0x7fd8ff, 3);
     this.level.add(lamp);
