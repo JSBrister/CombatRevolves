@@ -14,6 +14,8 @@ export interface SimConfig {
   spin: boolean; // false: the world doesn't rotate at all (Earth)
   world: 'ring' | 'planet' | 'disk'; // 'planet': on the OUTSIDE of a spinning ball of radius R, gravity g toward its centre; 'disk': on top of a spinning disk of radius R, gravity g straight down the axis
   planetSpin: number; // planet: how much of g the spin cancels at the equator; disk: the spin's outward push at the rim, as a multiple of g. Sets the spin rate
+  teams: number; // 0 = everyone for themselves; 2-4 = teams (teammates can't hurt each other)
+  teamBases: boolean; // with teams: each team has a home (spawns, a flag stand) and the pickups are the same on every side
   tower: number; // ring world: >0 = a spin tower through the axis instead of a ring: the top (hub) floor's least half-width round the spin (m); the floors below are bigger
   diskBowl: boolean; // disk: the surface curves up (a paraboloid, like water in a spinning bucket) so gravity is always straight into it
   outerShell: number; // planet: >0 = a hollow shell of this radius round the ball, walkable on its inside near its equator
@@ -510,6 +512,9 @@ export interface Deck {
 }
 
 /** A Gaussian hill on the floor. */
+/** A team's home: where its players (re)spawn, and its flag stand (on the ground, for capture the flag). */
+export interface TeamBase { team: number; pos: Vec3; spawns: SpawnPoint[] }
+
 /** A Gaussian bump: peak height and spread (sigma, metres along the surface). */
 export interface Bump { c: [number, number, number]; height: number; radius: number }
 
@@ -534,6 +539,8 @@ export interface Level {
   decks?: Deck[];
   /** Launch pads. */
   pads?: Pad[];
+  /** Team bases (with cfg.teams and cfg.teamBases): where each team spawns, and its flag stand. */
+  bases?: TeamBase[];
   /** Spin tower geometry. */
   tower?: Tower;
   /** Hills and mountains on a planet (c: unit vector to the peak) or a disk (c: the peak's (x, y) on the disk): Gaussian bumps on the surface. */

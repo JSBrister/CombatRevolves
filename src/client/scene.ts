@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { disposeTree } from './dispose';
-import { DISK_THICKNESS, diskBumpsAt, diskSurface, floorRadius, hillsAt, planetBumpsAt, towerPoint, type Hole, type Level, type SimConfig, type Vec3 } from '../sim';
+import { TEAM_COLORS, localBasis, DISK_THICKNESS, diskBumpsAt, diskSurface, floorRadius, hillsAt, planetBumpsAt, towerPoint, type Hole, type Level, type SimConfig, type Vec3 } from '../sim';
 import { ballTexture, crateTexture, deckTexture, glowTexture, grassTexture, planetTexture, rockTexture, sandTexture, snowTexture, wallTexture } from './textures';
 
 export const LAYER_ROT_TRAILS = 1;
@@ -228,7 +228,7 @@ export class RingScene {
       const ribs = new THREE.InstancedMesh(new THREE.BoxGeometry(1.2, hull * 1.2, len), new THREE.MeshStandardMaterial({ color: k ? 0xc86a2a : 0x2a8ac8, roughness: 0.6 }), 24);
       for (let i = 0; i < 24; i++) { basisMatrix(m, (i / 24) * Math.PI * 2, R + hull, zc); ribs.setMatrixAt(i, m); }
       grp.add(ribs);
-      this.buildBoxes(cfg, { ...level, boxes: level.boxes.filter((b) => (b.ring ?? 0) === k), spawns: level.spawns.filter((sp) => (sp.z >= 0 ? 1 : 0) === k) });
+      this.buildBoxes(cfg, { ...level, boxes: level.boxes.filter((b) => (b.ring ?? 0) === k), spawns: level.spawns.filter((sp) => (sp.z >= 0 ? 1 : 0) === k), bases: level.bases?.filter((b) => (b.pos[2] >= 0 ? 1 : 0) === k) });
       saved.add(grp);
       this.twinGroups.push(grp);
     }
@@ -283,8 +283,31 @@ export class RingScene {
       this.level.add(mesh);
     }
 
+    // Team bases: a ring in the team's colour, and a flag on a pole (the flag stand, for capture the flag)
+    for (const b of level.bases ?? []) {
+      const col = TEAM_COLORS[b.team] ?? 0xffffff;
+      const up = new THREE.Vector3(...localBasis(b.pos).up);
+      const holder = new THREE.Object3D();
+      holder.position.set(b.pos[0], b.pos[1], b.pos[2]);
+      holder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(3.2, 4, 40), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.05;
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(3.2, 40), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.18, side: THREE.DoubleSide }));
+      disc.rotation.x = -Math.PI / 2;
+      disc.position.y = 0.04;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 4, 8), new THREE.MeshStandardMaterial({ color: 0xd8dde4, metalness: 0.7, roughness: 0.3 }));
+      pole.position.y = 2;
+      const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.9), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.35, side: THREE.DoubleSide }));
+      flag.position.set(0.72, 3.5, 0);
+      const glow = this.makeGlowSprite(col, 3);
+      glow.position.y = 3.5;
+      holder.add(ring, disc, pole, flag, glow);
+      this.level.add(holder);
+    }
+
     // Spawn pads.
-    for (const s of level.shape !== 'ring' ? [] : level.spawns) {
+    for (const s of level.shape !== 'ring' || level.bases ? [] : level.spawns) {
       const pad = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), new THREE.MeshBasicMaterial({ color: 0x3fa7ff, transparent: true, opacity: 0.35 }));
       pad.rotateX(-Math.PI / 2);
       const holder = new THREE.Object3D();

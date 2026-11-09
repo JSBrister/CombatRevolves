@@ -103,3 +103,15 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 .buttons.small { margin-top: -18px; }
 .buttons.small button { font-size: 12px; padding: 6px 14px; letter-spacing: 1px; opacity: 0.8; }
 #gfx-lost { background: rgba(2, 3, 10, 0.9); z-index: 9; }
+
+/* who's playing: name and colour, match setup */
+.setup-bar { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; justify-content: center; font-size: 13px; color: #cfe9ff; margin: 0 0 24px; width: min(900px, 100%); }
+.setup-bar input[type=text], .setup-bar input[type=number], .setup-bar select { font: inherit; background: rgba(15, 30, 55, 0.9); color: #dff6ff; border: 1px solid var(--hud-dim); padding: 4px 6px; }
+.setup-bar input[type=number] { width: 52px; margin-right: 4px; }
+.setup-bar input[type=checkbox] { accent-color: #f2c94c; vertical-align: middle; }
+.setup-bar .swatches { display: inline-flex; gap: 6px; align-items: center; }
+.overlay .setup-bar button.swatch { width: 22px; height: 22px; padding: 0; border: 2px solid transparent; border-radius: 50%; }
+.overlay .setup-bar button.swatch.on { border-color: #f2c94c; box-shadow: 0 0 6px #f2c94c; }
+.setup-bar .small-note { width: 100%; font-size: 11px; opacity: 0.55; }
+#team-scores { position: absolute; top: 86px; left: 50%; transform: translateX(-50%); font: 600 15px ui-monospace, monospace; letter-spacing: 1px; }
+#team-scores span { margin: 0 10px; }

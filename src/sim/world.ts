@@ -2,6 +2,7 @@ import { BIKE_RADIUS, generateDisk, generateLevel, generatePlanet, levelSdf, spa
 import { setDisk, setPlanet } from './physics';
 import { localBasis } from './physics';
 import { generateTower } from './tower';
+import { applyTeamBases } from './teams';
 import { rngRange } from './rng';
 import { defaultConfig } from './tuning';
 import { DT, STARTING_WEAPONS, WEAPON_IDS, neutralInput, omegaOf, type GameMode, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
@@ -68,6 +69,7 @@ export function createState(opts: WorldOptions = {}): SimState {
     : config.world === 'disk'
     ? generateDisk(config, state, opts.obstacles ?? true, () => allocId(state))
     : generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true, opts.vehicles ?? -1);
+  applyTeamBases(config, state.level);
   for (const spot of state.level.vehicleSpots) addVehicle(state, spot.pos, spot.yaw);
   if (opts.pickups ?? opts.obstacles ?? true) {
     for (const spot of state.level.pickupSpots) addPickup(state, spot.item, spot.pos, -1, Math.round(config.pickupRespawn / DT), -1);

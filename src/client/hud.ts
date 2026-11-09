@@ -1,7 +1,12 @@
-import { DT, PLAYER_WEAPON_SLOTS, slotKey, WEAPON_IDS, WEAPON_NAMES, omegaOf, spinAt, type Player, type SimEvent, type SimState } from '../sim';
+import { DT, TEAM_COLORS, TEAM_NAMES, PLAYER_WEAPON_SLOTS, slotKey, WEAPON_IDS, WEAPON_NAMES, omegaOf, spinAt, type Player, type SimEvent, type SimState } from '../sim';
 import { ITEM_NAMES } from './models';
 
 const $ = (id: string) => document.getElementById(id)!;
+/** Names are typed by players: keep them as text. */
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+/** A player's name, in their colour (team colour in team games). */
+const tag = (p: Player | undefined) => (!p ? '?' : p.color >= 0 ? `<span style="color:${hex(p.color)}">${esc(p.name)}</span>` : esc(p.name));
 
 export class Hud {
   private feed: { text: string; until: number }[] = [];
@@ -60,8 +65,17 @@ export class Hud {
     sc.classList.toggle('hidden', !opts.showScores);
     if (opts.showScores) {
       const rows = state.players.filter((p) => p.kind !== 'dummy').sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
-      sc.textContent = 'NAME              KILLS  DEATHS\n' + rows.map((p) => `${(p.id === me.id ? '> ' : '  ') + p.name.padEnd(16)}${String(p.kills).padStart(5)}  ${String(p.deaths).padStart(6)}`).join('\n');
+      const line = (p: Player) => `${p.id === me.id ? '&gt; ' : '  '}<span style="color:${p.color >= 0 ? hex(p.color) : 'inherit'}">${esc(p.name.padEnd(16))}</span>${String(p.kills).padStart(5)}  ${String(p.deaths).padStart(6)}`;
+      if (cfg.teams >= 2) {
+        // by team, best team first
+        const teams = Array.from({ length: cfg.teams }, (_, t) => t).sort((a, b) => teamKills(state, b) - teamKills(state, a));
+        sc.innerHTML = teams.map((t) => `<span style="color:${hex(TEAM_COLORS[t])}">${TEAM_NAMES[t].toUpperCase().padEnd(18)}${String(teamKills(state, t)).padStart(5)}</span>\n` +
+          rows.filter((p) => p.team === t).map(line).join('\n')).join('\n\n');
+      } else sc.innerHTML = 'NAME              KILLS  DEATHS\n' + rows.map(line).join('\n');
     }
+    $('team-scores').innerHTML = cfg.teams >= 2
+      ? Array.from({ length: cfg.teams }, (_, t) => `<span style="color:${hex(TEAM_COLORS[t])}">${TEAM_NAMES[t].toUpperCase()} ${teamKills(state, t)}</span>`).join('')
+      : '';
     // hover-bike: health and a prompt when one is in reach
     const bike = state.vehicles.find((v) => v.id === me.vehicle);
     const near = !bike && me.alive && state.vehicles.some((v) => v.alive && v.driver < 0 && Math.hypot(v.pos[0] - me.pos[0], v.pos[1] - me.pos[1], v.pos[2] - me.pos[2]) < 2.6);
@@ -100,8 +114,8 @@ export class Hud {
     if (!me.alive) {
       const killer = state.players.find((p) => p.id === me.lastAttacker);
       dead.classList.remove('hidden');
-      const by = killer && killer.id !== me.id ? `Killed by ${killer.name}` : 'You played yourself';
-      dead.textContent = me.canRespawn ? `${by} — respawning in ${Math.max(0, (me.respawnTick - state.tick) * DT).toFixed(1)} s` : by;
+      const by = killer && killer.id !== me.id ? `Killed by ${tag(killer)}` : 'You played yourself';
+      dead.innerHTML = me.canRespawn ? `${by} — respawning in ${Math.max(0, (me.respawnTick - state.tick) * DT).toFixed(1)} s` : by;
     } else dead.classList.add('hidden');
     const now = performance.now();
     $('hitmark').style.opacity = now < this.hitUntil ? '1' : '0';
@@ -110,7 +124,7 @@ export class Hud {
   }
 
   onEvent(state: SimState, e: SimEvent, localId: number) {
-    const name = (id: number) => state.players.find((p) => p.id === id)?.name ?? '?';
+    const name = (id: number) => tag(state.players.find((p) => p.id === id));
     if (e.type === 'hit' && e.attacker === localId && e.target !== localId) this.hitUntil = performance.now() + 150;
     if (e.type === 'kill') {
       const how = e.cause === 'spaced' ? 'knocked off the ring' : e.cause === 'impact' ? 'splat' : e.cause;
@@ -127,4 +141,9 @@ export class Hud {
     this.feed.push({ text, until: performance.now() + 5000 });
     if (this.feed.length > 6) this.feed.shift();
   }
+}
+
+/** A team's score: its players' kills. */
+function teamKills(state: SimState, team: number) {
+  return state.players.reduce((n, p) => n + (p.team === team && p.kind !== 'dummy' ? p.kills : 0), 0);
 }

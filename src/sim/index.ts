@@ -16,3 +16,4 @@ export * from './terrain';
 export * from './vehicles';
 export * from './twin';
 export * from './tower';
+export * from './teams';

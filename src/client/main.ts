@@ -11,6 +11,7 @@ import { Sfx } from './audio';
 import { CUSTOM_DEFAULTS, buildCustomForm, customLevel, decodeCustom, encodeCustom, randomCustom, type CustomSettings } from './custom';
 import { BOLT_COLORS, EntityViews, type PosMap } from './entities';
 import { Hud } from './hud';
+import { basesFor, buildMatchPanel, buildPlayerPanel, setupFor } from './setup';
 import { InputSampler } from './input';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, RingScene } from './scene';
 import './style.css';
@@ -77,7 +78,7 @@ let rOverride: number | null = null;
 function startGame(def: LevelDef) {
   currentLevel = def;
   const ldef = rOverride !== null ? { ...def, config: { ...def.config, R: rOverride } } : def;
-  const started = startLevel(ldef, { ...cfg });
+  const started = startLevel(ldef, { ...cfg }, setupFor(def));
   state = started.state;
   Object.assign(cfg, state.config); // the GUI stays bound to the same object
   state.config = cfg;
@@ -101,7 +102,7 @@ function newWorld() {
 }
 
 function setBotCount(n: number) {
-  if (state.mode !== 'sandbox') return;
+  if (state.mode !== 'sandbox' || state.config.teams >= 2) return; // (team games: set the bots in the match setup)
   while (botIds.length < n) botIds.push(addPlayer(state, 'bot', `Bot ${String.fromCharCode(65 + botIds.length)}`));
   while (botIds.length > n) removePlayer(state, botIds.pop()!);
 }
@@ -535,6 +536,9 @@ document.addEventListener('pointerlockchange', () => {
 const fmtSpin = (R: number) => `${((2 * Math.PI) / Math.sqrt(cfg.g / R)).toFixed(1)} s spin`;
 function showLevels(mode: GameMode) {
   $('levels-title').textContent = mode === 'campaign' ? 'CAMPAIGN' : 'DEATHMATCH';
+  const ms = $('match-setup');
+  ms.classList.toggle('hidden', mode !== 'sandbox');
+  if (mode === 'sandbox') buildMatchPanel(ms, () => showLevels(mode));
   const list = $('level-list');
   list.innerHTML = '';
   delete list.dataset.last;
@@ -562,7 +566,7 @@ function showLevels(mode: GameMode) {
     }
     const card = document.createElement('div');
     card.className = 'level-card';
-    const who = mode === 'campaign' ? `${def.enemies?.length ?? 0} enemies` : `${def.bots ?? 0} bots`;
+    const who = mode === 'campaign' ? `${def.enemies?.length ?? 0} enemies` : `${def.bots ?? 0} bots${basesFor(def, sim.defaultConfig()) ? ' · team bases' : ''}`;
     card.innerHTML = `<h3>${def.name}</h3><div class="stats">${def.config.spin === false ? "flat ground · no spin" : `R ${def.config.R} m · ${fmtSpin(def.config.R ?? 100)}`} · ${who}</div><p>${def.blurb}</p>`;
     card.addEventListener('click', () => {
       rOverride = null;
@@ -578,6 +582,7 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('#loading button[da
   b.addEventListener('click', () => showLevels(b.dataset.mode as GameMode));
 }
 $('btn-back').addEventListener('click', () => show('title'));
+buildPlayerPanel($('player-setup'));
 $('btn-gfx').textContent = `Graphics: ${gfx === 'high' ? 'High' : 'Low'}`;
 $('btn-gfx').addEventListener('click', () => {
   try { localStorage.setItem('cr-graphics', gfx === 'high' ? 'low' : 'high'); } catch { /* can't remember it: still switch for now */ }

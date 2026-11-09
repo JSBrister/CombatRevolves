@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  TEAM_COLORS, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -2579,5 +2579,63 @@ describe('47. hills and mountains on more shapes', () => {
       expect(p.grounded).toBe(true);
       expect(Math.abs(Math.hypot(p.pos[0], p.pos[1]) - floorRadius(s.level, s.config, angleOf(p.pos), p.pos[2]) + standHeight(1))).toBeLessThan(0.3);
     }
+  });
+});
+
+describe('48. teams and team bases', () => {
+  const game = (id: string, teams: number, bots?: number[], bases = true) => startLevel(levelById(id)!, {}, { teams, myTeam: 1, bots, bases, name: 'Tester' });
+  it('teams: everyone in their team colour, bots shared out, no friendly fire, bots only shoot the other team', () => {
+    const { state, localId, botIds } = game('s-standard', 2, [3, 2]);
+    const me = state.players.find((p) => p.id === localId)!;
+    expect(me.name).toBe('Tester');
+    expect(me.team).toBe(1);
+    expect(botIds.length).toBe(5);
+    for (const p of state.players) expect(p.color).toBe(TEAM_COLORS[p.team]);
+    expect(state.players.filter((p) => p.team === 0).length).toBe(3);
+    expect(state.players.filter((p) => p.team === 1).length).toBe(3);
+    expect(state.config.friendlyFire).toBe(false);
+    const mate = state.players.find((p) => p.team === 1 && p.id !== localId)!;
+    damagePlayer(state, mate, localId, 50, 50, 'test');
+    expect(mate.health + mate.shield).toBe(mate.maxHealth + mate.maxShield);
+    let teamHits = 0, hits = 0;
+    for (let i = 0; i < 120 * 30; i++) {
+      step(state, [cmdFor(state, localId), ...botIds.map((b) => botInput(state, b))], state.tick);
+      for (const e of state.events) if (e.type === 'hit') { hits++; const a = state.players.find((p) => p.id === e.attacker), v = state.players.find((p) => p.id === e.target); if (a && v && a.team === v.team && a !== v) teamHits++; }
+    }
+    expect(teamHits).toBe(0);
+  }, 30000);
+  it('free-for-all keeps your own name and colour, and takes a bot count', () => {
+    const { state, localId, botIds } = startLevel(levelById('s-standard')!, {}, { name: '  Zed  ', color: 0x40c080, bots: [7] });
+    const me = state.players.find((p) => p.id === localId)!;
+    expect(me.name).toBe('Zed');
+    expect(me.color).toBe(0x40c080);
+    expect(botIds.length).toBe(7);
+    expect(new Set(state.players.map((p) => p.team)).size).toBe(8);
+  });
+  it('team bases: each team starts and respawns at home, and every side has the same pickups', () => {
+    for (const [id, n] of [['s-standard', 2], ['s-standard', 3], ['s-standard', 4], ['s-twin-bikes', 2], ['s-tower', 2], ['s-rough', 2], ['s-disk', 2]] as const) {
+      const { state, localId } = game(id, n, Array(n).fill(2));
+      const bases = state.level.bases!;
+      expect(bases.length, id).toBe(n);
+      const near = (p: Vec3, q: Vec3, m: number) => dist(p, q) < m;
+      for (const p of state.players) {
+        const b = bases.find((x) => x.team === p.team)!;
+        expect(near(p.pos, b.pos, 25), `${id} start`).toBe(true);
+      }
+      // the pickups: the same items on every side, each side's a turned (or mirrored) copy of team 0's
+      const items = state.pickups.filter((pk) => Math.hypot(pk.pos[0], pk.pos[1]) > 1).map((pk) => pk.item); // (prizes on the axis itself are shared)
+      for (const it of new Set(items)) expect(items.filter((x) => x === it).length % n, `${id} ${it}`).toBe(0);
+      // die and come back at home
+      const me = state.players.find((p) => p.id === localId)!;
+      damagePlayer(state, me, -1, 1e4, 1e4, 'test');
+      run(state, Math.round((state.config.respawnTime + 0.5) / DT), (s) => [cmdFor(s, localId)]);
+      expect(me.alive).toBe(true);
+      expect(near(me.pos, bases.find((x) => x.team === me.team)!.pos, 25), `${id} respawn`).toBe(true);
+    }
+  });
+  it('no bases where a level has no room for them (Earth), or bases turned off', () => {
+    expect(game('s-earth', 2).state.level.bases).toBeUndefined();
+    expect(game('s-standard', 2, undefined, false).state.level.bases).toBeUndefined();
+    expect(game('s-tower', 3).state.level.bases).toBeUndefined(); // (two arms: two teams)
   });
 });

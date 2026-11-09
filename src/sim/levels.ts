@@ -17,6 +17,7 @@ import { ENEMY_TYPES, defaultConfig } from './tuning';
 import { WEAPON_IDS, type GameMode, type ItemKind, type SimConfig, type SimState } from './types';
 import { type Vec3, addScaled } from './vec';
 import { addPlayer, createState, freeSpotNear, standHeight } from './world';
+import { TEAM_COLORS, TEAM_NAMES } from './teams';
 
 export interface EnemySpawn {
   type: keyof typeof ENEMY_TYPES;
@@ -307,7 +308,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'tower', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'tower', 'teams', 'teamBases', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
@@ -322,20 +323,40 @@ export interface StartedLevel {
   botIds: number[]; // every AI-driven player (sandbox bots and campaign enemies)
 }
 
+/** A level's bots shared out between the teams, so they come out even with you counted (on `myTeam`). */
+export function splitBots(bots: number, teams: number, myTeam: number): number[] {
+  const total = bots + 1, base = Math.floor(total / teams), extra = total % teams;
+  // (the odd ones out go to the teams after yours, so yours isn't the big one)
+  return Array.from({ length: teams }, (_, t) => base + ((t - myTeam - 1 + teams) % teams < extra ? 1 : 0) - (t === myTeam ? 1 : 0)).map((n) => Math.max(0, n));
+}
+
+/** Who's playing (deathmatch): your name and colour, and teams. */
+export interface GameSetup {
+  name?: string;
+  color?: number; // -1 = default
+  teams?: number; // 0 = free-for-all, 2-4 teams
+  myTeam?: number;
+  /** Bots: free-for-all, [count]; with teams, the count on each team. Default: the level's own number (split between the teams). */
+  bots?: number[];
+  bases?: boolean; // with teams, give each team a base (where the level allows); default true
+}
+
 /**
  * Build a level. `baseConfig` (e.g. the debug panel's live values) is applied
- * first, then the level's own overrides on top.
+ * first, then the level's own overrides on top, then `setup` (deathmatch only).
  */
-export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): StartedLevel {
+export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}, setup: GameSetup = {}): StartedLevel {
   const campaign = def.mode === 'campaign';
   // World settings always come from the defaults plus this level, never from
   // whatever level ran before (other debug tweaks do carry over).
   const defaults = defaultConfig();
   const world: Partial<SimConfig> = {};
   for (const k of WORLD_KEYS) (world as Record<string, unknown>)[k] = defaults[k];
+  const teams = campaign ? 0 : Math.max(0, Math.min(4, setup.teams ?? 0));
+  const teamPlay = teams >= 2;
   const state = createState({
     seed: def.seed,
-    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign },
+    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign && !teamPlay, teams: teamPlay ? teams : 0, teamBases: teamPlay && (setup.bases ?? true) },
     variedWalls: def.variedWalls ?? true,
     props: def.props ?? true,
     pickups: def.pickups ?? true,
@@ -409,8 +430,39 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}): 
       p.yaw = (e.angle ?? 0) > 0 ? Math.PI : 0;
       botIds.push(id);
     }
+  } else if (teamPlay) {
+    // teams: you, then each team's bots; everyone in their team's colour
+    const myTeam = Math.max(0, Math.min(teams - 1, setup.myTeam ?? 0));
+    me.team = myTeam;
+    me.color = TEAM_COLORS[myTeam];
+    const perTeam = setup.bots ?? splitBots(def.bots ?? 0, teams, myTeam);
+    for (let t = 0; t < teams; t++) {
+      for (let i = 0; i < Math.max(0, perTeam[t] ?? 0); i++) {
+        const id = addPlayer(state, 'bot', `${TEAM_NAMES[t]} bot ${i + 1}`);
+        const b = state.players.find((q) => q.id === id)!;
+        b.team = t;
+        b.color = TEAM_COLORS[t];
+        botIds.push(id);
+      }
+    }
+    // with bases, everyone starts at home
+    if (state.level.bases) {
+      const k = new Map<number, number>();
+      for (const p of state.players) {
+        const base = state.level.bases.find((b) => b.team === p.team);
+        if (!base) continue;
+        const i = k.get(p.team) ?? 0;
+        k.set(p.team, i + 1);
+        const sp = base.spawns[i % base.spawns.length];
+        p.pos = freeSpotNear(state, spawnPosition(cfg, sp, standHeight(p.size), state.level), p.size);
+        p.homeSpawn = 0;
+      }
+    }
   } else {
-    for (let i = 0; i < (def.bots ?? 0); i++) botIds.push(addPlayer(state, 'bot', `Bot ${String.fromCharCode(65 + i)}`));
+    const n = setup.bots?.[0] ?? def.bots ?? 0;
+    for (let i = 0; i < n; i++) botIds.push(addPlayer(state, 'bot', `Bot ${String.fromCharCode(65 + (i % 26))}${i >= 26 ? Math.floor(i / 26) : ''}`));
   }
+  if (setup.name?.trim()) me.name = setup.name.trim().slice(0, 16);
+  if (!teamPlay && setup.color !== undefined) me.color = setup.color;
   return { state, localId, botIds };
 }

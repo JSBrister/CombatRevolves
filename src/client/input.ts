@@ -25,6 +25,8 @@ export class InputSampler {
   constructor(private el: HTMLElement) {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'SELECT' || tgt.tagName === 'TEXTAREA')) return; // typing in a form
       this.keys.add(e.code);
       if (e.code === 'Space') this.latched |= BTN_JUMP;
       if (e.code === 'KeyG') this.latched |= BTN_GRENADE;
