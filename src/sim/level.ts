@@ -826,8 +826,8 @@ export function generateLevel(cfg: SimConfig, rng: { rng: number }, withObstacle
   const k = Math.min(1, R / 60);
   const arena = cfg.arena > 0;
   if (arena) {
-    // end walls closing off the arena
-    const wh = fullWallHeight(cfg);
+    // end walls closing off the arena (spinning: bulkheads right up to near the axis, sealing off the rest of the ring)
+    const wh = cfg.spin ? 0.95 * R : fullWallHeight(cfg);
     for (const sgn of [-1, 1]) addBox((sgn * (cfg.arena / 2 + 0.75)) / R, 0, 0.75, wh / 2, cfg.halfWidth + cfg.wallThickness, 'wall');
   }
   if (withObstacles) {

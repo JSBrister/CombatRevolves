@@ -10,7 +10,7 @@ import { floorRadius, planetBumpsAt, terrainAt } from './terrain';
 import { towerFloorBelow, towerWaypoint } from './tower';
 import { boltStats, launchVelocity, muzzlePoint } from './step';
 import { hash01 } from './rng';
-import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_SPRINT, DT, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_IDS, spinAt, type BoltKind, type InputCmd, type Player, type SimState } from './types';
+import { BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_SPRINT, DT, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_IDS, spinNow, type BoltKind, type InputCmd, type Player, type SimState } from './types';
 import { type Vec3, addScaled, clone, cross, dot, len, norm, scale, sub, dist } from './vec';
 import { ENEMY_TYPES } from './tuning';
 import { eyeOffset, standHeight } from './world';
@@ -31,7 +31,7 @@ export function aimAt(from: Vec3, to: Vec3): { yaw: number; pitch: number } {
  */
 export function solveAim(state: SimState, me: Player, target: Player, kind: BoltKind): { yaw: number; pitch: number } {
   const cfg = state.config;
-  const spin = spinAt(cfg, state.tick);
+  const spin = spinNow(state);
   const omega = frameOmega(spin.omega, frameOf(cfg, me.pos)); // (twin rings: our own ring's spin)
   setSpinAlpha(spin.alpha);
   const eye = addScaled(me.pos, localBasis(me.pos).up, eyeOffset(me));
@@ -192,7 +192,7 @@ function seenFrom(state: SimState, me: Player, p: Player): Player {
   const f = frameOf(cfg, me.pos), g = frameOf(cfg, p.pos);
   if (f === g) return p;
   const pos = clone(p.pos), vel = clone(p.vel);
-  convertBody(pos, vel, g, f, state.frameAngle, spinAt(cfg, state.tick).omega);
+  convertBody(pos, vel, g, f, state.frameAngle, spinNow(state).omega);
   return { ...p, pos, vel };
 }
 
@@ -231,7 +231,9 @@ export function botInput(state: SimState, playerId: number): InputCmd {
   if (hash01(playerId, epoch, 3) < 0.3) cmd.buttons |= BTN_SPRINT;
 
   // Capture the flag: somewhere to be (overrides wandering, and steers while fighting)
-  let goal = state.flags.length && !state.over ? ctfGoal(state, me) : null;
+  let goal = state.over ? null : state.flags.length ? ctfGoal(state, me)
+    : state.objective ? (dist(me.pos, state.objective.pos) > state.objective.radius * 0.6 ? state.objective.pos : null) // (spin control: into the engine room)
+    : null;
   if (goal && state.level.tower) goal = towerWaypoint(state.level, me.pos, goal, standHeight(me.size)); // (the way there, by ramps and pads)
   const towardGoal = () => {
     if (!goal) return;

@@ -8,7 +8,7 @@ import { ITEM_NAMES } from './models';
 export interface PlayerPrefs { name: string; color: number } // color -1 = default blue
 export interface ItemPrefs { banned: ItemKind[]; start: WeaponId[]; sticky: number; bounce: number; jetpack: boolean; grapple: boolean }
 export const ITEM_DEFAULTS: ItemPrefs = { banned: [], start: ['rifle', 'pistol'], sticky: 4, bounce: 4, jetpack: false, grapple: true };
-export interface MatchPrefs { teams: number; myTeam: number; bots: (number | null)[]; bases: boolean; ctf: boolean; scoreLimit: number; ctfLimit: number; timeLimit: number; items: ItemPrefs; showItems: boolean } // limits: 0 = none; timeLimit in minutes // bots: null = the level's own number
+export interface MatchPrefs { teams: number; myTeam: number; bots: (number | null)[]; bases: boolean; ctf: boolean; spin: boolean; spinLimit: number; scoreLimit: number; ctfLimit: number; timeLimit: number; items: ItemPrefs; showItems: boolean } // limits: 0 = none; timeLimit in minutes // bots: null = the level's own number
 
 export const PLAYER_COLORS = [-1, 0x2fb8c8, 0xe07a2a, 0xd84aa0, 0x8a5ad8, 0xe8e6dc, 0x40c080, 0xc8a040];
 
@@ -18,7 +18,7 @@ const load = <T,>(key: string, fallback: T): T => {
 const save = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* not remembered: fine for now */ } };
 
 export const player: PlayerPrefs = load('cr-player', { name: '', color: -1 });
-export const match: MatchPrefs = load('cr-match', { teams: 0, myTeam: 0, bots: [null, null, null, null], bases: true, ctf: false, scoreLimit: 15, ctfLimit: 3, timeLimit: 0, items: { ...ITEM_DEFAULTS }, showItems: false });
+export const match: MatchPrefs = load('cr-match', { teams: 0, myTeam: 0, bots: [null, null, null, null], bases: true, ctf: false, spin: false, spinLimit: 100, scoreLimit: 15, ctfLimit: 3, timeLimit: 0, items: { ...ITEM_DEFAULTS }, showItems: false });
 match.items = { ...ITEM_DEFAULTS, ...match.items }; // (older saved settings had none)
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
@@ -76,10 +76,11 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
     s.addEventListener('change', () => { set(s.value); save('cr-match', match); buildMatchPanel(el, onChange); onChange(); });
     return s;
   };
-  const modeVal = match.teams >= 2 && match.ctf ? `ctf${match.teams}` : String(match.teams);
-  row('Mode', select([['0', 'Free-for-all'], ['2', '2 teams'], ['3', '3 teams'], ['4', '4 teams'], ['ctf2', 'Capture the flag (2 teams)'], ['ctf3', 'Capture the flag (3 teams)'], ['ctf4', 'Capture the flag (4 teams)']], modeVal, (v) => {
+  const modeVal = match.teams >= 2 && match.spin ? 'spin2' : match.teams >= 2 && match.ctf ? `ctf${match.teams}` : String(match.teams);
+  row('Mode', select([['0', 'Free-for-all'], ['2', '2 teams'], ['3', '3 teams'], ['4', '4 teams'], ['ctf2', 'Capture the flag (2 teams)'], ['ctf3', 'Capture the flag (3 teams)'], ['ctf4', 'Capture the flag (4 teams)'], ['spin2', 'Spin control (2 teams)']], modeVal, (v) => {
     match.ctf = v.startsWith('ctf');
-    match.teams = +v.replace('ctf', '');
+    match.spin = v.startsWith('spin');
+    match.teams = +v.replace('ctf', '').replace('spin', '');
     match.myTeam = Math.min(match.myTeam, Math.max(0, match.teams - 1));
   }));
   const n = Math.max(1, match.teams);
@@ -107,10 +108,11 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
   }
   if (match.teams >= 2) el.appendChild(bots); else row('Bots', bots);
   // what ends the match: a score, a time, both or neither (scores are kept either way)
-  const ctfMode = match.teams >= 2 && match.ctf;
-  const lim = ctfMode ? [1, 2, 3, 5, 7, 10] : [5, 10, 15, 25, 50, 100];
-  row(ctfMode ? 'Captures to win' : 'Score to win', select([['0', 'No limit'], ...lim.map((n) => [String(n), String(n)] as [string, string])], String(ctfMode ? match.ctfLimit : match.scoreLimit), (v) => { if (ctfMode) match.ctfLimit = +v; else match.scoreLimit = +v; }))
-    .title = ctfMode ? 'First team to this many captures wins' : 'A kill scores 1, killing yourself loses 1; first to this wins (a team: its total)';
+  const ctfMode = match.teams >= 2 && match.ctf && !match.spin, spinMode = match.teams >= 2 && match.spin;
+  const lim = ctfMode ? [1, 2, 3, 5, 7, 10] : spinMode ? [30, 60, 100, 150, 200, 300] : [5, 10, 15, 25, 50, 100];
+  const cur = ctfMode ? match.ctfLimit : spinMode ? match.spinLimit : match.scoreLimit;
+  row(ctfMode ? 'Captures to win' : spinMode ? 'Points to win' : 'Score to win', select([['0', 'No limit'], ...lim.map((n) => [String(n), String(n)] as [string, string])], String(cur), (v) => { if (ctfMode) match.ctfLimit = +v; else if (spinMode) match.spinLimit = +v; else match.scoreLimit = +v; }))
+    .title = ctfMode ? 'First team to this many captures wins' : spinMode ? 'A point for every second your team has the engine room to itself' : 'A kill scores 1, killing yourself loses 1; first to this wins (a team: its total)';
   row('Time', select([['0', 'No limit'], ...[2, 5, 10, 15, 20, 30].map((n) => [String(n), `${n} min`] as [string, string])], String(match.timeLimit), (v) => { match.timeLimit = +v; }))
     .title = 'When time runs out the highest score wins';
   // pickups and loadout, folded away unless you want them
@@ -119,7 +121,7 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
   tog.className = 'mini';
   tog.textContent = `Items${changed ? ' (changed)' : ''} ${match.showItems ? '▾' : '▸'}`;
   tog.addEventListener('click', () => { match.showItems = !match.showItems; save('cr-match', match); buildMatchPanel(el, onChange); });
-  if (match.teams >= 2 && !match.ctf) {
+  if (match.teams >= 2 && !match.ctf && !match.spin) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = match.bases;
@@ -196,21 +198,21 @@ function itemsPanel(changed: () => void): HTMLElement {
 
 /** Does this level give each team a base, with the current setup? */
 export function basesFor(def: LevelDef, defaults: SimConfig): boolean {
-  return match.teams >= 2 && (match.bases || match.ctf) && maxTeamBases({ ...defaults, ...def.config } as SimConfig) >= match.teams;
+  return match.teams >= 2 && (match.bases || match.ctf || match.spin) && maxTeamBases({ ...defaults, ...def.config } as SimConfig) >= match.teams;
 }
 
 /** The setup to start `def` with. */
 export function setupFor(def: LevelDef): GameSetup {
   const s: GameSetup = { name: player.name, color: player.color };
   if (def.mode !== 'sandbox') return s;
-  s.scoreLimit = match.teams >= 2 && match.ctf ? match.ctfLimit : match.scoreLimit;
+  s.scoreLimit = match.teams >= 2 && match.spin ? match.spinLimit : match.teams >= 2 && match.ctf ? match.ctfLimit : match.scoreLimit;
   const it = match.items;
   Object.assign(s, { bannedItems: [...it.banned], startWeapons: [...it.start], startSticky: it.sticky, startBounce: it.bounce, startJetpack: it.jetpack, startGrapple: it.grapple });
   s.timeLimit = match.timeLimit * 60;
   const teams = match.teams >= 2 ? match.teams : 0;
   if (teams) {
     const auto = splitBots(def.bots ?? 0, teams, match.myTeam);
-    return { ...s, teams, myTeam: match.myTeam, bases: match.bases || match.ctf, ctf: match.ctf, bots: auto.map((a, t) => match.bots[t] ?? a) };
+    return { ...s, teams, myTeam: match.myTeam, bases: match.bases || match.ctf || match.spin, ctf: match.ctf && !match.spin, spinControl: match.spin && teams === 2, bots: auto.map((a, t) => match.bots[t] ?? a) };
   }
   return { ...s, ...(match.bots[0] !== null && match.bots[0] !== undefined ? { bots: [match.bots[0]] } : {}) };
 }

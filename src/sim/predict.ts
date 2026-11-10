@@ -5,7 +5,7 @@ import { setSdfFrame, sphereTrace } from './level';
 import { frameOf, frameOmega } from './twin';
 import { advanceFree, planetPullAt, setSpinAlpha } from './physics';
 import { GRENADE_RADIUS, boltStats, launchVelocity, moveSphereBody, muzzlePoint, type SphereBody } from './step';
-import { DT, spinAt, type BoltKind, type SimState, type ThrownKind } from './types';
+import { DT, spinNow, type BoltKind, type SimState, type ThrownKind } from './types';
 import { type Vec3, clone } from './vec';
 
 export interface Prediction {
@@ -24,7 +24,7 @@ export function predictTrajectory(
   const r = clone(from);
   const v = launchVelocity(state.config, p, kind, from, yaw, pitch);
   const radius = thrown ? GRENADE_RADIUS : boltStats(state.config, kind as BoltKind).radius;
-  const spin = spinAt(state.config, state.tick);
+  const spin = spinNow(state);
   const pf = frameOf(state.config, p.pos);
   setSdfFrame(pf, state.frameAngle);
   const omega = frameOmega(spin.omega, pf);

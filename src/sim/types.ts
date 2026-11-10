@@ -26,6 +26,9 @@ export interface SimConfig {
   teams: number; // 0 = everyone for themselves; 2-4 = teams (teammates can't hurt each other)
   teamBases: boolean;
   ctf: boolean; // capture the flag (with team bases)
+  spinControl: boolean; // spin control: hold the engine room to score; the spin turns to favour whichever team is behind (2 teams, with bases)
+  spinControlRate: number; // how fast the spin changes when it turns (fraction of full spin per second: 0.1 = 20 s from full one way to full the other)
+  spinControlLead: number; // the spin turns only once a team is ahead by this many points
   scoreLimit: number; // deathmatch: first to this score wins (a player's, or a team's total); capture the flag: captures. 0 = no limit
   timeLimit: number; // the match ends after this long (s), highest score wins (or a draw). 0 = no limit
   flagReturnTime: number; // a dropped flag goes home by itself after this long (s) // with teams: each team has a home (spawns, a flag stand) and the pickups are the same on every side
@@ -181,6 +184,14 @@ export function spinFactor(c: SimConfig, t: number): { f: number; df: number } {
 }
 
 /** Spin rate and angular acceleration (Euler force) for a tick, taken at its midpoint (2nd-order accurate). */
+/** The spin now: from the clock (spinAt), or in spin control from the state (it turns to favour whoever's behind). Taken at mid-tick. */
+export function spinNow(state: Pick<SimState, 'config' | 'tick' | 'spinF' | 'spinRate'>): { omega: number; alpha: number } {
+  const c = state.config;
+  if (!c.spinControl) return spinAt(c, state.tick);
+  const w0 = omegaOf(c);
+  return { omega: w0 * (state.spinF + state.spinRate * DT * 0.5), alpha: w0 * state.spinRate };
+}
+
 export function spinAt(c: SimConfig, tick: number): { omega: number; alpha: number } {
   const w0 = omegaOf(c);
   if (!w0) return { omega: 0, alpha: 0 };
@@ -641,6 +652,12 @@ export interface SimState {
   flags: Flag[];
   captures: number[];
   winner: number; // (once over) the winning team, or in a free-for-all the winning player's id; -1: a draw
+  /** Spin control: the spin as a fraction of full (-1 = full the other way), how fast it's changing (per s), and where it's heading. */
+  spinF: number;
+  spinRate: number;
+  spinTarget: number;
+  /** Spin control: the engine room (a circle on the floor), and which team holds it (-1 nobody; -2 contested). */
+  objective: { pos: Vec3; radius: number; holder: number } | null;
   over: boolean; // the match has ended (score or time limit): nothing scores any more
   /** Accumulated spin angle (= omega * t for constant omega). Inertial-frame things render at -frameAngle. */
   frameAngle: number;

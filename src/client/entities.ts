@@ -340,7 +340,38 @@ export class EntityViews {
     }
   }
 
+  /** Spin control's engine room: a circle on the floor and a column of light, in the colour of whoever holds it (flickering when it's contested). */
+  private objView: { group: THREE.Group; ring: THREE.Mesh; core: THREE.Mesh; glow: THREE.Sprite } | null = null;
+  private renderObjective(state: SimState) {
+    const ob = state.objective;
+    if (!ob) { if (this.objView) { disposeTree(this.objView.group, undefined, true); this.objView = null; } return; }
+    if (!this.objView) {
+      const group = new THREE.Group();
+      const ring = new THREE.Mesh(new THREE.RingGeometry(ob.radius - 0.5, ob.radius, 64), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.06;
+      const core = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.3, 7, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+      core.position.y = 3.5;
+      const glow = this.makeGlow(0xffffff, 6);
+      glow.position.y = 7.5;
+      group.add(ring, core, glow);
+      const p = this.toView(ob.pos);
+      group.position.set(p[0], p[1], p[2]);
+      group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...localBasis(p).up));
+      this.root.add(group);
+      this.objView = { group, ring, core, glow };
+    }
+    const t = performance.now() / 1000;
+    const col = ob.holder >= 0 ? TEAM_COLORS[ob.holder] : ob.holder === -2 ? (Math.sin(t * 12) > 0 ? 0xffffff : 0xff6a3d) : 0xd8dde4;
+    (this.objView.ring.material as THREE.MeshBasicMaterial).color.setHex(col);
+    (this.objView.core.material as THREE.MeshBasicMaterial).color.setHex(col);
+    this.objView.glow.material.color.setHex(col);
+    this.objView.core.rotation.y = t;
+    this.objView.core.scale.set(1, 1 + 0.08 * Math.sin(t * 3), 1);
+  }
+
   reset() {
+    if (this.objView) { disposeTree(this.objView.group, undefined, true); this.objView = null; }
     for (const v of this.flagViews.values()) { disposeTree(v.flag, undefined, true); disposeTree(v.beacon, undefined, true); }
     this.flagViews.clear();
     for (const v of this.players.values()) { if (v.rope) { disposeTree(v.rope.line, undefined, true); disposeTree(v.rope.hook, undefined, true); } if (v.carry) { disposeTree(v.carry.flag, undefined, true); disposeTree(v.carry.beacon, undefined, true); } disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); }
@@ -603,6 +634,7 @@ export class EntityViews {
       if (!seenP.has(id)) { disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); this.players.delete(id); }
     }
     this.renderFlags(state, lerpPos);
+    this.renderObjective(state);
 
     // projectiles
     const pulse = 0.85 + 0.15 * Math.sin(performance.now() * 0.03);

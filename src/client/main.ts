@@ -609,7 +609,10 @@ function showLevels(mode: GameMode) {
     const card = document.createElement('div');
     card.className = 'level-card';
     const bases = basesFor(def, sim.defaultConfig());
-    const who = mode === 'campaign' ? `${def.enemies?.length ?? 0} enemies` : `${def.bots ?? 0} bots${bases ? (match.ctf ? ' · capture the flag' : ' · team bases') : match.ctf && match.teams >= 2 ? ' · no bases here: team deathmatch' : ''}`;
+    const spinOk = bases && !def.config.twin && !(def.config.tower ?? 0);
+    const who = mode === 'campaign' ? `${def.enemies?.length ?? 0} enemies` : `${def.bots ?? 0} bots${
+      match.teams >= 2 && match.spin ? (spinOk ? ' · spin control' : ' · no engine room here: team deathmatch')
+      : bases ? (match.ctf ? ' · capture the flag' : ' · team bases') : match.ctf && match.teams >= 2 ? ' · no bases here: team deathmatch' : ''}`;
     card.innerHTML = `<h3>${def.name}</h3><div class="stats">${def.config.spin === false ? "flat ground · no spin" : `R ${def.config.R} m · ${fmtSpin(def.config.R ?? 100)}`} · ${who}</div><p>${def.blurb}</p>`;
     card.addEventListener('click', () => {
       rOverride = null;

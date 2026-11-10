@@ -8,8 +8,8 @@ import { apart, convertBody, convertDir, frameOf, frameOmega } from './twin';
 import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setDisk, setPlanet, setSpinAlpha, viewVectors } from './physics';
 import { rngInt, rngNext } from './rng';
 import {
-  BTN_FIRE, BTN_GRAPPLE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, WEAPON_FLAG, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
-  omegaOf, spinAt,
+  BTN_FIRE, BTN_GRAPPLE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, WEAPON_FLAG, spinNow, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
+  omegaOf,
   type Bolt, type BoltKind, type Flag, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
   type Outcome, type Player, type Prop, type SimConfig, type SimState, type Vehicle, type WeaponId, type WeaponStats,
 } from './types';
@@ -121,7 +121,12 @@ const capsuleEnds = (p: Player): [Vec3, Vec3] => {
 export function step(state: SimState, inputs: readonly InputCmd[], tick: number = state.tick): SimState {
   if (tick !== state.tick) throw new Error(`step: expected tick ${state.tick}, got ${tick}`);
   const cfg = state.config;
-  const spin = spinAt(cfg, state.tick);
+  if (cfg.spinControl) {
+    // spin control: turning toward the target at a steady rate (an Euler push the whole time it turns)
+    const gap = state.spinTarget - state.spinF;
+    state.spinRate = Math.abs(gap) < 1e-9 ? 0 : Math.sign(gap) * Math.min(cfg.spinControlRate, Math.abs(gap) / DT);
+  }
+  const spin = spinNow(state);
   const omega = spin.omega;
   setSpinAlpha(spin.alpha);
   setPlanet(cfg.world === 'planet' ? cfg.g * cfg.R * cfg.R : 0, omega);
@@ -163,10 +168,12 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   for (const p of state.players) updateVitals(state, p);
   updatePickups(state);
   if (state.flags.length) updateFlags(state, omega);
+  if (state.objective) updateObjective(state);
   if (state.mode === 'sandbox' && !state.over) updateMatch(state);
   if (state.mode === 'campaign') updateOutcome(state);
   for (const p of state.players) p.prevButtons = p.lastInput.buttons;
 
+  if (cfg.spinControl) state.spinF += state.spinRate * DT;
   state.tick++;
   state.frameAngle += omega * DT;
   return state;
@@ -1514,7 +1521,7 @@ export function matchScores(state: SimState): { id: number; score: number }[] {
   if (cfg.teams >= 2) {
     return Array.from({ length: cfg.teams }, (_, t) => ({
       id: t,
-      score: state.flags.length ? state.captures[t] ?? 0 : state.players.reduce((n, p) => n + (p.team === t && p.kind !== 'dummy' ? p.score : 0), 0),
+      score: state.flags.length || state.objective ? Math.floor(state.captures[t] ?? 0) : state.players.reduce((n, p) => n + (p.team === t && p.kind !== 'dummy' ? p.score : 0), 0),
     }));
   }
   return state.players.filter((p) => p.kind !== 'dummy').map((p) => ({ id: p.id, score: p.score }));
@@ -1595,4 +1602,31 @@ function updateHook(state: SimState, p: Player, omega: number) {
     // (pulled up off the floor: you're hanging, not standing)
     if (-dot(n, localBasis(p.pos).up) > 0.25) { p.grounded = false; p.groundNormal = null; }
   }
+}
+
+// =========================================================================== spin control
+
+/**
+ * Spin control: a team that has the engine room to itself scores a point a
+ * second. And the station's spin turns to favour whichever team is behind:
+ * toward the direction that makes their shots toward the engine room (and the
+ * enemy beyond it) spinward, so those curve down and speed up while the
+ * leaders' float up and slow. It turns only once the lead is big enough, and
+ * takes a while to turn (everything slides while it does).
+ */
+function updateObjective(state: SimState) {
+  const cfg = state.config, ob = state.objective!;
+  const present = new Set<number>();
+  for (const p of state.players) if (p.alive && p.kind !== 'dummy' && dist(p.pos, ob.pos) < ob.radius) present.add(p.team);
+  ob.holder = present.size === 1 ? [...present][0] : present.size > 1 ? -2 : -1;
+  if (!state.over && ob.holder >= 0) state.captures[ob.holder] = (state.captures[ob.holder] ?? 0) + DT;
+  // which way favours each team: its shots from its base toward the engine room go spinward
+  const bases = state.level.bases ?? [];
+  if (bases.length !== 2) return;
+  const [a, b] = [0, 1].map((t) => Math.floor(state.captures[t] ?? 0));
+  const behind = a + cfg.spinControlLead <= b ? 0 : b + cfg.spinControlLead <= a ? 1 : -1;
+  if (behind < 0) return; // (close: leave it as it is)
+  const base = bases.find((x) => x.team === behind)!;
+  const toward = Math.atan2(Math.sin(Math.atan2(ob.pos[1], ob.pos[0]) - Math.atan2(base.pos[1], base.pos[0])), Math.cos(Math.atan2(ob.pos[1], ob.pos[0]) - Math.atan2(base.pos[1], base.pos[0])));
+  state.spinTarget = toward >= 0 ? 1 : -1;
 }

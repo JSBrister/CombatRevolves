@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  BTN_GRAPPLE, ITEM_KINDS, STARTING_WEAPONS, WEAPON_IDS, TEAM_COLORS, matchScores, timeLeft, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  spinNow, BTN_GRAPPLE, ITEM_KINDS, STARTING_WEAPONS, WEAPON_IDS, TEAM_COLORS, matchScores, timeLeft, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -3025,5 +3025,84 @@ describe('53. wheel station', () => {
       minR = Math.min(minR, Math.hypot(me.pos[0], me.pos[1]));
     }
     expect(minR).toBeLessThan(H.r + 1.5);
+  });
+});
+
+describe('54. spin control and the half ring', () => {
+  const game = (id = 's-half', bots = [0, 0]) => {
+    const g = startLevel(levelById(id)!, {}, { teams: 2, myTeam: 0, spinControl: true, bots, scoreLimit: 0 });
+    return { s: g.state, id: g.localId, me: g.state.players.find((p) => p.id === g.localId)!, botIds: g.botIds };
+  };
+  const into = (s: SimState, p: Player, at: Vec3) => { p.pos = addScaled(at, localBasis(at).up, standHeight(p.size)); p.vel = [0, 0, 0]; };
+  it('the half ring: a base at each end, the engine room in the middle, pickups mirrored end to end', () => {
+    const { s } = game();
+    const [b0, b1] = [0, 1].map((t) => s.level.bases!.find((b) => b.team === t)!);
+    const ang = (p: Vec3) => Math.atan2(p[1], p[0]);
+    expect(ang(b0.pos)).toBeLessThan(-1);
+    expect(ang(b1.pos)).toBeCloseTo(-ang(b0.pos), 6);
+    expect(Math.abs(ang(s.objective!.pos))).toBeLessThan(1e-9);
+    const items = s.pickups.map((p) => p.item);
+    for (const it of new Set(items)) expect(items.filter((x) => x === it).length % 2).toBe(0);
+  });
+  it('the ends are sealed: you can\'t get past a bulkhead', () => {
+    const { state: s, localId } = startLevel(levelById('s-half')!);
+    s.players = s.players.filter((p) => p.id === localId);
+    const me = s.players[0], R = s.config.R, end = s.config.arena / 2 / R;
+    const a = end - 6 / R;
+    me.pos = [(R - standHeight(1)) * Math.cos(a), (R - standHeight(1)) * Math.sin(a), 0];
+    me.vel = [0, 0, 0];
+    run(s, 120 * 5, (st) => [cmdFor(st, localId, { moveY: 1, yaw: 0, buttons: (st.tick % 60 === 0 ? BTN_JUMP : 0) })]); // run (and jump) spinward at it
+    expect(Math.atan2(me.pos[1], me.pos[0])).toBeLessThan(end);
+  });
+  it('a team alone in the engine room scores a point a second; with both there, nobody does', () => {
+    const { s, id, me } = game('s-half', [0, 1]);
+    const red = s.players.find((p) => p.team === 1)!;
+    red.pos = addScaled(red.pos, localBasis(red.pos).up, 0); // (red stays home)
+    into(s, me, s.objective!.pos);
+    run(s, 120 * 10, (st) => [cmdFor(st, id)]);
+    expect(s.objective!.holder).toBe(0);
+    expect(matchScores(s)[0].score).toBeGreaterThanOrEqual(9);
+    const before = s.captures[0];
+    into(s, red, s.objective!.pos);
+    red.pos = addScaled(red.pos, localBasis(red.pos).axial, 3);
+    run(s, 240, (st) => [cmdFor(st, id)]);
+    expect(s.objective!.holder).toBe(-2);
+    expect(s.captures[0]).toBe(before);
+  });
+  it('the spin turns to favour whoever\'s behind: through a stop, with everything sliding, to full the other way', () => {
+    const { s, id, me } = game();
+    expect(s.spinF).toBe(1);
+    const w0 = omegaOf(s.config);
+    // blue (team 0, at the antispinward end: its shots toward the middle go spinward when the spin is +) gets well ahead
+    s.captures = [s.config.spinControlLead + 1, 0];
+    let sawStop = false, sawEuler = false;
+    for (let i = 0; i < 120 * 25; i++) {
+      step(s, [cmdFor(s, id)], s.tick);
+      if (Math.abs(s.spinF) < 0.02) sawStop = true;
+      if (Math.abs(spinNow(s).alpha) > 0.5 * s.config.spinControlRate * w0) sawEuler = true;
+    }
+    expect(s.spinTarget).toBe(-1); // now red's way (red is behind)
+    expect(s.spinF).toBeCloseTo(-1, 6);
+    expect(sawStop && sawEuler).toBe(true);
+    void me;
+    // a close game leaves the spin alone
+    s.captures = [10, 12];
+    run(s, 240, (st) => [cmdFor(st, id)]);
+    expect(s.spinTarget).toBe(-1);
+  });
+  it('bots go for the engine room', () => {
+    const { s, id, botIds } = game('s-half', [3, 3]);
+    let held = 0;
+    for (let i = 0; i < 120 * 40; i++) { step(s, [cmdFor(s, id), ...botIds.map((b) => botInput(s, b))], s.tick); if (s.objective!.holder >= 0) held++; }
+    expect(held).toBeGreaterThan(120 * 3);
+    expect(s.captures[0] + s.captures[1]).toBeGreaterThan(3);
+  }, 30000);
+  it('also on a whole ring (a quarter turn from each base), never on twin rings or the tower', () => {
+    const r = game('s-standard').s;
+    const a = (p: Vec3) => Math.atan2(p[1], p[0]);
+    const d0 = Math.abs(Math.atan2(Math.sin(a(r.objective!.pos) - a(r.level.bases![0].pos)), Math.cos(a(r.objective!.pos) - a(r.level.bases![0].pos))));
+    expect(d0).toBeCloseTo(Math.PI / 2, 6);
+    expect(game('s-twin-bikes').s.objective).toBeNull();
+    expect(game('s-tower').s.objective).toBeNull();
   });
 });

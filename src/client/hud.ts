@@ -1,4 +1,4 @@
-import { DT, matchScores, timeLeft, TEAM_COLORS, TEAM_NAMES, PLAYER_WEAPON_SLOTS, slotKey, WEAPON_IDS, WEAPON_NAMES, omegaOf, spinAt, type Player, type SimEvent, type SimState } from '../sim';
+import { DT, matchScores, timeLeft, TEAM_COLORS, TEAM_NAMES, PLAYER_WEAPON_SLOTS, slotKey, WEAPON_IDS, WEAPON_NAMES, omegaOf, spinNow, type Player, type SimEvent, type SimState } from '../sim';
 import { ITEM_NAMES } from './models';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -14,11 +14,11 @@ export class Hud {
 
   update(state: SimState, me: Player | undefined, opts: { yaw: number; timeScale: number; paused: boolean; freefly: boolean; sprintOn: boolean; showScores: boolean }) {
     const cfg = state.config;
-    const sp = spinAt(cfg, state.tick);
+    const sp = spinNow(state);
     const w = sp.omega;
     const w0 = omegaOf(cfg);
     // a changing spin: how much is left, which way it's going, and the Euler push along the floor
-    const change = cfg.spin && cfg.spinChange
+    const change = cfg.spin && (cfg.spinChange || cfg.spinControl)
       ? `<span style="color:${sp.alpha ? '#ff6a3d' : '#ffd27a'}">spin ${(100 * w / w0).toFixed(0)}%${w < 0 ? ' (REVERSED)' : ''}` +
         (sp.alpha ? ` · SPINNING ${sp.alpha < 0 ? 'DOWN' : 'UP'} · Euler ${(Math.abs(sp.alpha) * cfg.R).toFixed(1)} m/s² ${sp.alpha < 0 ? 'spinward' : 'antispinward'}` : '') +
         '</span><br/>'
@@ -107,7 +107,22 @@ export class Hud {
         : '';
       $('objective').innerHTML = carrying + lines.join(' &nbsp;·&nbsp; ');
     }
-    $('objective').classList.toggle('ctf', ctf);
+    if (state.objective) {
+      // spin control: who holds the engine room, and whose way the spin's turning
+      const ob = state.objective, bases = state.level.bases ?? [];
+      const held = ob.holder >= 0 ? `<span style="color:${hex(TEAM_COLORS[ob.holder])}">held by ${TEAM_NAMES[ob.holder]}</span>` : ob.holder === -2 ? '<span style="color:#ff6a3d">CONTESTED</span>' : 'empty';
+      let favours = '';
+      if (bases.length === 2) {
+        const b0 = bases.find((b) => b.team === 0)!;
+        const s0 = Math.sign(Math.sin(Math.atan2(ob.pos[1], ob.pos[0]) - Math.atan2(b0.pos[1], b0.pos[0])));
+        const f = state.spinF;
+        const fav = Math.abs(f) < 0.05 ? -1 : f * s0 > 0 ? 0 : 1;
+        const turning = state.spinRate !== 0 ? ` <span style="color:#ff6a3d">· TURNING toward ${TEAM_NAMES[state.spinTarget * s0 > 0 ? 0 : 1]}</span>` : '';
+        favours = fav < 0 ? ' · the spin is stopping' : ` · the spin favours <span style="color:${hex(TEAM_COLORS[fav])}">${TEAM_NAMES[fav]}</span>${turning}`;
+      }
+      $('objective').innerHTML = `ENGINE ROOM: ${held}${favours}`;
+    }
+    $('objective').classList.toggle('ctf', ctf || !!state.objective);
     // hover-bike: health and a prompt when one is in reach
     const bike = state.vehicles.find((v) => v.id === me.vehicle);
     const near = !bike && me.alive && state.vehicles.some((v) => v.alive && v.driver < 0 && Math.hypot(v.pos[0] - me.pos[0], v.pos[1] - me.pos[1], v.pos[2] - me.pos[2]) < 2.6);
@@ -115,7 +130,7 @@ export class Hud {
       ? `HOVER-BIKE ${Math.ceil(bike.health)} / ${bike.maxHealth} · ${Math.hypot(...bike.vel).toFixed(0)} m/s · <b>E</b> get off`
       : near ? '<b>E</b> ride hover-bike' : '';
     const enemies = state.players.filter((p) => p.enemyType !== '');
-    if (!state.flags.length) $('objective').textContent = state.mode === 'campaign' && state.outcome === 'playing'
+    if (!state.flags.length && !state.objective) $('objective').textContent = state.mode === 'campaign' && state.outcome === 'playing'
       ? `Enemies left: ${enemies.filter((p) => p.alive).length} / ${enemies.length}` : '';
     ($('shield-fill').parentElement as HTMLElement).style.borderColor = me.shield <= 0 ? '#ff6a3d' : '';
     $('weight').textContent = me.apparentG.toFixed(2);

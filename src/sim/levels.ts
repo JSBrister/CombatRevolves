@@ -295,6 +295,8 @@ export const LEVELS: LevelDef[] = [
     blurb: 'A bigger ball with hills and a few mountains on it: high ground to fight over, and from the tops you can see a long way round.' },
   { id: 's-wheel', mode: 'sandbox', name: 'Wheel Station (ring, spokes and hub)', seed: 56, config: { R: 120, halfWidth: 14, wheelHub: 12 }, bots: 4, items: undefined,
     blurb: 'The classic: a ring with four spokes up to a hub round the axis. Two spokes have lifts, two have ledges to jump up (further apart as you get lighter). In the hub you walk round the inside of the drum at a tenth of a g, and the best pickups are up there.' },
+  { id: 's-half', mode: 'sandbox', name: 'Half Ring (sealed at both ends)', seed: 57, config: { R: 100, halfWidth: 20, arena: Math.PI * 100 }, bots: 4,
+    blurb: 'Half a ring, with bulkheads at both ends. Made for Spin Control (the teams start at the ends, the engine room is in the middle), and fine for a deathmatch: shots fired one way along it curve down and speed up, the other way they float up and slow down.' },
   { id: 's-tower', mode: 'sandbox', name: 'Spin Tower', seed: 54, config: { R: 100, g: 14.7, tower: 10 }, props: false, vehicles: 0, bots: 4,
     blurb: 'Not a ring: a tower through the axis, spinning end over end, open to the stars. You start on the big bottom floor of one arm under 1.5 g and climb ramps, floor by floor, each one smaller, to the hub at the middle, where you weigh almost nothing. Launch pads there throw you across to the other arm. Don\'t fall off the edge.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
@@ -310,7 +312,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'wheelHub', 'wheelSpokes', 'tower', 'teams', 'teamBases', 'ctf', 'scoreLimit', 'timeLimit', 'bannedItems', 'startWeapons', 'startSticky', 'startBounce', 'startJetpack', 'startGrapple', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'wheelHub', 'wheelSpokes', 'tower', 'teams', 'teamBases', 'ctf', 'spinControl', 'scoreLimit', 'timeLimit', 'bannedItems', 'startWeapons', 'startSticky', 'startBounce', 'startJetpack', 'startGrapple', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
@@ -342,6 +344,7 @@ export interface GameSetup {
   bots?: number[];
   bases?: boolean; // with teams, give each team a base (where the level allows); default true
   ctf?: boolean; // capture the flag (teams with bases)
+  spinControl?: boolean; // spin control (2 teams with bases)
   /** Pickups and loadout (unset: the usual). */
   bannedItems?: ItemKind[];
   startWeapons?: WeaponId[];
@@ -368,7 +371,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}, s
   const teamPlay = teams >= 2;
   const state = createState({
     seed: def.seed,
-    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign && !teamPlay, teams: teamPlay ? teams : 0, teamBases: teamPlay && ((setup.bases ?? true) || !!setup.ctf), ctf: teamPlay && !!setup.ctf, scoreLimit: campaign ? 0 : Math.max(0, setup.scoreLimit ?? 0),
+    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign && !teamPlay, teams: teamPlay ? teams : 0, teamBases: teamPlay && ((setup.bases ?? true) || !!setup.ctf || !!setup.spinControl), ctf: teamPlay && !!setup.ctf && !setup.spinControl, spinControl: teams === 2 && !!setup.spinControl, scoreLimit: campaign ? 0 : Math.max(0, setup.scoreLimit ?? 0),
       ...(campaign ? {} : {
         ...(setup.bannedItems ? { bannedItems: [...setup.bannedItems] } : {}),
         ...(setup.startWeapons ? { startWeapons: [...setup.startWeapons] } : {}),

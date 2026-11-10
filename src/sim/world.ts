@@ -3,7 +3,7 @@ import { setDisk, setPlanet } from './physics';
 import { localBasis } from './physics';
 import { generateTower } from './tower';
 import { addWheel } from './wheel';
-import { applyTeamBases } from './teams';
+import { applyTeamBases, placeObjective } from './teams';
 import { rngRange } from './rng';
 import { defaultConfig } from './tuning';
 import { DT, ITEM_KINDS, STARTING_WEAPONS, WEAPON_IDS, neutralInput, omegaOf, type GameMode, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
@@ -51,6 +51,10 @@ export function createState(opts: WorldOptions = {}): SimState {
     captures: [],
     winner: -1,
     over: false,
+    spinF: 1,
+    spinRate: 0,
+    spinTarget: 1,
+    objective: null,
     frameAngle: 0,
     rng: (opts.seed ?? 1234) >>> 0,
     nextId: 1,
@@ -76,6 +80,8 @@ export function createState(opts: WorldOptions = {}): SimState {
     : generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true, opts.vehicles ?? -1);
   if (config.wheelHub > 0 && state.level.shape === 'ring' && !config.twin) addWheel(config, state.level, state, () => allocId(state));
   applyTeamBases(config, state.level);
+  state.objective = placeObjective(config, state.level);
+  if (state.objective) state.captures = [0, 0];
   state.level.pickupSpots = banPickups(config, state.level.pickupSpots);
   // capture the flag: a flag on each base's stand
   if (config.ctf && state.level.bases) {

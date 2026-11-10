@@ -35,6 +35,9 @@ export const defaultConfig = (): SimConfig => ({
   teams: 0, // 0 = free-for-all; 2-4 teams
   teamBases: false,
   ctf: false, // capture the flag (needs team bases)
+  spinControl: false,
+  spinControlRate: 0.1,
+  spinControlLead: 5,
   scoreLimit: 0, // first to this many points (or captures) wins; 0 = play on for ever
   timeLimit: 0, // seconds; 0 = no time limit
   flagReturnTime: 30, // teams: give each a base (spawns, flag stand) and make the pickups even

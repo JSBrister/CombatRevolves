@@ -31,8 +31,8 @@ export type ServerMsg =
 export type NetInput = Pick<InputCmd, 'moveX' | 'moveY' | 'yaw' | 'pitch' | 'buttons' | 'weapon'>;
 
 /** The part of the sim's state that changes: everything but the config and the level. */
-export type Dyn = Pick<SimState, 'tick' | 'frameAngle' | 'rng' | 'nextId' | 'outcome' | 'flags' | 'captures' | 'winner' | 'over' | 'players' | 'bolts' | 'grenades' | 'props' | 'explosions' | 'pickups' | 'vehicles'>;
-const DYN_KEYS: (keyof Dyn)[] = ['tick', 'frameAngle', 'rng', 'nextId', 'outcome', 'flags', 'captures', 'winner', 'over', 'players', 'bolts', 'grenades', 'props', 'explosions', 'pickups', 'vehicles'];
+export type Dyn = Pick<SimState, 'tick' | 'frameAngle' | 'rng' | 'nextId' | 'outcome' | 'flags' | 'captures' | 'winner' | 'over' | 'spinF' | 'spinRate' | 'spinTarget' | 'objective' | 'players' | 'bolts' | 'grenades' | 'props' | 'explosions' | 'pickups' | 'vehicles'>;
+const DYN_KEYS: (keyof Dyn)[] = ['tick', 'frameAngle', 'rng', 'nextId', 'outcome', 'flags', 'captures', 'winner', 'over', 'spinF', 'spinRate', 'spinTarget', 'objective', 'players', 'bolts', 'grenades', 'props', 'explosions', 'pickups', 'vehicles'];
 
 export function dynOf(state: SimState): Dyn {
   const d = {} as Record<string, unknown>;
