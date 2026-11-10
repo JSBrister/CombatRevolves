@@ -118,3 +118,8 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 #team-scores .small { font-size: 11px; font-weight: 400; opacity: 0.6; text-align: center; }
 #objective .carry { font-size: 20px; font-weight: 700; letter-spacing: 2px; margin-bottom: 4px; text-shadow: 0 0 10px currentColor; animation: pulse 1.2s infinite; }
 #objective.ctf { top: 128px; text-align: center; width: max-content; max-width: calc(100% - 32px); color: #dff6ff; }
+#mp { background: rgba(2, 3, 10, 0.85); }
+.overlay .mp-help { max-width: 640px; line-height: 1.6; font-size: 13px; opacity: 0.75; margin-bottom: 24px; }
+.overlay .mp-help b { color: #f2c94c; font-weight: 600; }
+#mp-status { min-height: 18px; margin: -8px 0 18px; font-size: 14px; opacity: 0.9; color: #ffd27a; }
+#net-info { position: fixed; left: 150px; bottom: 8px; z-index: 6; font: 11px ui-monospace, monospace; color: rgba(159, 230, 255, 0.7); pointer-events: none; }

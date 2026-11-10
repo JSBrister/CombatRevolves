@@ -280,6 +280,14 @@ export class EntityViews {
     this.setChargeGlow(this.fpGlow, p, tick);
   }
 
+  /** A projectile changes id (a predicted shot becoming the server's): the same view, and its trail, carry on. */
+  renameProj(from: number, to: number) {
+    const v = this.projs.get(from);
+    if (!v || this.projs.has(to)) return;
+    this.projs.delete(from);
+    this.projs.set(to, v);
+  }
+
   setViewWeapon(weapon: number, visible: boolean, flagTeam = -1) {
     this.viewModel.visible = visible;
     const key = weapon * 10 + flagTeam + 1;

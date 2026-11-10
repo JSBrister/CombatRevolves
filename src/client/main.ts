@@ -11,7 +11,8 @@ import { Sfx } from './audio';
 import { CUSTOM_DEFAULTS, buildCustomForm, customLevel, decodeCustom, encodeCustom, randomCustom, type CustomSettings } from './custom';
 import { BOLT_COLORS, EntityViews, type PosMap } from './entities';
 import { Hud } from './hud';
-import { basesFor, buildMatchPanel, buildPlayerPanel, match, setupFor } from './setup';
+import { basesFor, buildMatchPanel, buildPlayerPanel, match, player, setupFor } from './setup';
+import { NetClient } from '../net/client';
 import { InputSampler } from './input';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, RingScene } from './scene';
 import './style.css';
@@ -59,6 +60,9 @@ let localId = -1;
 let botIds: number[] = [];
 let prev: PosMap = new Map();
 let prevFrameAngle = 0;
+/** A network game: the socket and the client's side of the match. Null when playing locally. */
+let net: { ws: WebSocket; client: NetClient } | null = null;
+const NO_PREV: PosMap = new Map();
 
 const view = {
   timeScale: 1,
@@ -102,7 +106,7 @@ function newWorld() {
 }
 
 function setBotCount(n: number) {
-  if (state.mode !== 'sandbox' || state.config.teams >= 2) return; // (team games: set the bots in the match setup)
+  if (net || state.mode !== 'sandbox' || state.config.teams >= 2) return; // (team games: set the bots in the match setup)
   while (botIds.length < n) botIds.push(addPlayer(state, 'bot', `Bot ${String.fromCharCode(65 + botIds.length)}`));
   while (botIds.length > n) removePlayer(state, botIds.pop()!);
 }
@@ -351,7 +355,21 @@ let acc = 0;
 let last = performance.now();
 const MAX_STEPS = 12;
 
+/** A tick of a network game: this tick's input goes to the server and into the prediction. */
+function netTick() {
+  const c = net!.client;
+  const before = c.localPlayer;
+  const from: Vec3 | null = before && before.alive ? [...before.pos] as Vec3 : null;
+  // (in a menu the game goes on: you just stand there)
+  c.tick((id, tick) => (screen === 'playing' ? input.sample(id, tick) : { playerId: id, tick, moveX: 0, moveY: 0, yaw: input.yaw, pitch: input.pitch, buttons: 0, weapon: before?.weapon ?? 0 }));
+  const after = c.localPlayer;
+  if (cfg.world !== 'ring' && from && after && after.alive && dist(from, after.pos) < 5) input.yaw = transportYaw(input.yaw, from, after.pos);
+  const rs0 = c.renderState(1, 0);
+  if (rs0) views.onTick(rs0);
+}
+
 function simTick() {
+  if (net) return netTick();
   prev = capture(state);
   prevFrameAngle = state.frameAngle;
   const inputs: InputCmd[] = [input.sample(localId, state.tick)];
@@ -367,7 +385,7 @@ function simTick() {
 }
 
 function previewKind(): BoltKind | ThrownKind | null {
-  const me = state.players.find((p) => p.id === localId);
+  const me = net ? net.client.localPlayer : state.players.find((p) => p.id === localId);
   if (!me || !me.alive || !view.preview) return null;
   if (input.grenadeHeld && me.grenades > 0) return 'grenade';
   if (input.bounceHeld && me.bounceGrenades > 0) return 'bounceGrenade';
@@ -384,7 +402,9 @@ function previewKind(): BoltKind | ThrownKind | null {
 function frame(now: number) {
   const dtReal = Math.min(0.1, (now - last) / 1000);
   last = now;
-  if (!view.paused) acc += dtReal * view.timeScale;
+  // (a network game never pauses, and runs a shade fast or slow to stay in step with the server)
+  if (net) acc += dtReal * net.client.timeScale;
+  else if (!view.paused) acc += dtReal * view.timeScale;
   let steps = 0;
   while (acc >= DT && steps < MAX_STEPS) {
     simTick();
@@ -394,8 +414,12 @@ function frame(now: number) {
   if (steps === MAX_STEPS) acc = 0; // can't keep up: drop time rather than spiral
   const alpha = acc / DT;
 
-  const fa = prevFrameAngle + (state.frameAngle - prevFrameAngle) * alpha;
-  const me = state.players.find((p) => p.id === localId);
+  // what to draw: the local world, or (network) everyone else interpolated and you predicted
+  const rstate = (net && net.client.renderState(alpha, dtReal)) || state;
+  const rprev = net ? NO_PREV : prev, ralpha = net ? 1 : alpha;
+  const fa = net ? rstate.frameAngle : prevFrameAngle + (state.frameAngle - prevFrameAngle) * alpha;
+  const me = rstate.players.find((p) => p.id === localId);
+  const myTick = net?.client.pred?.tick ?? state.tick; // (the tick your own timers run on)
   // Twin rings: draw everything in the frame of the ring you're on.
   const vf: 0 | 1 = cfg.twin && me && me.pos[2] >= 0 ? 1 : 0;
   views.twin = cfg.twin;
@@ -416,8 +440,8 @@ function frame(now: number) {
     camera.position.copy(ff.pos);
     camera.quaternion.copy(ff.quat);
   } else if (me) {
-    const p0 = views.toView(prev.get(me.id) ?? me.pos), p1 = views.toView(me.pos);
-    const pos: Vec3 = [p0[0] + (p1[0] - p0[0]) * alpha, p0[1] + (p1[1] - p0[1]) * alpha, p0[2] + (p1[2] - p0[2]) * alpha];
+    const p0 = views.toView(rprev.get(me.id) ?? me.pos), p1 = views.toView(me.pos);
+    const pos: Vec3 = [p0[0] + (p1[0] - p0[0]) * ralpha, p0[1] + (p1[1] - p0[1]) * ralpha, p0[2] + (p1[2] - p0[2]) * ralpha];
     const v = viewVectors(pos, input.yaw, input.pitch);
     const eo = eyeOffset(me);
     const eye = new THREE.Vector3(pos[0] + v.up[0] * eo, pos[1] + v.up[1] * eo, pos[2] + v.up[2] * eo);
@@ -442,16 +466,16 @@ function frame(now: number) {
   views.cameraPos.copy(camera.position);
   rs.updateSun(viewAngle, camera.position);
   rs.updateLifts(state.level);
-  views.render(state, prev, alpha, dtReal);
+  views.render(rstate, rprev, ralpha, dtReal);
   // trajectory preview (real physics, includes the shooter's own velocity)
   const pk = previewKind();
   const maxT = pk === 'laconic' ? cfg.weapons.laconic.lifetime : 22;
-  views.setPreview(pk ? predictTrajectory(state, localId, pk, input.yaw, input.pitch, maxT) : null, BOLT_COLORS[pk ?? 'rifle']);
+  views.setPreview(pk ? predictTrajectory(net?.client.pred ?? state, localId, pk, input.yaw, input.pitch, maxT) : null, BOLT_COLORS[pk ?? 'rifle']);
   // first-person gun, mouse slowdown while charging the laser, owned list for the wheel
   views.setViewWeapon(me?.weapon ?? 0, !!me && me.alive && !view.freefly && me.vehicle < 0, me?.carrying ?? -1);
-  views.setViewCharge(me, state.tick);
-  input.lookScale = me && isLaconicBusy(me, state.tick) ? cfg.weapons.laconic.chargeLookScale : 1;
-  views.reloadDip = me && me.reloadUntil > state.tick && me.reloadWeapon === me.weapon ? Math.min(1, views.reloadDip + dtReal * 6) : Math.max(0, views.reloadDip - dtReal * 6);
+  views.setViewCharge(me, myTick);
+  input.lookScale = me && isLaconicBusy(me, myTick) ? cfg.weapons.laconic.chargeLookScale : 1;
+  views.reloadDip = me && me.reloadUntil > myTick && me.reloadWeapon === me.weapon ? Math.min(1, views.reloadDip + dtReal * 6) : Math.max(0, views.reloadDip - dtReal * 6);
   if (me) input.owned = me.owned;
 
   // main view
@@ -493,7 +517,13 @@ function frame(now: number) {
   if (tip && tipEl.textContent !== tip) tipEl.textContent = tip;
   tipEl.classList.toggle('on', !!tip && screen === 'playing');
   // (on ring 1 of the twin rings, spinward is the other way round)
-  hud.update(state, me, { yaw: input.yaw + (vf ? Math.PI : 0), timeScale: view.timeScale, paused: view.paused, freefly: view.freefly, sprintOn: input.sprintOn, showScores: input.keys.has('Tab') });
+  const ni = $('net-info');
+  ni.classList.toggle('hidden', !net);
+  if (net) {
+    const st = net.client.stats;
+    ni.textContent = `online · ping ${st.rtt.toFixed(0)} ms · ${st.pending} inputs ahead · last correction ${(st.lastCorrection * 100).toFixed(1)} cm`;
+  }
+  hud.update(rstate, me, { yaw: input.yaw + (vf ? Math.PI : 0), timeScale: view.timeScale, paused: view.paused, freefly: view.freefly, sprintOn: input.sprintOn, showScores: input.keys.has('Tab') });
   requestAnimationFrame(frame);
 }
 
@@ -508,11 +538,11 @@ window.addEventListener('resize', resize);
 // Screens: title -> level list -> playing <-> paused, and the campaign's
 // win/lose screen. Playing == pointer locked: losing the lock (Esc) pauses and
 // shows the debug panel.
-type Screen = 'title' | 'levels' | 'custom' | 'playing' | 'paused' | 'outcome';
+type Screen = 'title' | 'levels' | 'custom' | 'mp' | 'playing' | 'paused' | 'outcome';
 let screen: Screen = 'title';
 let outcomeAt = 0; // when the campaign outcome was first seen (performance.now)
 const $ = (id: string) => document.getElementById(id)!;
-const overlays: Record<string, HTMLElement> = { title: $('loading'), levels: $('levels'), custom: $('custom'), paused: $('pause'), outcome: $('outcome') };
+const overlays: Record<string, HTMLElement> = { title: $('loading'), levels: $('levels'), custom: $('custom'), mp: $('mp'), paused: $('pause'), outcome: $('outcome') };
 document.querySelector('#pause .controls')!.innerHTML = document.querySelector('#loading .controls')!.innerHTML;
 
 function show(next: Screen) {
@@ -521,8 +551,12 @@ function show(next: Screen) {
   $('hud').classList.toggle('hidden', next === 'title' || next === 'levels' || next === 'custom');
   $('build').classList.toggle('hidden', next === 'playing');
   view.paused = next !== 'playing';
-  if (next === 'paused') gui.show();
+  if (next === 'paused' && !net) gui.show(); // (the debug panel changes the rules: not in a network game)
   else gui.hide();
+  $('pause-title').textContent = net ? 'MENU (the game goes on)' : 'PAUSED';
+  $('btn-change').classList.toggle('hidden', !net);
+  $('btn-restart').textContent = net ? 'Restart match' : 'Restart level';
+  $('btn-menu').textContent = net ? 'Leave the server' : 'Quit to menu';
   input.keys.clear();
   input.mouseButtons = 0;
 }
@@ -542,7 +576,7 @@ document.addEventListener('pointerlockchange', () => {
 
 const fmtSpin = (R: number) => `${((2 * Math.PI) / Math.sqrt(cfg.g / R)).toFixed(1)} s spin`;
 function showLevels(mode: GameMode) {
-  $('levels-title').textContent = mode === 'campaign' ? 'CAMPAIGN' : 'DEATHMATCH';
+  $('levels-title').textContent = net ? 'MULTIPLAYER: CHOOSE A LEVEL' : mode === 'campaign' ? 'CAMPAIGN' : 'DEATHMATCH';
   const ms = $('match-setup');
   ms.classList.toggle('hidden', mode !== 'sandbox');
   if (mode === 'sandbox') buildMatchPanel(ms, () => showLevels(mode));
@@ -578,7 +612,8 @@ function showLevels(mode: GameMode) {
     card.innerHTML = `<h3>${def.name}</h3><div class="stats">${def.config.spin === false ? "flat ground · no spin" : `R ${def.config.R} m · ${fmtSpin(def.config.R ?? 100)}`} · ${who}</div><p>${def.blurb}</p>`;
     card.addEventListener('click', () => {
       rOverride = null;
-      startGame(def);
+      if (net) net.client.requestStart({ def, setup: setupFor(def) }); // (the server starts it for everyone)
+      else startGame(def);
       requestPlay();
     });
     list.appendChild(card);
@@ -589,7 +624,7 @@ function showLevels(mode: GameMode) {
 for (const b of document.querySelectorAll<HTMLButtonElement>('#loading button[data-mode]')) {
   b.addEventListener('click', () => showLevels(b.dataset.mode as GameMode));
 }
-$('btn-back').addEventListener('click', () => show('title'));
+$('btn-back').addEventListener('click', () => show(net ? 'paused' : 'title'));
 buildPlayerPanel($('player-setup'));
 $('btn-gfx').textContent = `Graphics: ${gfx === 'high' ? 'High' : 'Low'}`;
 $('btn-gfx').addEventListener('click', () => {
@@ -611,7 +646,8 @@ $('btn-custom-random').addEventListener('click', () => showCustom(randomCustom()
 $('btn-custom-play').addEventListener('click', () => {
   rOverride = null;
   history.replaceState(null, '', `#custom=${encodeCustom(custom)}`);
-  startGame(customLevel(custom));
+  if (net) net.client.requestStart({ def: customLevel(custom), setup: setupFor({ ...customLevel(custom), mode: 'sandbox' }) });
+  else startGame(customLevel(custom));
   requestPlay();
 });
 $('btn-custom-link').addEventListener('click', () => {
@@ -623,10 +659,95 @@ $('btn-custom-link').addEventListener('click', () => {
   ) ?? ($('custom-note').textContent = url);
 });
 $('btn-resume').addEventListener('click', requestPlay);
-$('btn-restart').addEventListener('click', () => { newWorld(); requestPlay(); });
-$('btn-menu').addEventListener('click', () => show('title'));
-$('btn-menu2').addEventListener('click', () => show('title'));
-$('btn-retry').addEventListener('click', () => { newWorld(); requestPlay(); });
+const restart = () => { if (net) { if (net.client.spec) net.client.requestStart(net.client.spec); } else newWorld(); requestPlay(); };
+const toTitle = () => { netLeave(); show('title'); };
+$('btn-restart').addEventListener('click', restart);
+$('btn-menu').addEventListener('click', toTitle);
+$('btn-menu2').addEventListener('click', toTitle);
+$('btn-retry').addEventListener('click', restart);
+$('btn-change').addEventListener('click', () => showLevels('sandbox'));
+
+// ---------------------------------------------------------------- multiplayer
+/** "host:port", "ws://...", or an http address someone pasted: the WebSocket address for it. */
+function wsUrl(addr: string): string {
+  let a = addr.trim();
+  if (/^wss?:\/\//i.test(a)) return a;
+  const secure = /^https:\/\//i.test(a) || (!/^http:\/\//i.test(a) && location.protocol === 'https:');
+  a = a.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  return `${secure ? 'wss' : 'ws'}://${a}`;
+}
+
+function netLeave() {
+  if (!net) return;
+  const { ws } = net;
+  net = null;
+  try { ws.close(); } catch { /* already gone */ }
+  startGame(levelById('s-standard')!); // (a local world again, behind the menus)
+}
+
+function netConnect(addr: string) {
+  netLeave();
+  const status = $('mp-status');
+  let url: string;
+  try { url = wsUrl(addr); new URL(url); } catch { status.textContent = "That doesn't look like an address."; return; }
+  try { localStorage.setItem('cr-server', addr.trim()); } catch { /* not remembered */ }
+  status.textContent = `Connecting to ${url} ...`;
+  let ws: WebSocket;
+  try { ws = new WebSocket(url); } catch { status.textContent = `Can't open ${url} (a page loaded over https can only reach wss:// servers).`; return; }
+  ws.binaryType = 'arraybuffer';
+  const client = new NetClient((bytes) => { if (ws.readyState === WebSocket.OPEN) ws.send(bytes); }, {
+    now: () => performance.now(),
+    onEvent: (e) => handleEvent(e),
+    onRename: (from, to) => views.renameProj(from, to),
+    onError: (text) => hud.push(`<span style="color:#ff6a3d">${text.replace(/[<>&]/g, '')}</span>`),
+    onMatch: (c) => {
+      // a (new) match: the server's world, built here from its description
+      state = c.world!;
+      Object.assign(cfg, state.config);
+      state.config = cfg;
+      localId = c.localId;
+      botIds = [];
+      currentLevel = c.spec!.def;
+      outcomeAt = 0;
+      gui.controllersRecursive().forEach((g) => g.updateDisplay());
+      rs.build(cfg, state.level, 'space');
+      views.reset();
+      views.localId = localId;
+      input.pitch = 0;
+      input.weapon = 0;
+      prev = new Map();
+      status.textContent = '';
+      if (document.pointerLockElement === canvas) show('playing'); else show('paused');
+    },
+  });
+  const session = { ws, client };
+  net = session;
+  ws.onopen = () => { status.textContent = 'Connected: joining ...'; client.hello(player.name, player.color, match.teams >= 2 ? match.myTeam : -1); };
+  ws.onmessage = (ev) => { if (net === session) client.receive(new Uint8Array(ev.data as ArrayBuffer)); };
+  const lost = (why: string) => {
+    if (net !== session) return;
+    net = null;
+    startGame(levelById('s-standard')!);
+    if (document.pointerLockElement === canvas) document.exitPointerLock();
+    show('mp');
+    status.textContent = why;
+  };
+  ws.onclose = () => lost(client.world ? 'Disconnected from the server.' : `Couldn't reach ${url}.`);
+  ws.onerror = () => lost(`Couldn't reach ${url}.`);
+}
+
+{
+  // the address: remembered, or (when this page came from a game server) the server it came from
+  const addr = $('mp-addr') as HTMLInputElement;
+  let saved = '';
+  try { saved = localStorage.getItem('cr-server') ?? ''; } catch { /* none */ }
+  const served = !/github\.io$/.test(location.hostname) && location.protocol !== 'file:' && location.port !== '5173';
+  addr.value = served ? location.host : saved;
+  $('btn-mp').addEventListener('click', () => { $('mp-status').textContent = ''; show('mp'); });
+  $('btn-mp-back').addEventListener('click', () => { netLeave(); show('title'); });
+  $('btn-mp-connect').addEventListener('click', () => netConnect(addr.value));
+  addr.addEventListener('keydown', (e) => { if (e.key === 'Enter') netConnect(addr.value); });
+}
 $('btn-next').addEventListener('click', () => {
   const next = nextCampaignLevel();
   if (next) { rOverride = null; startGame(next); requestPlay(); }

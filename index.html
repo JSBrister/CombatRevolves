@@ -41,6 +41,7 @@
   </div>
 
   <div id="build"></div>
+  <div id="net-info" class="hidden"></div>
   <div id="gfx-lost" class="overlay hidden"><h2>GRAPHICS RESET</h2><p>The graphics card dropped the game (often: not enough video memory).<br/>It should come back by itself; if not, reload the page, or try Graphics: Low on the title screen.</p></div>
 
   <div id="loading" class="overlay menu">
@@ -49,6 +50,7 @@
       <button data-mode="sandbox">Deathmatch</button>
       <button data-mode="campaign">Campaign</button>
       <button id="btn-custom">Build a level</button>
+      <button id="btn-mp">Multiplayer</button>
     </div>
     <div id="player-setup" class="setup-bar"></div>
     <div class="buttons small"><button id="btn-gfx">Graphics: High</button></div>
@@ -72,6 +74,21 @@
     <div class="buttons"><button id="btn-back">Back</button></div>
   </div>
 
+  <div id="mp" class="overlay menu hidden">
+    <h2>MULTIPLAYER</h2>
+    <div class="setup-bar">
+      <label>Server <input type="text" id="mp-addr" placeholder="address, e.g. 192.168.1.20:8080" size="34" /></label>
+      <button id="btn-mp-connect">Connect</button>
+    </div>
+    <div id="mp-status" class="note"></div>
+    <div class="note mp-help">
+      Someone runs the server (<b>npm run host</b> in the game's folder), which also serves the game: everyone opens
+      <b>http://&lt;that machine&gt;:8080</b> and presses Connect. Your name, colour and team are the ones you've set on the title screen
+      and in the Deathmatch match setup. Once you're in, anyone can change the level from the pause menu.
+    </div>
+    <div class="buttons"><button id="btn-mp-back">Back</button></div>
+  </div>
+
   <div id="custom" class="overlay menu hidden">
     <h2>BUILD A LEVEL</h2>
     <div id="custom-form"></div>
@@ -85,9 +102,10 @@
   </div>
 
   <div id="pause" class="overlay hidden">
-    <h2>PAUSED</h2>
+    <h2 id="pause-title">PAUSED</h2>
     <div class="buttons">
       <button id="btn-resume">Resume</button>
+      <button id="btn-change" class="hidden">Change level</button>
       <button id="btn-restart">Restart level</button>
       <button id="btn-menu">Quit to menu</button>
     </div>

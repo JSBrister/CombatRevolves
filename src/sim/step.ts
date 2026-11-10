@@ -908,6 +908,12 @@ function fireSpread(state: SimState, p: Player, kind: BoltKind, ws: WeaponStats)
  * Lifts move on a fixed schedule. Anyone standing on one moves with it (the
  * level push-out alone would leave you hopping as it goes down).
  */
+/** Put every lift where it belongs at the state's current tick (after loading a snapshot: lifts run on a schedule, not on stored state). */
+export function syncLifts(state: SimState) {
+  const t = state.tick * DT;
+  for (const b of state.level.boxes) if (b.lift) b.center = addScaled(b.lift.base, localBasis(b.lift.base).up, liftOffset(b.lift, t));
+}
+
 function moveLifts(state: SimState) {
   const t = (state.tick + 1) * DT;
   for (const b of state.level.boxes) {

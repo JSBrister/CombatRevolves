@@ -18,6 +18,32 @@ npx tsc -p src/sim # proves the sim compiles without DOM types
 
 **Who's playing.** Set your name and colour on the title screen (remembered in this browser). Deathmatch has a match setup above the levels: free-for-all or 2-4 teams, your team, and how many bots on each team (blank shares the level's bots out evenly, counting you). In team games everyone wears their team colour, teammates can't hurt each other, the scoreboard (Tab) groups players by team, and team scores show at the top. With **team bases** on, each team gets a home where it spawns and respawns, marked with a flag on a pole (the stand for a later capture-the-flag mode), and the pickups are made the same on every side: on most levels the teams get equal sectors round the spin axis (team 0's pickups are copied, turned, into the others'); on the twin rings each team gets a ring (ring B's pickups mirror ring A's: (x, y, z) to (x, -y, -z), since it turns the other way), and in the Spin Tower an arm each (already the same both ends). Levels with no room for bases (Earth, tiny rings, the tidal spheres) fall back to spawning anywhere. All of it is set up from the config (`teams`, `teamBases`) and the seed, so every machine in a future network game builds the same level.
 
+## Multiplayer
+
+One machine runs the server; it is the only place the game is really simulated. Everyone else connects to it.
+
+```bash
+npm install
+```
+
+```bash
+npm run host
+```
+
+That builds the game and starts the server on port 8080 (it serves the game's pages too). Everyone, including the host, opens `http://<the host's address>:8080`, presses **Multiplayer**, then **Connect**. Your name, colour and team come from the title screen and the Deathmatch match setup. Once you're in, anyone can pick another level or restart the match from the menu (Esc); the match setup (teams, capture the flag, bots, limits) applies to the level you pick. Options: `npm run server -- --port 8080 --level s-twin-bikes --teams 2 --ctf --bots 4 --score 3 --minutes 10` (`--levels` lists the level ids; `npm run server` skips the build).
+
+Playing over the internet needs the host's port to be reachable (port forwarding, or a tunnel). The copy of the game on GitHub Pages is served over https, so a browser will only let it connect to a `wss://` server: put the server behind a tunnel or proxy that gives it https (then enter that address), or just have everyone load the game from the server itself as above.
+
+How it works (`src/net/`, tests in `tests/net.test.ts`):
+
+- **The server is the authority** (`room.ts`). It steps the one real simulation at 120 ticks a second, bots included, using one input per tick from each client, in order. Thirty times a second it sends everyone a snapshot of everything that moves (the level is never sent: both sides build it from the same description). A client can only ever send inputs.
+- **Prediction** (`client.ts`). Your own player doesn't wait: each tick your input goes to the server and at once into a small local world holding just you, your shots and the bike you're riding, with the real level and physics. So moving, jumping and firing feel the same as offline.
+- **Reconciliation.** Every snapshot says which of your inputs the server has used. The client rebuilds that local world from the server's version of you and replays the inputs still in flight. Same code, same inputs: normally the answer is identical (the tests check: zero correction over six seconds of running, jumping and turning with 60 ± 20 ms of lag each way). When the server knows something you didn't (you were shoved, hit, blown up), you end up where it says, and the difference is faded out over a tenth of a second rather than snapping.
+- **Interpolation.** Everyone and everything else is drawn about 100 ms in the past, blended between the two snapshots either side of that moment, so they move smoothly however unevenly snapshots arrive (tested with ± 30 ms of jitter).
+- **Your shots** appear at once from the prediction and are handed over to the server's copy when it arrives (same projectile, same trail). Hits on other players are the server's decision alone.
+- **Bandwidth.** A snapshot for 8 players is about 10 KB, but one is much like the last, and the WebSocket's compression remembers: about 1.6 KB each on the wire, roughly 50 KB/s per player. (`npx tsx scripts/netsize.ts` measures it.)
+- Not predicted (so they wait for the server, about one round trip): picking things up, getting on a bike, bumping into other players and props, and where you respawn.
+
 **Winning.** The match setup has a score limit and a time limit, each of which can be off (with both off the match never ends; scores are kept anyway). In deathmatch a kill scores 1 and killing yourself (or falling off) loses 1; a team's score is its players' added up. First to the score limit wins; when time runs out the highest score wins, and level at the top is a draw. In capture the flag the score is captures.
 
 **Capture the flag** (match setup: *Capture the flag*, 2-4 teams; any level with team bases). Each base has its team's flag on a stand. Touch an enemy flag and you're carrying it: it becomes your only weapon (no switching), swung like the Grav Mallet but much weaker (22 damage against the mallet's 90, a fraction of the knockback). **Q** (normally the melee shove) tosses it ahead along your aim, to pass it to a teammate or over a gap; you can't grab it straight back for a second. Die and you drop it. A dropped flag is a body like any other: it falls and rolls (with the spin), and goes home if one of its own team touches it, after 30 s, or at once if it's lost to space. Bring the enemy's flag to your own while yours is at home and you score; first to the capture limit wins (3 by default). A carrier is hard to miss: a big flag in the stolen flag's colour on a tall pole on their back, waving harder the faster they go, their body pulsing in that colour, and a beacon over their head you can see through walls from anywhere (dropped flags get one too). The HUD shows captures, where every flag is, and a banner while you carry one. Bots play it: they're split into attackers (go for the enemy flag, or escort whoever has it) and defenders (stay home, chase anyone with their flag), and carriers run home. In the Spin Tower they find their way with a simple route: up the ramps, across on a launch pad, down the other side.
@@ -85,6 +111,8 @@ The deathmatch list groups the oversized levels (radius or half-width of 500 m o
 | `src/sim/step.ts` | Players, weapons, projectiles, sticky grenades, explosions, damage and respawn |
 | `src/sim/serialize.ts` | `snapshot`/`restore` and a compact lossless binary encoder |
 | `src/sim/bots.ts` | Scripted bots and campaign enemy AI (aiming, cover, ramps): pure `state → InputCmd` |
+| `src/net/` | Multiplayer: the wire format, the server's room, the client's prediction / reconciliation / interpolation |
+| `src/server/main.ts` | The game server (Node): one room, WebSockets, and the game's pages |
 | `src/sim/terrain.ts` | Floor height profile: hills and the sphere band; bumps on planets and disks |
 | `src/sim/tower.ts` | The Spin Tower: its walls, floors, ramps, lifts and pads |
 | `src/sim/vehicles.ts` | Hover-bikes: riding, crashes, ramming, damage and respawn |

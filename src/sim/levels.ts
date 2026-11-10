@@ -469,3 +469,23 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}, s
   if (!teamPlay && setup.color !== undefined) me.color = setup.color;
   return { state, localId, botIds };
 }
+
+/**
+ * A player joins a running match (multiplayer): on the team asked for (or the
+ * smallest), in its colour, at its base if there are bases. Returns their id.
+ */
+export function joinPlayer(state: SimState, who: { name?: string; color?: number; team?: number }): number {
+  const cfg = state.config;
+  const id = addPlayer(state, 'human', (who.name ?? '').trim().slice(0, 16) || 'Player');
+  const p = state.players.find((q) => q.id === id)!;
+  if (cfg.teams >= 2) {
+    const count = (t: number) => state.players.filter((q) => q.id !== id && q.team === t && q.kind !== 'dummy').length;
+    let team = who.team !== undefined && who.team >= 0 && who.team < cfg.teams ? who.team : 0;
+    if (who.team === undefined || who.team < 0 || who.team >= cfg.teams) for (let t = 1; t < cfg.teams; t++) if (count(t) < count(team)) team = t;
+    p.team = team;
+    p.color = TEAM_COLORS[team];
+    const base = state.level.bases?.find((b) => b.team === team);
+    if (base) p.pos = freeSpotNear(state, spawnPosition(cfg, base.spawns[count(team) % base.spawns.length], standHeight(p.size), state.level), p.size);
+  } else if (who.color !== undefined) p.color = who.color;
+  return id;
+}

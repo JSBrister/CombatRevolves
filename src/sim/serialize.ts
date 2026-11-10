@@ -24,6 +24,8 @@ export function cloneState(state: SimState): SimState {
 
 const T_NULL = 0, T_FALSE = 1, T_TRUE = 2, T_U8 = 3, T_I32 = 4, T_F64 = 5, T_STR = 6, T_ARR = 7, T_OBJ = 8;
 const T_KEYNEW = 9, T_KEYREF = 10;
+// short forms (most arrays, objects and key tables are small): a one-byte count or index
+const T_ARR8 = 11, T_OBJ8 = 12, T_KEYREF8 = 13, T_I16 = 14;
 
 class Writer {
   buf = new ArrayBuffer(1024);
@@ -55,6 +57,7 @@ class Writer {
     if (typeof v === 'number') {
       if (Number.isInteger(v) && !Object.is(v, -0)) {
         if (v >= 0 && v < 256) { this.u8(T_U8); return this.u8(v); }
+        if (v >= -32768 && v <= 32767) { this.u8(T_I16); this.ensure(2); this.view.setInt16(this.pos, v, true); this.pos += 2; return; }
         if (v >= -2147483648 && v <= 2147483647) { this.u8(T_I32); return this.i32(v); }
       }
       this.u8(T_F64);
@@ -62,18 +65,17 @@ class Writer {
     }
     if (typeof v === 'string') { this.u8(T_STR); return this.str(v); }
     if (Array.isArray(v)) {
-      this.u8(T_ARR);
-      this.u32(v.length);
+      if (v.length < 256) { this.u8(T_ARR8); this.u8(v.length); } else { this.u8(T_ARR); this.u32(v.length); }
       for (const x of v) this.value(x);
       return;
     }
     if (typeof v === 'object') {
       const entries = Object.entries(v as Record<string, unknown>).filter(([, x]) => x !== undefined);
-      this.u8(T_OBJ);
-      this.u32(entries.length);
+      if (entries.length < 256) { this.u8(T_OBJ8); this.u8(entries.length); } else { this.u8(T_OBJ); this.u32(entries.length); }
       for (const [k, x] of entries) {
         const ref = this.keys.get(k);
-        if (ref !== undefined) { this.u8(T_KEYREF); this.u32(ref); }
+        if (ref !== undefined && ref < 256) { this.u8(T_KEYREF8); this.u8(ref); }
+        else if (ref !== undefined) { this.u8(T_KEYREF); this.u32(ref); }
         else { this.keys.set(k, this.keys.size); this.u8(T_KEYNEW); this.str(k); }
         this.value(x);
       }
@@ -106,14 +108,15 @@ class Reader {
       case T_I32: { const v = this.view.getInt32(this.pos, true); this.pos += 4; return v; }
       case T_F64: { const v = this.view.getFloat64(this.pos, true); this.pos += 8; return v; }
       case T_STR: return this.str();
-      case T_ARR: { const n = this.u32(); const a = new Array(n); for (let i = 0; i < n; i++) a[i] = this.value(); return a; }
-      case T_OBJ: {
-        const n = this.u32();
+      case T_I16: { const v = this.view.getInt16(this.pos, true); this.pos += 2; return v; }
+      case T_ARR: case T_ARR8: { const n = t === T_ARR ? this.u32() : this.u8(); const a = new Array(n); for (let i = 0; i < n; i++) a[i] = this.value(); return a; }
+      case T_OBJ: case T_OBJ8: {
+        const n = t === T_OBJ ? this.u32() : this.u8();
         const o: Record<string, unknown> = {};
         for (let i = 0; i < n; i++) {
           const kt = this.u8();
           let k: string;
-          if (kt === T_KEYNEW) { k = this.str(); this.keys.push(k); } else k = this.keys[this.u32()];
+          if (kt === T_KEYNEW) { k = this.str(); this.keys.push(k); } else k = this.keys[kt === T_KEYREF8 ? this.u8() : this.u32()];
           o[k] = this.value();
         }
         return o;
