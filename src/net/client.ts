@@ -136,7 +136,7 @@ export class NetClient {
     switch (e.type) {
       case 'fire': return e.owner === me;
       case 'impact': return e.owner === me && e.target < 0; // (hitting the level; hitting a player only the server knows)
-      case 'melee': case 'jump': case 'reload': case 'overheat': case 'pad': return e.id === me;
+      case 'melee': case 'jump': case 'reload': case 'overheat': case 'pad': case 'grapple': return e.id === me;
       default: return false;
     }
   }

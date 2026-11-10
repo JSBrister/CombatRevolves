@@ -28,12 +28,18 @@ export const defaultConfig = (): SimConfig => ({
   startSticky: 4,
   startBounce: 4,
   startJetpack: false,
+  startGrapple: false,
+  grappleSpeed: 80,
+  grappleRange: 50,
+  grappleReel: 5,
   teams: 0, // 0 = free-for-all; 2-4 teams
   teamBases: false,
   ctf: false, // capture the flag (needs team bases)
   scoreLimit: 0, // first to this many points (or captures) wins; 0 = play on for ever
   timeLimit: 0, // seconds; 0 = no time limit
   flagReturnTime: 30, // teams: give each a base (spawns, flag stand) and make the pickups even
+  wheelHub: 0, // a wheel station's hub radius (0: no hub)
+  wheelSpokes: 4,
   tower: 0, // >0: a spin tower (its half-width round the spin) instead of a ring
   diskBowl: false, // disk world: curve the surface up into a paraboloid (gravity always straight into it)
   launchPads: true, // nested spheres: pads that throw you between ball and shell

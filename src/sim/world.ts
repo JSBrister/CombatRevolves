@@ -2,6 +2,7 @@ import { BIKE_RADIUS, generateDisk, generateLevel, generatePlanet, levelSdf, spa
 import { setDisk, setPlanet } from './physics';
 import { localBasis } from './physics';
 import { generateTower } from './tower';
+import { addWheel } from './wheel';
 import { applyTeamBases } from './teams';
 import { rngRange } from './rng';
 import { defaultConfig } from './tuning';
@@ -73,6 +74,7 @@ export function createState(opts: WorldOptions = {}): SimState {
     : config.world === 'disk'
     ? generateDisk(config, state, opts.obstacles ?? true, () => allocId(state))
     : generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true, opts.vehicles ?? -1);
+  if (config.wheelHub > 0 && state.level.shape === 'ring' && !config.twin) addWheel(config, state.level, state, () => allocId(state));
   applyTeamBases(config, state.level);
   state.level.pickupSpots = banPickups(config, state.level.pickupSpots);
   // capture the flag: a flag on each base's stand
@@ -137,7 +139,7 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
     heat: WEAPON_IDS.map(() => 0), overheatUntil: WEAPON_IDS.map(() => 0), ammo: WEAPON_IDS.map(() => 0),
     mag: WEAPON_IDS.map(() => 0), reloadUntil: 0, reloadWeapon: -1, infiniteAmmo: false,
     charge: 0, holdTicks: 0, needRelease: false, burstUntil: 0, meleeReadyTick: 0, vehicle: -1,
-    fireReadyTick: 0, hasJetpack: false, jetFuel: 0, jetting: false, lastGroundTick: -1e9, lastJumpTick: -1e9,
+    fireReadyTick: 0, hasJetpack: false, hasGrapple: false, hook: { state: 0, pos: [0, 0, 0], vel: [0, 0, 0], len: 0, frame: 0 }, jetFuel: 0, jetting: false, lastGroundTick: -1e9, lastJumpTick: -1e9,
     grenades: 0, bounceGrenades: 0, grenadeReadyTick: 0,
     prevButtons: 0, lastInput: neutralInput(id, 0),
     kills: 0, deaths: 0, score: 0, carrying: -1, needles: 0, needleTick: -1e9,
@@ -164,6 +166,8 @@ export function giveLoadout(cfg: SimConfig, p: Player) {
   p.bounceGrenades = Math.max(0, Math.min(MAX_GRENADES, cfg.startBounce ?? MAX_GRENADES));
   p.hasJetpack = !!cfg.startJetpack;
   p.jetFuel = p.hasJetpack ? 1 : 0;
+  p.hasGrapple = !!cfg.startGrapple;
+  p.hook = { state: 0, pos: [0, 0, 0], vel: [0, 0, 0], len: 0, frame: 0 };
 }
 
 /**

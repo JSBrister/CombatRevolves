@@ -293,6 +293,8 @@ export const LEVELS: LevelDef[] = [
     blurb: 'The same spinning disk, curved up into the shape water takes in a spinning bucket, so gravity is always straight into the ground. Walk right up the 80 m-high rim, where you weigh 1.9 g; just don\'t go over it.' },
   { id: 's-rough', mode: 'sandbox', name: 'Rough Planet (hills and mountains)', seed: 55, config: { world: 'planet', R: 120, g: 9.81, planetSpin: 0.3, hills: 50, hillHeight: 8, mountains: 5, mountainHeight: 35 }, props: false, bots: 4,
     blurb: 'A bigger ball with hills and a few mountains on it: high ground to fight over, and from the tops you can see a long way round.' },
+  { id: 's-wheel', mode: 'sandbox', name: 'Wheel Station (ring, spokes and hub)', seed: 56, config: { R: 120, halfWidth: 14, wheelHub: 12 }, bots: 4, items: undefined,
+    blurb: 'The classic: a ring with four spokes up to a hub round the axis. Two spokes have lifts, two have ledges to jump up (further apart as you get lighter). In the hub you walk round the inside of the drum at a tenth of a g, and the best pickups are up there.' },
   { id: 's-tower', mode: 'sandbox', name: 'Spin Tower', seed: 54, config: { R: 100, g: 14.7, tower: 10 }, props: false, vehicles: 0, bots: 4,
     blurb: 'Not a ring: a tower through the axis, spinning end over end, open to the stars. You start on the big bottom floor of one arm under 1.5 g and climb ramps, floor by floor, each one smaller, to the hub at the middle, where you weigh almost nothing. Launch pads there throw you across to the other arm. Don\'t fall off the edge.' },
   { id: 's-wide', mode: 'sandbox', name: 'Wide Ring (150 m)', seed: 33, config: { R: 150, halfWidth: 70 }, bots: 4,
@@ -308,7 +310,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'tower', 'teams', 'teamBases', 'ctf', 'scoreLimit', 'timeLimit', 'bannedItems', 'startWeapons', 'startSticky', 'startBounce', 'startJetpack', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'wheelHub', 'wheelSpokes', 'tower', 'teams', 'teamBases', 'ctf', 'scoreLimit', 'timeLimit', 'bannedItems', 'startWeapons', 'startSticky', 'startBounce', 'startJetpack', 'startGrapple', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
@@ -346,6 +348,7 @@ export interface GameSetup {
   startSticky?: number;
   startBounce?: number;
   startJetpack?: boolean;
+  startGrapple?: boolean;
   scoreLimit?: number; // first to this score (captures, in capture the flag) wins; 0 or unset: no limit
   timeLimit?: number; // seconds; 0 or unset: no limit
 }
@@ -372,6 +375,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}, s
         ...(setup.startSticky !== undefined ? { startSticky: setup.startSticky } : {}),
         ...(setup.startBounce !== undefined ? { startBounce: setup.startBounce } : {}),
         ...(setup.startJetpack !== undefined ? { startJetpack: setup.startJetpack } : {}),
+        ...(setup.startGrapple !== undefined ? { startGrapple: setup.startGrapple } : {}),
       }), timeLimit: campaign ? 0 : Math.max(0, setup.timeLimit ?? 0) },
     variedWalls: def.variedWalls ?? true,
     props: def.props ?? true,

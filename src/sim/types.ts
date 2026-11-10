@@ -19,12 +19,18 @@ export interface SimConfig {
   startSticky: number; // sticky grenades at (re)spawn (at most 4)
   startBounce: number; // bouncing grenades at (re)spawn (at most 4)
   startJetpack: boolean; // spawn with a full jetpack
+  startGrapple: boolean; // spawn with a grappling hook
+  grappleSpeed: number; // how fast the hook flies out (m/s, plus your own velocity)
+  grappleRange: number; // the rope's length: further than this and the hook comes back (m)
+  grappleReel: number; // while you hang on, the rope winds in at this rate (m/s)
   teams: number; // 0 = everyone for themselves; 2-4 = teams (teammates can't hurt each other)
   teamBases: boolean;
   ctf: boolean; // capture the flag (with team bases)
   scoreLimit: number; // deathmatch: first to this score wins (a player's, or a team's total); capture the flag: captures. 0 = no limit
   timeLimit: number; // the match ends after this long (s), highest score wins (or a draw). 0 = no limit
   flagReturnTime: number; // a dropped flag goes home by itself after this long (s) // with teams: each team has a home (spawns, a flag stand) and the pickups are the same on every side
+  wheelHub: number; // ring world: >0 = a hub round the axis this big (radius of its floor, m), joined to the ring by spokes
+  wheelSpokes: number;
   tower: number; // ring world: >0 = a spin tower through the axis instead of a ring: the top (hub) floor's least half-width round the spin (m); the floors below are bigger
   diskBowl: boolean; // disk: the surface curves up (a paraboloid, like water in a spinning bucket) so gravity is always straight into it
   outerShell: number; // planet: >0 = a hollow shell of this radius round the ball, walkable on its inside near its equator
@@ -193,6 +199,7 @@ export const BTN_GRENADE2 = 32; // bouncing grenade: hold to aim, release to thr
 export const BTN_RELOAD = 64;
 export const BTN_MELEE = 128;
 export const BTN_USE = 256; // get on / off a vehicle
+export const BTN_GRAPPLE = 512; // grappling hook: hold to fire it and hang on; let go to drop
 
 // Weapons are addressed by a fixed slot index (also the number keys), in a
 // sensible order: rifles and sidearms, then the specialists, the explosives,
@@ -332,6 +339,9 @@ export interface Player {
   vehicle: number; // id of the vehicle being ridden, or -1
   fireReadyTick: number;
   hasJetpack: boolean;
+  hasGrapple: boolean;
+  /** The grappling hook: 0 stowed, 1 flying out, 2 caught on something (pos: where; len: the rope). Its frame: the ring it's in (twin rings). */
+  hook: { state: 0 | 1 | 2; pos: Vec3; vel: Vec3; len: number; frame: 0 | 1 };
   jetFuel: number; // 0..1
   jetting: boolean; // thrusting this tick (for visuals)
   lastGroundTick: number;
@@ -351,9 +361,9 @@ export interface Player {
 
 export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'rocket' | 'seeker' | 'pellet' | 'chaos' | 'bullet' | 'hover';
 
-export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rocket' | 'seeker' | 'scatter' | 'chaos' | 'revolver' | 'rifle' | 'pistol' | 'jetpack';
+export type ItemKind = 'health' | 'sticky' | 'bounce' | 'grapple' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rocket' | 'seeker' | 'scatter' | 'chaos' | 'revolver' | 'rifle' | 'pistol' | 'jetpack';
 /** Every kind of pickup, in the order menus list them. */
-export const ITEM_KINDS: ItemKind[] = ['health', 'sticky', 'bounce', 'jetpack', 'rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer'];
+export const ITEM_KINDS: ItemKind[] = ['health', 'sticky', 'bounce', 'jetpack', 'grapple', 'rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer'];
 /** The weapons you can be given to start with (all but the flag and the debug hover gun). */
 export const LOADOUT_WEAPONS: WeaponId[] = ['rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer'];
 
@@ -578,6 +588,8 @@ export interface Level {
   pads?: Pad[];
   /** Team bases (with cfg.teams and cfg.teamBases): where each team spawns, and its flag stand. */
   bases?: TeamBase[];
+  /** Wheel station: the hub round the axis and its spokes. */
+  hub?: { r: number; halfLen: number; thickness: number; spokes: { angle: number; w: number; d: number }[] };
   /** Spin tower geometry. */
   tower?: Tower;
   /** Hills and mountains on a planet (c: unit vector to the peak) or a disk (c: the peak's (x, y) on the disk): Gaussian bumps on the surface. */
@@ -604,6 +616,7 @@ export type SimEvent =
   | { type: 'outcome'; outcome: Outcome }
   | { type: 'flag'; what: 'taken' | 'dropped' | 'returned' | 'captured'; flagTeam: number; by: number; pos: Vec3 }
   | { type: 'matchOver'; winner: number }
+  | { type: 'grapple'; id: number; what: 'throw' | 'catch'; pos: Vec3 }
   | { type: 'reload'; id: number }
   | { type: 'mount'; id: number; vehicle: number; on: boolean }
   | { type: 'vehicleHit'; id: number; damage: number; pos: Vec3 }

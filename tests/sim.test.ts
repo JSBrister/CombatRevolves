@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  ITEM_KINDS, STARTING_WEAPONS, WEAPON_IDS, TEAM_COLORS, matchScores, timeLeft, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  BTN_GRAPPLE, ITEM_KINDS, STARTING_WEAPONS, WEAPON_IDS, TEAM_COLORS, matchScores, timeLeft, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -2910,5 +2910,120 @@ describe('51. pickups and loadout', () => {
     expect([me.grenades, me.bounceGrenades, me.hasJetpack]).toEqual([4, 4, false]);
     const c = startLevel(levelById('c1')!, {}, { startWeapons: ['laconic'], bannedItems: ['health'] }).state;
     expect(c.players.find((p) => p.kind === 'human')!.owned).toEqual(STARTING_WEAPONS);
+  });
+});
+
+describe('52. grappling hook', () => {
+  const game = (id = 's-standard') => {
+    const { state, localId } = startLevel(levelById(id)!, {}, { startGrapple: true });
+    state.players = state.players.filter((p) => p.id === localId);
+    state.level.boxes = [];
+    const me = state.players[0];
+    run(state, 30, (s) => [cmdFor(s, localId)]);
+    return { s: state, id: localId, me };
+  };
+  it('throw it at the floor ahead: it catches, and the rope winds you toward it', () => {
+    const { s, id, me } = game();
+    expect(me.hasGrapple).toBe(true);
+    const start = clone(me.pos);
+    run(s, 1, (st) => [cmdFor(st, id, { buttons: BTN_GRAPPLE, yaw: 0, pitch: -0.06 })]); // a little down, spinward
+    let caught = -1;
+    for (let i = 0; i < 120 && caught < 0; i++) { step(s, [cmdFor(s, id, { buttons: BTN_GRAPPLE, yaw: 0, pitch: -0.06 })], s.tick); if (me.hook.state === 2) caught = i; }
+    expect(caught).toBeGreaterThanOrEqual(0);
+    const anchor = clone(me.hook.pos);
+    expect(levelSdf(s.level, s.config, anchor).d).toBeLessThan(0.15); // on the floor
+    const d0 = dist(me.pos, anchor);
+    run(s, 240, (st) => [cmdFor(st, id, { buttons: BTN_GRAPPLE, yaw: 0, pitch: -0.06 })]);
+    expect(dist(me.pos, anchor)).toBeLessThan(d0 - 5); // pulled in
+    expect(dist(me.pos, anchor)).toBeLessThanOrEqual(me.hook.len + 1e-6); // and never further than the rope
+    expect(dist(me.pos, start)).toBeGreaterThan(5);
+    // let go: gone
+    run(s, 1, (st) => [cmdFor(st, id)]);
+    expect(me.hook.state).toBe(0);
+  });
+  it('hang from the ceiling of a lookout... or from the far side: the rope holds you against the spin', () => {
+    const { s, id, me } = game();
+    // a hook caught up near the axis, straight overhead: you hang there, off the floor
+    const up = localBasis(me.pos).up;
+    me.hook = { state: 2, pos: addScaled(me.pos, up, 30), vel: [0, 0, 0], len: 20, frame: 0 };
+    run(s, 120 * 3, (st) => [cmdFor(st, id, { buttons: BTN_GRAPPLE })]);
+    const h = dist(me.pos, me.hook.pos);
+    expect(h).toBeLessThanOrEqual(me.hook.len + 1e-6);
+    expect(me.grounded).toBe(false);
+    expect(s.config.R - Math.hypot(me.pos[0], me.pos[1])).toBeGreaterThan(10); // well up off the floor
+  });
+  it('a throw that hits nothing within the rope\'s length comes back; you can\'t use it without one, or on a bike', () => {
+    const { s, id, me } = game();
+    // straight up toward the axis (100 m away): out of rope at 50 m
+    run(s, 1, (st) => [cmdFor(st, id, { buttons: BTN_GRAPPLE, pitch: 1.5 })]);
+    expect(me.hook.state).toBe(1);
+    let back = false;
+    for (let i = 0; i < 240 && !back; i++) { step(s, [cmdFor(s, id, { buttons: BTN_GRAPPLE, pitch: 1.5 })], s.tick); back = me.hook.state === 0; }
+    expect(back).toBe(true);
+    me.hasGrapple = false;
+    run(s, 2, (st) => [cmdFor(st, id, { buttons: (st.tick % 2) * BTN_GRAPPLE })]);
+    expect(me.hook.state).toBe(0);
+    // picking one up gives you one
+    expect(applyItem(s.config, me, 'grapple', 1)).toBe(true);
+    expect(me.hasGrapple).toBe(true);
+  });
+  it('off by default (outside the menu), and dropped on death when you picked it up', () => {
+    const { state: s, localId } = startLevel(levelById('s-standard')!);
+    const me = s.players.find((p) => p.id === localId)!;
+    expect(me.hasGrapple).toBe(false);
+    applyItem(s.config, me, 'grapple', 1);
+    const n = s.pickups.length;
+    damagePlayer(s, me, -1, 1e4, 1e4, 'test');
+    expect(s.pickups.slice(n).some((p) => p.item === 'grapple')).toBe(true);
+  });
+});
+
+describe('53. wheel station', () => {
+  const wheel = (setup = {}) => {
+    const { state, localId } = startLevel(levelById('s-wheel')!, {}, setup);
+    state.players = state.players.filter((p) => p.id === localId);
+    return { s: state, id: localId, me: state.players[0], H: state.level.hub! };
+  };
+  it('the hub is a drum round the axis: stand on the inside of it at about a tenth of a g', () => {
+    const { s, id, me, H } = wheel();
+    expect(H.spokes.length).toBe(4);
+    const a = H.spokes[0].angle + Math.PI / 4;
+    me.pos = [(H.r - standHeight(1)) * Math.cos(a), (H.r - standHeight(1)) * Math.sin(a), 5];
+    me.vel = [0, 0, 0];
+    run(s, 300, (st) => [cmdFor(st, id)]);
+    expect(me.grounded).toBe(true);
+    expect(Math.abs(Math.hypot(me.pos[0], me.pos[1]) - (H.r - standHeight(1)))).toBeLessThan(0.05);
+    expect(me.apparentG).toBeCloseTo(H.r / s.config.R, 1);
+  });
+  it('every spoke has a lift from the floor up to the hub', () => {
+    const { s, id, me, H } = wheel();
+    const lift = s.level.boxes.find((b) => b.lift)!;
+    expect(s.level.boxes.filter((b) => b.lift).length).toBe(4);
+    const a = Math.atan2(lift.center[1], lift.center[0]);
+    // wait for it at the bottom, step on, ride
+    for (let i = 0; i < 120 * 60 && Math.hypot(lift.center[0], lift.center[1]) < s.config.R - 1; i++) step(s, [cmdFor(s, id)], s.tick);
+    const r = s.config.R - 0.4 - standHeight(1);
+    me.pos = [r * Math.cos(a), r * Math.sin(a), 0];
+    me.vel = [0, 0, 0];
+    let minR = Infinity;
+    for (let i = 0; i < 120 * 40; i++) { step(s, [cmdFor(s, id)], s.tick); minR = Math.min(minR, Math.hypot(me.pos[0], me.pos[1])); }
+    expect(minR).toBeLessThan(H.r); // up into the hub
+    expect(me.alive).toBe(true);
+  });
+  it('or climb a spoke with the grappling hook', () => {
+    const { s, id, me, H } = wheel({ startGrapple: true });
+    s.level.boxes = s.level.boxes.filter((b) => !b.lift);
+    const a = H.spokes[0].angle, r0 = s.config.R - standHeight(1);
+    me.pos = [r0 * Math.cos(a), r0 * Math.sin(a), 0];
+    me.vel = [0, 0, 0];
+    run(s, 60, (st) => [cmdFor(st, id)]);
+    let hold = true, minR = Infinity;
+    for (let i = 0; i < 120 * 40 && minR > H.r + 1.5; i++) {
+      if (me.hook.state === 2 && me.hook.len <= 1.6) hold = false;
+      else if (me.hook.state === 0) hold = !hold || i % 2 === 0 ? !hold : hold;
+      step(s, [cmdFor(s, id, { pitch: 1.5, buttons: hold ? BTN_GRAPPLE : 0 })], s.tick);
+      minR = Math.min(minR, Math.hypot(me.pos[0], me.pos[1]));
+    }
+    expect(minR).toBeLessThan(H.r + 1.5);
   });
 });

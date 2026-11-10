@@ -8,7 +8,7 @@ import { disposeTree } from './dispose';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
 
 const PICKUP_GLOW: Record<string, number> = {
-  health: 0xff6060, sticky: 0x7fb6ff, bounce: 0xffd23a, redRifle: 0xff4a3a, launcher: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a, hammer: 0x9ad0ff, jetpack: 0xffa040,
+  health: 0xff6060, sticky: 0x7fb6ff, bounce: 0xffd23a, redRifle: 0xff4a3a, launcher: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a, hammer: 0x9ad0ff, jetpack: 0xffa040, grapple: 0xd8c08a,
   rocket: 0xffa03a, seeker: 0xff6ad8, scatter: 0xffc070, chaos: 0xb0b0ff, revolver: 0xfff2b0,
   rifle: 0x55c8ff, pistol: 0x8dff5a,
 };
@@ -105,7 +105,8 @@ interface PlayerView {
   shell: THREE.Mesh; // shield bubble, a little outside the body
   shellGlow: number; // 0..1, decays
   prevShield: number;
-  carry: { team: number; flag: THREE.Group; beacon: THREE.Sprite } | null; // capture the flag: a big flag on their back, and a beacon over them
+  carry: { team: number; flag: THREE.Group; beacon: THREE.Sprite } | null;
+  rope: { line: THREE.Mesh; hook: THREE.Mesh } | null; // the grappling hook, while it's out // capture the flag: a big flag on their back, and a beacon over them
 }
 
 interface PickupView {
@@ -342,7 +343,7 @@ export class EntityViews {
   reset() {
     for (const v of this.flagViews.values()) { disposeTree(v.flag, undefined, true); disposeTree(v.beacon, undefined, true); }
     this.flagViews.clear();
-    for (const v of this.players.values()) { if (v.carry) { disposeTree(v.carry.flag, undefined, true); disposeTree(v.carry.beacon, undefined, true); } disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); }
+    for (const v of this.players.values()) { if (v.rope) { disposeTree(v.rope.line, undefined, true); disposeTree(v.rope.hook, undefined, true); } if (v.carry) { disposeTree(v.carry.flag, undefined, true); disposeTree(v.carry.beacon, undefined, true); } disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); }
     for (const v of this.projs.values()) this.disposeProj(v);
     for (const v of this.props.values()) disposeTree(v, undefined, true);
     for (const v of this.explosions.values()) disposeTree(v, undefined, true, new Set([this.unitSphere]));
@@ -450,7 +451,7 @@ export class EntityViews {
     const chargeGlow = this.makeGlow(0xff2a1a, 1, pl.id === this.localId ? LAYER_SELF : 0);
     chargeGlow.visible = false;
     gunHolder.add(chargeGlow);
-    const v: PlayerView = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, wasAlive: pl.alive, chargeGlow, flame, shell, shellGlow: 0, prevShield: pl.shield, carry: null };
+    const v: PlayerView = { group, body, shieldFlash: 0, marker, gunHolder, gunWeapon: -1, wasAlive: pl.alive, chargeGlow, flame, shell, shellGlow: 0, prevShield: pl.shield, carry: null, rope: null };
     this.players.set(id, v);
     return v;
   }
@@ -552,6 +553,31 @@ export class EntityViews {
         v.carry.beacon.scale.setScalar(Math.max(3, dCam * 0.06) * (0.85 + 0.15 * Math.sin(t * 8)));
         v.carry.beacon.visible = p.id !== this.localId || this.showSelf;
       }
+      // the grappling hook: a line from your hand to the hook (from just under your eye, in first person)
+      if (p.hook && p.hook.state !== 0) {
+        if (!v.rope) {
+          // a thin cylinder (lines are one pixel wide, and vanish), 1 m long along y, stretched each frame
+          const g = new THREE.CylinderGeometry(0.035, 0.035, 1, 6, 1, true);
+          g.translate(0, 0.5, 0);
+          const line = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xe8d8a8, emissive: 0x403820, roughness: 0.8 }));
+          line.frustumCulled = false;
+          const hook = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), new THREE.MeshStandardMaterial({ color: 0xc8ccd4, metalness: 0.9, roughness: 0.3, emissive: 0x303030 }));
+          this.root.add(line, hook);
+          v.rope = { line, hook };
+        }
+        const hp = this.toView(p.hook.pos);
+        const up = new THREE.Vector3(...b.up);
+        const from = p.id === this.localId && !this.showSelf
+          ? this.cameraPos.clone().addScaledVector(up, -0.35)
+          : v.group.position.clone().addScaledVector(up, 0.45 * p.size);
+        const to = new THREE.Vector3(hp[0], hp[1], hp[2]), span = to.clone().sub(from);
+        v.rope.line.position.copy(from);
+        v.rope.line.scale.set(1, Math.max(0.01, span.length()), 1);
+        v.rope.line.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), span.normalize());
+        (v.rope.line.material as THREE.MeshStandardMaterial).color.setHex(p.hook.state === 2 ? 0xf2e2b0 : 0x9a8a68); // (taut: brighter)
+        v.rope.hook.position.set(hp[0], hp[1], hp[2]);
+        v.rope.hook.rotation.y += 0.2;
+      } else if (v.rope) { disposeTree(v.rope.line, undefined, true); disposeTree(v.rope.hook, undefined, true); v.rope = null; }
       v.flame.visible = p.jetting;
       if (p.jetting) v.flame.scale.setScalar(0.7 + Math.random() * 0.5);
       // Shields: the bubble flashes on hits, bursts when the shield breaks,
@@ -572,6 +598,7 @@ export class EntityViews {
       if (v.carry && !bare) mat.emissive.setHex(TEAM_COLORS[v.carry.team] ?? 0xffffff).multiplyScalar(0.25 + 0.2 * Math.sin(performance.now() * 0.008));
     }
     for (const [id, v] of this.players) {
+      if (v.rope && (!seenP.has(id) || !v.group.visible)) { disposeTree(v.rope.line, undefined, true); disposeTree(v.rope.hook, undefined, true); v.rope = null; }
       if (v.carry && (!seenP.has(id) || !v.group.visible)) { disposeTree(v.carry.flag, undefined, true); disposeTree(v.carry.beacon, undefined, true); v.carry = null; }
       if (!seenP.has(id)) { disposeTree(v.group, undefined, true); disposeTree(v.marker, undefined, true); this.players.delete(id); }
     }

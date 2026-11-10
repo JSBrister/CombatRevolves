@@ -161,8 +161,58 @@ export class RingScene {
     }
     this.level.add(ribs);
 
+    if (level.hub) this.buildHub(level);
     this.buildBoxes(cfg, level);
     this.buildSky(cfg);
+  }
+
+  /** The wheel station's hub: a drum round the axis (its floor on the inside), open where the spokes come in, with lit ends. */
+  private buildHub(level: Level) {
+    const H = level.hub!, L = H.halfLen, r = H.r, T = H.thickness;
+    const tex = this.floorTex('deck');
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    const inner = new THREE.MeshStandardMaterial({ map: tex, color: 0xb8c8dc, side: THREE.DoubleSide, roughness: 0.8, metalness: 0.25 });
+    const outer = new THREE.MeshStandardMaterial({ color: 0x3a404c, side: THREE.DoubleSide, roughness: 0.85, metalness: 0.5 });
+    /** A piece of the drum's wall: angles a0..a1, z0..z1, at radius rr. */
+    const patch = (rr: number, a0: number, a1: number, z0: number, z1: number, mat: THREE.Material) => {
+      const nu = Math.max(4, Math.ceil(((a1 - a0) * rr) / 1.5)), pos: number[] = [], uv: number[] = [], idx: number[] = [];
+      for (let i = 0; i <= nu; i++) for (const z of [z0, z1]) {
+        const a = a0 + ((a1 - a0) * i) / nu;
+        pos.push(rr * Math.cos(a), rr * Math.sin(a), z);
+        uv.push((a * rr) / 4, z / 4);
+      }
+      for (let i = 0; i < nu; i++) { const k = i * 2; idx.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, mat);
+      m.receiveShadow = true;
+      this.level.add(m);
+    };
+    for (const [rr, mat] of [[r, inner], [r + T, outer]] as const) {
+      const d = H.spokes[0]?.d ?? 0;
+      patch(rr, 0, 2 * Math.PI, d, L, mat);
+      patch(rr, 0, 2 * Math.PI, -L, -d, mat);
+      // the middle band, between the spokes' openings
+      const gaps = H.spokes.map((s) => ({ a: s.angle, h: s.w / r })).sort((x, y) => x.a - y.a);
+      gaps.forEach((gp, i) => {
+        const next = gaps[(i + 1) % gaps.length];
+        const a0 = gp.a + gp.h, a1 = next.a - next.h + (i + 1 === gaps.length ? 2 * Math.PI : 0);
+        patch(rr, a0, a1, -d, d, mat);
+      });
+    }
+    // the ends: plates with a glowing ring round the axis
+    for (const sz of [-1, 1]) {
+      const end = new THREE.Mesh(new THREE.CircleGeometry(r + T, 64), new THREE.MeshStandardMaterial({ color: 0x5a6474, side: THREE.DoubleSide, roughness: 0.7, metalness: 0.4 }));
+      end.position.z = sz * L;
+      const glow = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.8, 48), new THREE.MeshBasicMaterial({ color: 0xfff1c8, side: THREE.DoubleSide }));
+      glow.position.z = sz * (L - 0.05);
+      this.level.add(end, glow);
+    }
+    const lamp = new THREE.PointLight(0xfff2dd, 1.2, r * 3, 1);
+    this.level.add(lamp);
   }
 
   /**

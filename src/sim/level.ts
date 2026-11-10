@@ -587,6 +587,16 @@ function ringSdf(level: Level, cfg: SimConfig, p: Vec3): SdfHit {
     cutHoles(p, theta, level.holes, R, f); // ...with holes in it
     if (f.d < out.d) { out.d = f.d; out.n = f.n; }
   } else annulus(p, rho, R, R + hull, -(W + T), W + T, out); // floor / hull
+  if (level.hub) {
+    // the wheel station's hub: a drum round the axis (its inside is a floor), with an opening where each spoke comes in
+    const H = level.hub, L = H.halfLen, T = H.thickness;
+    const f: SdfHit = { d: Infinity, n: [0, 0, 1] };
+    annulus(p, rho, H.r, H.r + T, -L - T, L + T, f);
+    cutHoles(p, theta, H.spokes.map((s) => ({ angle: s.angle, z: 0, halfArc: s.w, halfZ: s.d })), H.r, f);
+    annulus(p, rho, 0, H.r + T, L, L + T, f); // the ends
+    annulus(p, rho, 0, H.r + T, -L - T, -L, f);
+    if (f.d < out.d) { out.d = f.d; out.n = f.n; }
+  }
   for (const dk of level.decks ?? []) {
     const f: SdfHit = { d: Infinity, n: [0, 0, 1] };
     annulus(p, rho, dk.r, dk.r + dk.thickness, -W, W, f);

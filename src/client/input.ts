@@ -2,7 +2,7 @@
 // exclusively through these commands, exactly like bots and (later) remote
 // clients.
 
-import { BTN_AIM, BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_RELOAD, BTN_SPRINT, BTN_USE, PLAYER_WEAPON_SLOTS, type InputCmd } from '../sim';
+import { BTN_AIM, BTN_FIRE, BTN_GRAPPLE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_RELOAD, BTN_SPRINT, BTN_USE, PLAYER_WEAPON_SLOTS, type InputCmd } from '../sim';
 
 export class InputSampler {
   keys = new Set<string>();
@@ -86,6 +86,7 @@ export class InputSampler {
     if (k.has('KeyF')) buttons |= BTN_GRENADE2;
     if (k.has('KeyR')) buttons |= BTN_RELOAD;
     if (k.has('KeyQ')) buttons |= BTN_MELEE;
+    if (k.has('KeyC') || this.mouseButtons & 2) buttons |= BTN_GRAPPLE; // (C, or the middle mouse button)
     if (k.has('KeyE')) buttons |= BTN_USE;
     const moveY = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
     const moveX = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);

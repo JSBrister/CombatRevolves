@@ -225,6 +225,21 @@ export function makePickup(item: ItemKind): THREE.Group {
       }
       break;
     }
+    case 'grapple': { // a coil of rope and a three-pronged hook
+      const steel = mat(0xc8ccd4, 0x202428, 0.9);
+      const coil = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.06, 8, 20), mat(0xb08a4a, 0x201408, 0.1));
+      coil.rotation.x = Math.PI / 2;
+      const shank = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.5, 8), steel);
+      shank.position.y = 0.25;
+      g.add(coil, shank);
+      for (let i = 0; i < 3; i++) {
+        const prong = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.025, 6, 12, Math.PI), steel);
+        prong.position.y = 0.52;
+        prong.rotation.y = (i * 2 * Math.PI) / 3;
+        g.add(prong);
+      }
+      break;
+    }
     case 'jetpack': {
       const grey = mat(0x8a909c);
       const flame = mat(0xff9a3a, 0xff5a10, 0.2);
@@ -245,5 +260,5 @@ export function makePickup(item: ItemKind): THREE.Group {
 
 export const ITEM_NAMES: Record<ItemKind, string> = {
   health: 'Health', sticky: 'Sticky grenades', bounce: 'Bouncing grenades', redRifle: 'Overclocked Plasma Rifle',
-  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', hammer: 'Grav Mallet', rocket: 'Torch Rocket', seeker: 'Seeker Swarm', scatter: 'Scattergun', chaos: 'Roulette Repeater', revolver: 'Revolver', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack',
+  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', hammer: 'Grav Mallet', rocket: 'Torch Rocket', seeker: 'Seeker Swarm', scatter: 'Scattergun', chaos: 'Roulette Repeater', revolver: 'Revolver', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack', grapple: 'Grappling Hook',
 };

@@ -8,7 +8,7 @@ import { apart, convertBody, convertDir, frameOf, frameOmega } from './twin';
 import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setDisk, setPlanet, setSpinAlpha, viewVectors } from './physics';
 import { rngInt, rngNext } from './rng';
 import {
-  BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, WEAPON_FLAG, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
+  BTN_FIRE, BTN_GRAPPLE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, WEAPON_FLAG, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
   omegaOf, spinAt,
   type Bolt, type BoltKind, type Flag, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
   type Outcome, type Player, type Prop, type SimConfig, type SimState, type Vehicle, type WeaponId, type WeaponStats,
@@ -144,6 +144,7 @@ export function step(state: SimState, inputs: readonly InputCmd[], tick: number 
   for (const p of state.players) if (p.alive && p.vehicle < 0) inFrame(state, omega, p, (w) => movePlayer(state, p, w));
   updateVehicles(state, omega);
   collidePlayers(state);
+  for (const p of state.players) updateHook(state, p, omega);
 
   // 3. props
   for (const pr of state.props) inFrame(state, omega, pr, (w) => moveProp(state, pr, w));
@@ -1258,6 +1259,7 @@ function dropItems(state: SimState, p: Player) {
     drops.push({ item: id as ItemKind, amount: ws.magSize > 0 ? rounds : -1 });
   }
   if (p.hasJetpack && p.jetFuel > 0.05) drops.push({ item: 'jetpack', amount: Math.round(p.jetFuel * 100) });
+  if (p.hasGrapple && !cfg.startGrapple) drops.push({ item: 'grapple', amount: 1 });
   if (p.grenades > 0) drops.push({ item: 'sticky', amount: p.grenades });
   if (p.bounceGrenades > 0) drops.push({ item: 'bounce', amount: p.bounceGrenades });
   if (!drops.length) return;
@@ -1306,6 +1308,10 @@ export function applyItem(cfg: SimConfig, p: Player, item: ItemKind, amount: num
     case 'bounce':
       if (p.bounceGrenades >= MAX_GRENADES) return false;
       p.bounceGrenades = full ? MAX_GRENADES : Math.min(MAX_GRENADES, p.bounceGrenades + amount);
+      return true;
+    case 'grapple':
+      if (p.hasGrapple) return false;
+      p.hasGrapple = true;
       return true;
     case 'jetpack': {
       const fuel = full ? 1 : amount / 100;
@@ -1531,4 +1537,62 @@ function updateMatch(state: SimState) {
   state.over = true;
   state.winner = leaders.length === 1 ? leaders[0].id : -1;
   state.events.push({ type: 'matchOver', winner: state.winner });
+}
+
+// =========================================================================== grappling hook
+
+/**
+ * The grappling hook. Hold the button: it flies out from your eye along your
+ * aim (a free body like anything else: it curves in the spin), and if it hits
+ * something within the rope's length it holds. While you keep holding, the
+ * rope winds in, and it never lets you be further from the hook than the rope
+ * (it can only pull, like a rope). Let go and you drop it.
+ */
+function updateHook(state: SimState, p: Player, omega: number) {
+  const cfg = state.config, h = p.hook;
+  const held = (p.lastInput.buttons & BTN_GRAPPLE) !== 0;
+  if (!p.alive || !p.hasGrapple || p.vehicle >= 0 || !held || (h.state !== 0 && cfg.twin && frameOf(cfg, p.pos) !== h.frame)) {
+    if (h.state !== 0) h.state = 0;
+    return;
+  }
+  const pressed = (p.lastInput.buttons & ~p.prevButtons & BTN_GRAPPLE) !== 0;
+  if (h.state === 0) {
+    if (!pressed) return; // (hold it to keep the hook; a fresh press to throw again)
+    const v = viewVectors(p.pos, p.yaw, p.pitch);
+    h.pos = addScaled(p.pos, v.up, eyeOffset(p));
+    h.vel = addScaled(p.vel, v.aim, cfg.grappleSpeed);
+    h.len = 0;
+    h.frame = cfg.twin ? frameOf(cfg, p.pos) : 0;
+    h.state = 1;
+    state.events.push({ type: 'grapple', id: p.id, what: 'throw', pos: clone(h.pos) });
+    return;
+  }
+  if (h.state === 1) {
+    // in flight: a short hop each tick, stopping at the first thing it touches
+    if (cfg.twin) setSdfFrame(h.frame, state.frameAngle);
+    const from = clone(h.pos);
+    const to = clone(h.pos), vel = clone(h.vel);
+    integrate(to, vel, DT, cfg.twin ? frameOmega(omega, h.frame) : omega, cfg);
+    const hit = sphereTrace(state.level, cfg, from, to, 0.08);
+    if (hit) {
+      h.pos = hit.pos;
+      h.vel = [0, 0, 0];
+      h.state = 2;
+      h.len = Math.max(1.5, dist(p.pos, h.pos));
+      state.events.push({ type: 'grapple', id: p.id, what: 'catch', pos: clone(h.pos) });
+    } else { h.pos = to; h.vel = vel; }
+    if (h.state === 1 && dist(p.pos, h.pos) > cfg.grappleRange) h.state = 0; // out of rope: it comes back
+    return;
+  }
+  // caught: wind in, and hold you within the rope (it can only pull)
+  h.len = Math.max(1.5, h.len - cfg.grappleReel * DT);
+  const d = sub(p.pos, h.pos), l = len(d);
+  if (l > h.len) {
+    const n = scale(d, 1 / l);
+    p.pos = addScaled(h.pos, n, h.len);
+    const vr = dot(p.vel, n);
+    if (vr > 0) p.vel = addScaled(p.vel, n, -vr);
+    // (pulled up off the floor: you're hanging, not standing)
+    if (-dot(n, localBasis(p.pos).up) > 0.25) { p.grounded = false; p.groundNormal = null; }
+  }
 }
