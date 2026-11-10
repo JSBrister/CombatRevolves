@@ -129,3 +129,8 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 .items-title { flex-basis: 100%; text-align: center; color: #f2c94c; letter-spacing: 2px; font-size: 12px; }
 .items-title span { color: #cfe9ff; opacity: 0.55; letter-spacing: 0; }
 .items-panel label.chk { white-space: nowrap; }
+#killcam { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); z-index: 6; text-align: center; font-size: 15px; letter-spacing: 1px; color: #e8f6ff;
+  background: rgba(8, 16, 32, 0.72); border: 1px solid var(--hud-dim); padding: 8px 16px; pointer-events: none; }
+#killcam b { color: #ff6a3d; letter-spacing: 3px; }
+#killcam .small { font-size: 11px; opacity: 0.6; margin-top: 2px; }
+#killcam-bar { position: absolute; left: 0; bottom: 0; height: 2px; background: #ff6a3d; }

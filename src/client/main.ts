@@ -13,6 +13,7 @@ import { BOLT_COLORS, EntityViews, type PosMap } from './entities';
 import { Hud } from './hud';
 import { basesFor, buildMatchPanel, buildPlayerPanel, match, player, setupFor } from './setup';
 import { NetClient } from '../net/client';
+import { KillCam } from './killcam';
 import { InputSampler } from './input';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, RingScene } from './scene';
 import './style.css';
@@ -60,6 +61,8 @@ let localId = -1;
 let botIds: number[] = [];
 let prev: PosMap = new Map();
 let prevFrameAngle = 0;
+const killcam = new KillCam();
+let killcamWas = false;
 /** A network game: the socket and the client's side of the match. Null when playing locally. */
 let net: { ws: WebSocket; client: NetClient } | null = null;
 const NO_PREV: PosMap = new Map();
@@ -94,6 +97,7 @@ function startGame(def: LevelDef) {
   rs.build(cfg, state.level, currentLevel.sky ?? 'space');
   views.reset();
   views.localId = localId;
+  killcam.clear();
   input.yaw = state.players.find((p) => p.id === localId)!.yaw;
   input.pitch = 0;
   input.weapon = 0;
@@ -348,6 +352,8 @@ function handleEvent(e0: SimEvent) {
       break;
     }
   }
+  // you were killed: the kill cam (deathmatch: the campaign has its own ending)
+  if (e.type === 'kill' && e.victim === localId && state.mode === 'sandbox') killcam.onDeath(e.victim, e.killer);
   hud.onEvent(state, e, localId);
 }
 
@@ -366,7 +372,7 @@ function netTick() {
   const after = c.localPlayer;
   if (cfg.world !== 'ring' && from && after && after.alive && dist(from, after.pos) < 5) input.yaw = transportYaw(input.yaw, from, after.pos);
   const rs0 = c.renderState(1, 0);
-  if (rs0) views.onTick(rs0);
+  if (rs0) { if (!killcam.active) views.onTick(rs0); killcam.record(rs0); }
 }
 
 function simTick() {
@@ -382,7 +388,8 @@ function simTick() {
   const meAfter = state.players.find((p) => p.id === localId);
   if (cfg.world !== 'ring' && from && meAfter && meAfter.alive && dist(from, meAfter.pos) < 5) input.yaw = transportYaw(input.yaw, from, meAfter.pos);
   for (const e of state.events) handleEvent(e);
-  views.onTick(state);
+  if (!killcam.active) views.onTick(state);
+  killcam.record(state);
 }
 
 function previewKind(): BoltKind | ThrownKind | null {
@@ -415,10 +422,17 @@ function frame(now: number) {
   if (steps === MAX_STEPS) acc = 0; // can't keep up: drop time rather than spiral
   const alpha = acc / DT;
 
-  // what to draw: the local world, or (network) everyone else interpolated and you predicted
-  const rstate = (net && net.client.renderState(alpha, dtReal)) || state;
-  const rprev = net ? NO_PREV : prev, ralpha = net ? 1 : alpha;
-  const fa = net ? rstate.frameAngle : prevFrameAngle + (state.frameAngle - prevFrameAngle) * alpha;
+  // what to draw: the local world, or (network) everyone else interpolated and you predicted; or the kill cam's replay
+  const live = (net && net.client.renderState(alpha, dtReal)) || state;
+  const kc = killcam.next(dtReal, live);
+  if (kc) views.onTick(kc.state); // (its trails grow as it plays)
+  if (kc === null && killcamWas) { views.reset(); views.localId = localId; } // (a clean slate after a replay)
+  killcamWas = kc !== null;
+  $('killcam').classList.toggle('hidden', !kc);
+  $('crosshair').style.visibility = kc ? 'hidden' : '';
+  const rstate = kc ? kc.state : live;
+  const rprev = net || kc ? NO_PREV : prev, ralpha = net || kc ? 1 : alpha;
+  const fa = kc ? kc.frameAngle : net ? rstate.frameAngle : prevFrameAngle + (state.frameAngle - prevFrameAngle) * alpha;
   const me = rstate.players.find((p) => p.id === localId);
   const myTick = net?.client.pred?.tick ?? state.tick; // (the tick your own timers run on)
   // Twin rings: draw everything in the frame of the ring you're on.
@@ -440,7 +454,15 @@ function frame(now: number) {
     ff.pos.add(mv);
     camera.position.copy(ff.pos);
     camera.quaternion.copy(ff.quat);
+  } else if (kc) {
+    // the kill cam: fixed to the stars (so the station turns), looking at the shot side-on; you're visible, and so are the straight inertial trails
+    camera.layers.enable(LAYER_SELF);
+    camera.layers.enable(LAYER_INERTIAL_ONLY);
+    camera.position.set(...kc.eye);
+    camera.up.set(...kc.up);
+    camera.lookAt(...kc.target);
   } else if (me) {
+    camera.layers.disable(LAYER_INERTIAL_ONLY);
     const p0 = views.toView(rprev.get(me.id) ?? me.pos), p1 = views.toView(me.pos);
     const pos: Vec3 = [p0[0] + (p1[0] - p0[0]) * ralpha, p0[1] + (p1[1] - p0[1]) * ralpha, p0[2] + (p1[2] - p0[2]) * ralpha];
     const v = viewVectors(pos, input.yaw, input.pitch);
@@ -473,7 +495,7 @@ function frame(now: number) {
   const maxT = pk === 'laconic' ? cfg.weapons.laconic.lifetime : 22;
   views.setPreview(pk ? predictTrajectory(net?.client.pred ?? state, localId, pk, input.yaw, input.pitch, maxT) : null, BOLT_COLORS[pk ?? 'rifle']);
   // first-person gun, mouse slowdown while charging the laser, owned list for the wheel
-  views.setViewWeapon(me?.weapon ?? 0, !!me && me.alive && !view.freefly && me.vehicle < 0, me?.carrying ?? -1);
+  views.setViewWeapon(me?.weapon ?? 0, !kc && !!me && me.alive && !view.freefly && me.vehicle < 0, me?.carrying ?? -1);
   views.setViewCharge(me, myTick);
   input.lookScale = me && isLaconicBusy(me, myTick) ? cfg.weapons.laconic.chargeLookScale : 1;
   views.reloadDip = me && me.reloadUntil > myTick && me.reloadWeapon === me.weapon ? Math.min(1, views.reloadDip + dtReal * 6) : Math.max(0, views.reloadDip - dtReal * 6);
@@ -630,6 +652,9 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('#loading button[da
 }
 $('btn-back').addEventListener('click', () => show(net ? 'paused' : 'title'));
 buildPlayerPanel($('player-setup'));
+$('btn-killcam').textContent = `Kill cam: ${killcam.enabled ? 'On' : 'Off'}`;
+$('btn-killcam').addEventListener('click', () => { killcam.setEnabled(!killcam.enabled); $('btn-killcam').textContent = `Kill cam: ${killcam.enabled ? 'On' : 'Off'}`; });
+canvas.addEventListener('mousedown', () => { if (killcam.active) killcam.stop(); }); // (click to skip)
 $('btn-gfx').textContent = `Graphics: ${gfx === 'high' ? 'High' : 'Low'}`;
 $('btn-gfx').addEventListener('click', () => {
   try { localStorage.setItem('cr-graphics', gfx === 'high' ? 'low' : 'high'); } catch { /* can't remember it: still switch for now */ }
@@ -717,6 +742,7 @@ function netConnect(addr: string) {
       rs.build(cfg, state.level, 'space');
       views.reset();
       views.localId = localId;
+      killcam.clear();
       input.pitch = 0;
       input.weapon = 0;
       prev = new Map();
