@@ -5,7 +5,7 @@ import { generateTower } from './tower';
 import { applyTeamBases } from './teams';
 import { rngRange } from './rng';
 import { defaultConfig } from './tuning';
-import { DT, STARTING_WEAPONS, WEAPON_IDS, neutralInput, omegaOf, type GameMode, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
+import { DT, ITEM_KINDS, STARTING_WEAPONS, WEAPON_IDS, neutralInput, omegaOf, type GameMode, type ItemKind, type Player, type PlayerKind, type SimConfig, type SimState } from './types';
 import { type Vec3, addScaled, clone } from './vec';
 
 export const PLAYER_RADIUS = 0.4;
@@ -74,6 +74,7 @@ export function createState(opts: WorldOptions = {}): SimState {
     ? generateDisk(config, state, opts.obstacles ?? true, () => allocId(state))
     : generateLevel(config, state, opts.obstacles ?? true, () => allocId(state), opts.variedWalls ?? true, opts.vehicles ?? -1);
   applyTeamBases(config, state.level);
+  state.level.pickupSpots = banPickups(config, state.level.pickupSpots);
   // capture the flag: a flag on each base's stand
   if (config.ctf && state.level.bases) {
     for (const b of state.level.bases) {
@@ -132,17 +133,53 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
     alive: true, respawnTick: 0, homeSpawn: si,
     health: state.config.maxHealth, shield: state.config.maxShield,
     lastDamageTick: -1e9, lastAttacker: -1,
-    weapon: 0, owned: [...STARTING_WEAPONS],
+    weapon: 0, owned: [],
     heat: WEAPON_IDS.map(() => 0), overheatUntil: WEAPON_IDS.map(() => 0), ammo: WEAPON_IDS.map(() => 0),
     mag: WEAPON_IDS.map(() => 0), reloadUntil: 0, reloadWeapon: -1, infiniteAmmo: false,
     charge: 0, holdTicks: 0, needRelease: false, burstUntil: 0, meleeReadyTick: 0, vehicle: -1,
     fireReadyTick: 0, hasJetpack: false, jetFuel: 0, jetting: false, lastGroundTick: -1e9, lastJumpTick: -1e9,
-    grenades: MAX_GRENADES, bounceGrenades: MAX_GRENADES, grenadeReadyTick: 0,
+    grenades: 0, bounceGrenades: 0, grenadeReadyTick: 0,
     prevButtons: 0, lastInput: neutralInput(id, 0),
     kills: 0, deaths: 0, score: 0, carrying: -1, needles: 0, needleTick: -1e9,
   };
+  giveLoadout(state.config, p);
   state.players.push(p);
   return id;
+}
+
+/** The weapons everyone starts with (never dropped on death: everyone has them). */
+export function startWeaponIds(cfg: SimConfig): number[] {
+  const ids = (cfg.startWeapons ?? []).map((w) => WEAPON_IDS.indexOf(w)).filter((w) => w >= 0 && WEAPON_IDS[w] !== 'flag' && WEAPON_IDS[w] !== 'hover');
+  return ids.length ? [...new Set(ids)].sort((a, b) => a - b) : [...STARTING_WEAPONS]; // (nothing at all: the usual two)
+}
+
+/** Fill a player's hands as at a (re)spawn: the starting weapons (full), grenades and jetpack. */
+export function giveLoadout(cfg: SimConfig, p: Player) {
+  p.owned = startWeaponIds(cfg);
+  p.mag = WEAPON_IDS.map(() => 0);
+  p.ammo = WEAPON_IDS.map(() => 0);
+  for (const w of p.owned) { const st = cfg.weapons[WEAPON_IDS[w]]; p.mag[w] = st.magSize; p.ammo[w] = st.ammoMax; }
+  p.weapon = p.owned[0];
+  p.grenades = Math.max(0, Math.min(MAX_GRENADES, cfg.startSticky ?? MAX_GRENADES));
+  p.bounceGrenades = Math.max(0, Math.min(MAX_GRENADES, cfg.startBounce ?? MAX_GRENADES));
+  p.hasJetpack = !!cfg.startJetpack;
+  p.jetFuel = p.hasJetpack ? 1 : 0;
+}
+
+/**
+ * Take the banned pickups off the field: each banned kind becomes one allowed
+ * kind (preferring the level's own), everywhere, so a symmetric layout stays
+ * symmetric. Nothing allowed at all: no pickups.
+ */
+export function banPickups(cfg: SimConfig, spots: { pos: Vec3; item: ItemKind }[]): { pos: Vec3; item: ItemKind }[] {
+  const banned = new Set(cfg.bannedItems ?? []);
+  if (!banned.size) return spots;
+  const own = [...new Set(spots.map((s) => s.item))].filter((k) => !banned.has(k));
+  const pool = own.length ? own : ITEM_KINDS.filter((k) => !banned.has(k));
+  if (!pool.length) return [];
+  const swap = new Map<ItemKind, ItemKind>();
+  [...new Set(spots.map((s) => s.item))].filter((k) => banned.has(k)).forEach((k, i) => swap.set(k, pool[i % pool.length]));
+  return spots.map((s) => (banned.has(s.item) ? { ...s, item: swap.get(s.item)! } : s));
 }
 
 /** Dummies (homeSpawn < 0) stand in a row 14 m spinward of spawn 0. */

@@ -14,6 +14,11 @@ export interface SimConfig {
   spin: boolean; // false: the world doesn't rotate at all (Earth)
   world: 'ring' | 'planet' | 'disk'; // 'planet': on the OUTSIDE of a spinning ball of radius R, gravity g toward its centre; 'disk': on top of a spinning disk of radius R, gravity g straight down the axis
   planetSpin: number; // planet: how much of g the spin cancels at the equator; disk: the spin's outward push at the rim, as a multiple of g. Sets the spin rate
+  bannedItems: ItemKind[]; // pickups that never appear (each banned kind's spots get one allowed kind instead, the same one everywhere, so team sides stay even)
+  startWeapons: WeaponId[]; // what everyone (re)spawns with, magazines full
+  startSticky: number; // sticky grenades at (re)spawn (at most 4)
+  startBounce: number; // bouncing grenades at (re)spawn (at most 4)
+  startJetpack: boolean; // spawn with a full jetpack
   teams: number; // 0 = everyone for themselves; 2-4 = teams (teammates can't hurt each other)
   teamBases: boolean;
   ctf: boolean; // capture the flag (with team bases)
@@ -347,6 +352,10 @@ export interface Player {
 export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'rocket' | 'seeker' | 'pellet' | 'chaos' | 'bullet' | 'hover';
 
 export type ItemKind = 'health' | 'sticky' | 'bounce' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rocket' | 'seeker' | 'scatter' | 'chaos' | 'revolver' | 'rifle' | 'pistol' | 'jetpack';
+/** Every kind of pickup, in the order menus list them. */
+export const ITEM_KINDS: ItemKind[] = ['health', 'sticky', 'bounce', 'jetpack', 'rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer'];
+/** The weapons you can be given to start with (all but the flag and the debug hover gun). */
+export const LOADOUT_WEAPONS: WeaponId[] = ['rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer'];
 
 /** Floating item pickup (not a physics object). */
 export interface Pickup {

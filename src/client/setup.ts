@@ -2,10 +2,13 @@
 // for deathmatch (free-for-all or teams, bots on each team, team bases).
 // Both are remembered in this browser.
 
-import { TEAM_COLORS, TEAM_NAMES, maxTeamBases, splitBots, type GameSetup, type LevelDef, type SimConfig } from '../sim';
+import { ITEM_KINDS, LOADOUT_WEAPONS, TEAM_COLORS, TEAM_NAMES, WEAPON_IDS, WEAPON_NAMES, maxTeamBases, splitBots, type GameSetup, type ItemKind, type LevelDef, type SimConfig, type WeaponId } from '../sim';
+import { ITEM_NAMES } from './models';
 
 export interface PlayerPrefs { name: string; color: number } // color -1 = default blue
-export interface MatchPrefs { teams: number; myTeam: number; bots: (number | null)[]; bases: boolean; ctf: boolean; scoreLimit: number; ctfLimit: number; timeLimit: number } // limits: 0 = none; timeLimit in minutes // bots: null = the level's own number
+export interface ItemPrefs { banned: ItemKind[]; start: WeaponId[]; sticky: number; bounce: number; jetpack: boolean }
+export const ITEM_DEFAULTS: ItemPrefs = { banned: [], start: ['rifle', 'pistol'], sticky: 4, bounce: 4, jetpack: false };
+export interface MatchPrefs { teams: number; myTeam: number; bots: (number | null)[]; bases: boolean; ctf: boolean; scoreLimit: number; ctfLimit: number; timeLimit: number; items: ItemPrefs; showItems: boolean } // limits: 0 = none; timeLimit in minutes // bots: null = the level's own number
 
 export const PLAYER_COLORS = [-1, 0x2fb8c8, 0xe07a2a, 0xd84aa0, 0x8a5ad8, 0xe8e6dc, 0x40c080, 0xc8a040];
 
@@ -15,7 +18,8 @@ const load = <T,>(key: string, fallback: T): T => {
 const save = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* not remembered: fine for now */ } };
 
 export const player: PlayerPrefs = load('cr-player', { name: '', color: -1 });
-export const match: MatchPrefs = load('cr-match', { teams: 0, myTeam: 0, bots: [null, null, null, null], bases: true, ctf: false, scoreLimit: 15, ctfLimit: 3, timeLimit: 0 });
+export const match: MatchPrefs = load('cr-match', { teams: 0, myTeam: 0, bots: [null, null, null, null], bases: true, ctf: false, scoreLimit: 15, ctfLimit: 3, timeLimit: 0, items: { ...ITEM_DEFAULTS }, showItems: false });
+match.items = { ...ITEM_DEFAULTS, ...match.items }; // (older saved settings had none)
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 
@@ -109,6 +113,12 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
     .title = ctfMode ? 'First team to this many captures wins' : 'A kill scores 1, killing yourself loses 1; first to this wins (a team: its total)';
   row('Time', select([['0', 'No limit'], ...[2, 5, 10, 15, 20, 30].map((n) => [String(n), `${n} min`] as [string, string])], String(match.timeLimit), (v) => { match.timeLimit = +v; }))
     .title = 'When time runs out the highest score wins';
+  // pickups and loadout, folded away unless you want them
+  const changed = itemsChanged();
+  const tog = document.createElement('button');
+  tog.className = 'mini';
+  tog.textContent = `Items${changed ? ' (changed)' : ''} ${match.showItems ? '▾' : '▸'}`;
+  tog.addEventListener('click', () => { match.showItems = !match.showItems; save('cr-match', match); buildMatchPanel(el, onChange); });
   if (match.teams >= 2 && !match.ctf) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
@@ -116,6 +126,71 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
     cb.addEventListener('change', () => { match.bases = cb.checked; save('cr-match', match); onChange(); });
     row('Team bases', cb).title = 'Each team spawns at its own base, with the pickups the same on every side (where the level has room)';
   }
+  el.appendChild(tog);
+  if (match.showItems) el.appendChild(itemsPanel(() => { save('cr-match', match); buildMatchPanel(el, onChange); }));
+}
+
+function itemsChanged(): boolean {
+  const it = match.items, d = ITEM_DEFAULTS;
+  return it.banned.length > 0 || it.start.join() !== d.start.join() || it.sticky !== d.sticky || it.bounce !== d.bounce || it.jetpack !== d.jetpack;
+}
+
+/** Checkboxes: what pickups are on the field, and what everyone starts with. */
+function itemsPanel(changed: () => void): HTMLElement {
+  const it = match.items;
+  const box = document.createElement('div');
+  box.className = 'items-panel';
+  const check = (label: string, on: boolean, set: (v: boolean) => void, title = '') => {
+    const l = document.createElement('label');
+    l.className = 'chk';
+    if (title) l.title = title;
+    const c = document.createElement('input');
+    c.type = 'checkbox';
+    c.checked = on;
+    c.addEventListener('change', () => { set(c.checked); changed(); });
+    l.append(c, ' ' + label);
+    return l;
+  };
+  const section = (title: string, note: string) => {
+    const s = document.createElement('div');
+    s.className = 'items-section';
+    const h = document.createElement('div');
+    h.className = 'items-title';
+    h.innerHTML = `${title} <span>${note}</span>`;
+    s.appendChild(h);
+    box.appendChild(s);
+    return s;
+  };
+  const field = section('On the field', '(unticked: never appears; its spots get something else)');
+  for (const k of ITEM_KINDS) {
+    field.appendChild(check(ITEM_NAMES[k], !it.banned.includes(k), (v) => { it.banned = v ? it.banned.filter((x) => x !== k) : [...it.banned, k]; }));
+  }
+  const start = section('Everyone starts with', '(and gets again on every respawn)');
+  for (const w of LOADOUT_WEAPONS) {
+    start.appendChild(check(WEAPON_NAMES[WEAPON_IDS.indexOf(w)], it.start.includes(w), (v) => {
+      const next = v ? [...it.start, w] : it.start.filter((x) => x !== w);
+      it.start = next.length ? LOADOUT_WEAPONS.filter((x) => next.includes(x)) : it.start; // (at least one weapon)
+    }));
+  }
+  const count = (label: string, value: number, set: (n: number) => void) => {
+    const l = document.createElement('label');
+    l.className = 'chk';
+    const s = document.createElement('select');
+    for (let n = 0; n <= 4; n++) { const o = document.createElement('option'); o.value = String(n); o.textContent = String(n); s.appendChild(o); }
+    s.value = String(value);
+    s.addEventListener('change', () => { set(+s.value); changed(); });
+    l.append(s, ' ' + label);
+    return l;
+  };
+  start.appendChild(count('sticky grenades', it.sticky, (n) => { it.sticky = n; }));
+  start.appendChild(count('bouncing grenades', it.bounce, (n) => { it.bounce = n; }));
+  start.appendChild(check('Jetpack', it.jetpack, (v) => { it.jetpack = v; }));
+  const reset = document.createElement('button');
+  reset.className = 'mini';
+  reset.textContent = 'Back to the usual';
+  reset.addEventListener('click', () => { match.items = { ...ITEM_DEFAULTS }; changed(); });
+  box.appendChild(reset);
+  return box;
 }
 
 /** Does this level give each team a base, with the current setup? */
@@ -128,6 +203,8 @@ export function setupFor(def: LevelDef): GameSetup {
   const s: GameSetup = { name: player.name, color: player.color };
   if (def.mode !== 'sandbox') return s;
   s.scoreLimit = match.teams >= 2 && match.ctf ? match.ctfLimit : match.scoreLimit;
+  const it = match.items;
+  Object.assign(s, { bannedItems: [...it.banned], startWeapons: [...it.start], startSticky: it.sticky, startBounce: it.bounce, startJetpack: it.jetpack });
   s.timeLimit = match.timeLimit * 60;
   const teams = match.teams >= 2 ? match.teams : 0;
   if (teams) {

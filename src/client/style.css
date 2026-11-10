@@ -123,3 +123,9 @@ canvas#view { display: block; width: 100vw; height: 100vh; }
 .overlay .mp-help b { color: #f2c94c; font-weight: 600; }
 #mp-status { min-height: 18px; margin: -8px 0 18px; font-size: 14px; opacity: 0.9; color: #ffd27a; }
 #net-info { position: fixed; left: 150px; bottom: 8px; z-index: 6; font: 11px ui-monospace, monospace; color: rgba(159, 230, 255, 0.7); pointer-events: none; }
+.overlay .setup-bar button.mini { font-size: 12px; padding: 4px 10px; letter-spacing: 1px; }
+.items-panel { flex-basis: 100%; display: flex; flex-direction: column; gap: 10px; align-items: center; background: rgba(10, 22, 40, 0.75); border: 1px solid var(--hud-dim); padding: 10px 14px; }
+.items-section { display: flex; flex-wrap: wrap; gap: 4px 16px; justify-content: center; }
+.items-title { flex-basis: 100%; text-align: center; color: #f2c94c; letter-spacing: 2px; font-size: 12px; }
+.items-title span { color: #cfe9ff; opacity: 0.55; letter-spacing: 0; }
+.items-panel label.chk { white-space: nowrap; }

@@ -8,14 +8,14 @@ import { apart, convertBody, convertDir, frameOf, frameOmega } from './twin';
 import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setDisk, setPlanet, setSpinAlpha, viewVectors } from './physics';
 import { rngInt, rngNext } from './rng';
 import {
-  BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, STARTING_WEAPONS, WEAPON_FLAG, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
+  BTN_FIRE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, WEAPON_FLAG, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
   omegaOf, spinAt,
   type Bolt, type BoltKind, type Flag, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
   type Outcome, type Player, type Prop, type SimConfig, type SimState, type Vehicle, type WeaponId, type WeaponStats,
 } from './types';
 import { type Vec3, add, addScaled, clone, cross, dist, dot, len, norm, rhoOf, scale, sub } from './vec';
 import {
-  MAX_GRENADES, PLAYER_MASS, addPickup, allocId, capsuleHalfSeg, capsuleRadius, dummyHome, eyeOffset, standHeight,
+  MAX_GRENADES, PLAYER_MASS, addPickup, giveLoadout, startWeaponIds, allocId, capsuleHalfSeg, capsuleRadius, dummyHome, eyeOffset, standHeight,
 } from './world';
 import { BIKE_MASS, damageVehicle, dismount, handleUse, updateVehicles } from './vehicles';
 
@@ -1249,7 +1249,7 @@ function dropItems(state: SimState, p: Player) {
   if (distanceOffRing(cfg, p.pos) > 0) return; // lost to space with them
   const drops: { item: ItemKind; amount: number }[] = [];
   for (const w of p.owned) {
-    if (STARTING_WEAPONS.includes(w)) continue;
+    if (startWeaponIds(cfg).includes(w)) continue; // (everyone has these)
     const id = WEAPON_IDS[w];
     const ws = cfg.weapons[id];
     const rounds = p.infiniteAmmo ? ws.magSize + ws.ammoMax : p.mag[w] + p.ammo[w];
@@ -1384,22 +1384,15 @@ function updateVitals(state: SimState, p: Player) {
   p.shield = p.maxShield;
   p.grounded = false;
   p.groundNormal = localBasis(p.pos).up;
-  p.owned = [...STARTING_WEAPONS];
-  p.weapon = STARTING_WEAPONS[0];
+  giveLoadout(cfg, p);
   p.heat = WEAPON_IDS.map(() => 0);
   p.overheatUntil = WEAPON_IDS.map(() => 0);
-  p.ammo = WEAPON_IDS.map(() => 0);
-  p.mag = WEAPON_IDS.map(() => 0);
   p.reloadUntil = 0;
   p.reloadWeapon = -1;
   p.burstUntil = 0;
   p.charge = 0;
   p.holdTicks = 0;
   p.needRelease = false;
-  p.hasJetpack = false;
-  p.jetFuel = 0;
-  p.grenades = MAX_GRENADES;
-  p.bounceGrenades = MAX_GRENADES;
   p.lastAttacker = -1;
   state.events.push({ type: 'respawn', id: p.id });
 }

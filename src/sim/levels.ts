@@ -14,7 +14,7 @@
 import { localBasis } from './physics';
 import { spawnPosition } from './level';
 import { ENEMY_TYPES, defaultConfig } from './tuning';
-import { WEAPON_IDS, type GameMode, type ItemKind, type SimConfig, type SimState } from './types';
+import { WEAPON_IDS, type GameMode, type ItemKind, type SimConfig, type SimState, type WeaponId } from './types';
 import { type Vec3, addScaled } from './vec';
 import { addPlayer, createState, freeSpotNear, standHeight } from './world';
 import { TEAM_COLORS, TEAM_NAMES } from './teams';
@@ -308,7 +308,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'tower', 'teams', 'teamBases', 'ctf', 'scoreLimit', 'timeLimit', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'tower', 'teams', 'teamBases', 'ctf', 'scoreLimit', 'timeLimit', 'bannedItems', 'startWeapons', 'startSticky', 'startBounce', 'startJetpack', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
@@ -340,6 +340,12 @@ export interface GameSetup {
   bots?: number[];
   bases?: boolean; // with teams, give each team a base (where the level allows); default true
   ctf?: boolean; // capture the flag (teams with bases)
+  /** Pickups and loadout (unset: the usual). */
+  bannedItems?: ItemKind[];
+  startWeapons?: WeaponId[];
+  startSticky?: number;
+  startBounce?: number;
+  startJetpack?: boolean;
   scoreLimit?: number; // first to this score (captures, in capture the flag) wins; 0 or unset: no limit
   timeLimit?: number; // seconds; 0 or unset: no limit
 }
@@ -359,7 +365,14 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}, s
   const teamPlay = teams >= 2;
   const state = createState({
     seed: def.seed,
-    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign && !teamPlay, teams: teamPlay ? teams : 0, teamBases: teamPlay && ((setup.bases ?? true) || !!setup.ctf), ctf: teamPlay && !!setup.ctf, scoreLimit: campaign ? 0 : Math.max(0, setup.scoreLimit ?? 0), timeLimit: campaign ? 0 : Math.max(0, setup.timeLimit ?? 0) },
+    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign && !teamPlay, teams: teamPlay ? teams : 0, teamBases: teamPlay && ((setup.bases ?? true) || !!setup.ctf), ctf: teamPlay && !!setup.ctf, scoreLimit: campaign ? 0 : Math.max(0, setup.scoreLimit ?? 0),
+      ...(campaign ? {} : {
+        ...(setup.bannedItems ? { bannedItems: [...setup.bannedItems] } : {}),
+        ...(setup.startWeapons ? { startWeapons: [...setup.startWeapons] } : {}),
+        ...(setup.startSticky !== undefined ? { startSticky: setup.startSticky } : {}),
+        ...(setup.startBounce !== undefined ? { startBounce: setup.startBounce } : {}),
+        ...(setup.startJetpack !== undefined ? { startJetpack: setup.startJetpack } : {}),
+      }), timeLimit: campaign ? 0 : Math.max(0, setup.timeLimit ?? 0) },
     variedWalls: def.variedWalls ?? true,
     props: def.props ?? true,
     pickups: def.pickups ?? true,

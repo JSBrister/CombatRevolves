@@ -23,6 +23,11 @@ export const defaultConfig = (): SimConfig => ({
   world: 'ring', // 'planet' = stand on the outside of a spinning ball (radius R, surface gravity g)
   planetSpin: 0.4, // planet: the spin cancels this much of g at the equator
   outerShell: 0, // planet: radius of a hollow shell round it (0 = none)
+  bannedItems: [], // pickups that never appear
+  startWeapons: ['rifle', 'pistol'], // the loadout everyone (re)spawns with
+  startSticky: 4,
+  startBounce: 4,
+  startJetpack: false,
   teams: 0, // 0 = free-for-all; 2-4 teams
   teamBases: false,
   ctf: false, // capture the flag (needs team bases)

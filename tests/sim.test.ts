@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  TEAM_COLORS, matchScores, timeLeft, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  ITEM_KINDS, STARTING_WEAPONS, WEAPON_IDS, TEAM_COLORS, matchScores, timeLeft, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -2866,5 +2866,49 @@ describe('50. win conditions', () => {
     }
     expect(d0).toBeGreaterThan(20);
     expect(returned).toBe(true);
+  });
+});
+
+describe('51. pickups and loadout', () => {
+  it('banned pickups never appear; their spots get one allowed kind, the same everywhere (team sides stay even)', () => {
+    const plain = startLevel(levelById('s-standard')!, {}, { teams: 2, bots: [1, 1] }).state;
+    const { state: s } = startLevel(levelById('s-standard')!, {}, { teams: 2, bots: [1, 1], bannedItems: ['revolver', 'health', 'jetpack'] });
+    expect(s.pickups.length).toBe(plain.pickups.length);
+    expect(s.pickups.some((p) => ['revolver', 'health', 'jetpack'].includes(p.item))).toBe(false);
+    const items = s.pickups.map((p) => p.item);
+    for (const it of new Set(items)) expect(items.filter((x) => x === it).length % 2).toBe(0);
+    // everything banned: an empty field
+    const none = startLevel(levelById('s-standard')!, {}, { bannedItems: [...ITEM_KINDS] }).state;
+    expect(none.pickups.length).toBe(0);
+  });
+  it('everyone starts, and respawns, with the chosen weapons (magazines full), grenades and jetpack; nobody drops them', () => {
+    const { state: s, localId, botIds } = startLevel(levelById('s-standard')!, {}, { bots: [1], startWeapons: ['revolver', 'hammer'], startSticky: 0, startBounce: 2, startJetpack: true });
+    const me = s.players.find((p) => p.id === localId)!, bot = s.players.find((p) => p.id === botIds[0])!;
+    for (const p of [me, bot]) {
+      expect(p.owned.map((w) => WEAPON_IDS[w])).toEqual(['revolver', 'hammer']);
+      expect(p.mag[WEAPON_REVOLVER]).toBe(s.config.weapons.revolver.magSize);
+      expect(p.grenades).toBe(0);
+      expect(p.bounceGrenades).toBe(2);
+      expect(p.hasJetpack).toBe(true);
+    }
+    const before = s.pickups.length;
+    damagePlayer(s, me, bot.id, 1e4, 1e4, 'test');
+    // drops: only the bouncing grenades and the jetpack (everyone has the revolver and mallet)
+    const dropped = s.pickups.slice(before).map((p) => p.item).sort();
+    expect(dropped).toEqual(['bounce', 'jetpack']);
+    run(s, Math.round((s.config.respawnTime + 0.5) / DT), (st) => [cmdFor(st, localId)]);
+    expect(me.alive).toBe(true);
+    expect(me.owned.map((w) => WEAPON_IDS[w])).toEqual(['revolver', 'hammer']);
+    expect(me.bounceGrenades).toBe(2);
+    expect(me.hasJetpack).toBe(true);
+    expect(me.jetFuel).toBe(1);
+  });
+  it('the usual, unless asked: rifle and pistol, 4 of each grenade, no jetpack; the campaign is untouched', () => {
+    const { state: s, localId } = startLevel(levelById('s-standard')!);
+    const me = s.players.find((p) => p.id === localId)!;
+    expect(me.owned).toEqual(STARTING_WEAPONS);
+    expect([me.grenades, me.bounceGrenades, me.hasJetpack]).toEqual([4, 4, false]);
+    const c = startLevel(levelById('c1')!, {}, { startWeapons: ['laconic'], bannedItems: ['health'] }).state;
+    expect(c.players.find((p) => p.kind === 'human')!.owned).toEqual(STARTING_WEAPONS);
   });
 });
