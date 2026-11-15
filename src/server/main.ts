@@ -2,15 +2,23 @@
 // The game server: one authoritative match, and the game's own pages.
 //
 //   npm run server -- [--port 8080] [--level s-standard] [--teams 2] [--ctf] [--bots 3] [--score 15] [--minutes 10]
+//                        [--ff off|on|explosions] [--tunnel]
 //
 // It serves the built client (dist/) over HTTP and takes WebSocket
 // connections on the same port, so players only need its address:
 // http://<this machine>:8080. Anyone in the match can start another level
 // from the Multiplayer menu.
+//
+// --tunnel also opens a free Cloudflare quick tunnel (needs the `cloudflared`
+// program installed) and prints its https address: send that to the other
+// players and they just open it in a browser. Nothing to install, no port
+// forwarding, and it's https, so it works from anywhere.
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { networkInterfaces } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { DT, LEVELS, levelById, type GameSetup } from '../sim';
@@ -28,6 +36,7 @@ const setup: GameSetup = {
   teams, ctf: flag('ctf'), bases: true,
   scoreLimit: Number(opt('score', flag('ctf') ? '3' : '15')),
   timeLimit: Number(opt('minutes', '0')) * 60,
+  friendlyFire: (['off', 'on', 'explosions'] as const).find((x) => x === opt('ff')) ?? 'off',
   ...(nBots !== undefined ? { bots: teams >= 2 ? Array.from({ length: teams }, (_, t) => Math.floor(nBots / teams) + (t < nBots % teams ? 1 : 0)) : [nBots] } : {}),
 };
 
@@ -78,5 +87,25 @@ setInterval(() => {
 http.listen(port, () => {
   console.log(`Combat Revolves server: ${def.name}${teams >= 2 ? ` · ${teams} teams${setup.ctf ? ' · capture the flag' : ''}` : ''}`);
   console.log(`  play at  http://localhost:${port}/  (other machines: this one's address, port ${port})`);
+  for (const list of Object.values(networkInterfaces())) for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) console.log(`  on this network:  http://${a.address}:${port}/`);
   if (!existsSync(join(root, 'index.html'))) console.log('  (no dist/ yet: run "npm run build" first to serve the game from here)');
+  if (flag('tunnel')) openTunnel();
+  else console.log('  (over the internet: add --tunnel for a public https address, see the README)');
 });
+
+/** A Cloudflare quick tunnel to this server: a public https (and wss) address, no account needed. */
+function openTunnel() {
+  const cf = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--url', `http://localhost:${port}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let found = false;
+  const scan = (chunk: Buffer) => {
+    const m = !found && /https:\/\/[a-z0-9-]+\.trycloudflare\.com/.exec(chunk.toString());
+    if (m) { found = true; console.log(`\n  >>> on the internet:  ${m[0]}/   (send this to the other players)\n`); }
+  };
+  cf.stdout.on('data', scan);
+  cf.stderr.on('data', scan);
+  cf.on('error', () => console.log('  --tunnel: couldn\'t run "cloudflared". Install it (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), or leave out --tunnel.'));
+  cf.on('exit', (code) => { if (code !== null) console.log(`  the tunnel closed (cloudflared exited with ${code})`); });
+  const stop = () => { cf.kill(); process.exit(0); };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+}

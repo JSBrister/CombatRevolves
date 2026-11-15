@@ -32,7 +32,13 @@ npm run host
 
 That builds the game and starts the server on port 8080 (it serves the game's pages too). Everyone, including the host, opens `http://<the host's address>:8080`, presses **Multiplayer**, then **Connect**. Your name, colour and team come from the title screen and the Deathmatch match setup. Once you're in, anyone can pick another level or restart the match from the menu (Esc); the match setup (teams, capture the flag, bots, limits) applies to the level you pick. Options: `npm run server -- --port 8080 --level s-twin-bikes --teams 2 --ctf --bots 4 --score 3 --minutes 10` (`--levels` lists the level ids; `npm run server` skips the build).
 
-Playing over the internet needs the host's port to be reachable (port forwarding, or a tunnel). The copy of the game on GitHub Pages is served over https, so a browser will only let it connect to a `wss://` server: put the server behind a tunnel or proxy that gives it https (then enter that address), or just have everyone load the game from the server itself as above.
+**Only the host installs anything.** The server serves the game itself, so the other players just open its address in a browser: nothing to download, no GitHub Pages or itch.io needed. On the same network that's the `on this network:` address the server prints. Over the internet, the easy way is a free Cloudflare quick tunnel (no account, no port forwarding): install [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) on the host, then
+
+```bash
+npm run host -- --tunnel
+```
+
+and the server prints an `https://<random words>.trycloudflare.com/` address to send round (a new one each time). It's https, so it also works with the copy on GitHub Pages: enter that address in its Multiplayer screen (as long as it's the same version of the game as the server). Without a tunnel, forward the host's port (8080) on its router and give out `http://<public address>:8080/`. `--ff off|on|explosions` sets friendly fire for the server's first match.
 
 How it works (`src/net/`, tests in `tests/net.test.ts`):
 
