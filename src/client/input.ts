@@ -18,6 +18,17 @@ export class InputSampler {
   owned: number[] = [0, 1];
   mouseButtons = 0;
   private latched = 0; // presses shorter than a tick still register
+
+  // ---- gamepad (Xbox 360 layout, the browser's "standard" mapping)
+  /** Right-stick look speed at full tilt (rad/s), and whether up on the stick looks down. */
+  padLookSpeed = 3.2;
+  padInvertY = false;
+  /** A gamepad has been used (so the game can be played without the mouse locked). */
+  padActive = false;
+  /** Called on a button press that the game (not the player's character) handles: 'start' (menu). */
+  onPadButton: (name: 'start') => void = () => {};
+  private padHeld: boolean[] = [];
+  private padNow = { buttons: [] as boolean[], lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
   enabled = true; // false while free-flying: player gets neutral movement
   onKey: (code: string) => void = () => {};
   freeLook: ((dx: number, dy: number) => void) | null = null;
@@ -69,9 +80,50 @@ export class InputSampler {
     this.weapon = list[(i < 0 ? 0 : i + dir + list.length) % list.length];
   }
 
-  get aiming() { return (this.mouseButtons & 4) !== 0; }
-  get grenadeHeld() { return this.keys.has('KeyG'); }
-  get bounceHeld() { return this.keys.has('KeyF'); }
+  get aiming() { return (this.mouseButtons & 4) !== 0 || !!this.padNow.buttons[11]; }
+  get grenadeHeld() { return this.keys.has('KeyG') || this.padNow.lt > 0.5; }
+  get bounceHeld() { return this.keys.has('KeyF') || !!this.padNow.buttons[4]; }
+  /** Let go of everything (on leaving the game for a menu). */
+  release() { this.keys.clear(); this.mouseButtons = 0; this.latched = 0; }
+  get scoresHeld() { return this.keys.has('Tab') || !!this.padNow.buttons[8]; }
+
+  /**
+   * Read the first connected gamepad. Edge-triggered things (cycling weapons,
+   * toggling sprint, the menu) happen here, once per press. Call once a frame.
+   */
+  pollPad(dt: number, playing: boolean) {
+    const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : [];
+    const pad = [...pads].find((g) => g && g.connected && g.buttons.length >= 16) ?? null;
+    if (!pad) { this.padNow = { buttons: [], lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 }; this.padHeld = []; return; }
+    const b = pad.buttons.map((x) => x.pressed || x.value > 0.5);
+    // a dead zone round the middle of each stick, then a curve (fine aim near the middle, fast turns at the edge)
+    const stick = (x: number, y: number) => {
+      const m = Math.hypot(x, y), dz = 0.15;
+      if (m < dz) return [0, 0];
+      const k = ((m - dz) / (1 - dz)) / m;
+      return [x * k, y * k];
+    };
+    const [lx, ly] = stick(pad.axes[0] ?? 0, pad.axes[1] ?? 0), [rx, ry] = stick(pad.axes[2] ?? 0, pad.axes[3] ?? 0);
+    this.padNow = { buttons: b, lx, ly, rx, ry, lt: pad.buttons[6]?.value ?? 0, rt: pad.buttons[7]?.value ?? 0 };
+    const pressed = (i: number) => b[i] && !this.padHeld[i];
+    if (b.some(Boolean) || Math.hypot(lx, ly, rx, ry) > 0) this.padActive = true;
+    if (pressed(9)) this.onPadButton('start');
+    if (!playing) { this.padHeld = b; return; } // (in a menu: only Start does anything)
+    if (pressed(3) || pressed(15)) this.cycleWeapon(1); // Y, d-pad right: next weapon
+    if (pressed(14)) this.cycleWeapon(-1); // d-pad left: previous
+    if (pressed(10) && this.enabled) { this.sprintOn = !this.sprintOn; } // left stick click: sprint on/off
+    if (pressed(0)) this.latched |= BTN_JUMP; // (short taps still count)
+    if (pressed(1)) this.latched |= BTN_MELEE;
+    if (pressed(2)) this.latched |= BTN_RELOAD;
+    if (pressed(12)) this.latched |= BTN_USE;
+    this.padHeld = b;
+    // look: the right stick turns you (a curve on top of the dead zone)
+    if (this.enabled && !this.freeLook) {
+      const curve = (v: number) => v * Math.abs(v);
+      this.yaw += curve(rx) * this.padLookSpeed * this.lookScale * dt;
+      this.pitch = Math.max(-1.55, Math.min(1.55, this.pitch + curve(ry) * (this.padInvertY ? 1 : -1) * this.padLookSpeed * 0.7 * this.lookScale * dt));
+    }
+  }
 
   sample(playerId: number, tick: number): InputCmd {
     const k = this.keys;
@@ -88,8 +140,20 @@ export class InputSampler {
     if (k.has('KeyQ')) buttons |= BTN_MELEE;
     if (k.has('KeyC') || this.mouseButtons & 2) buttons |= BTN_GRAPPLE; // (C, or the middle mouse button)
     if (k.has('KeyE')) buttons |= BTN_USE;
-    const moveY = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
-    const moveX = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
+    // the gamepad, on top of the keys
+    const g = this.padNow, gb = g.buttons;
+    if (g.rt > 0.5) buttons |= BTN_FIRE; // RT: fire
+    if (gb[11]) buttons |= BTN_AIM; // right stick click: trajectory preview
+    if (gb[0]) buttons |= BTN_JUMP; // A: jump (hold for the jetpack)
+    if (g.lt > 0.5) buttons |= BTN_GRENADE; // LT: sticky grenade (hold to aim, let go to throw)
+    if (gb[4]) buttons |= BTN_GRENADE2; // LB: bouncing grenade
+    if (gb[5]) buttons |= BTN_GRAPPLE; // RB: grappling hook
+    if (gb[1]) buttons |= BTN_MELEE; // B: melee (toss the flag)
+    if (gb[2]) buttons |= BTN_RELOAD; // X: reload
+    if (gb[12]) buttons |= BTN_USE; // d-pad up: get on/off a bike
+    const clamp1 = (v: number) => Math.max(-1, Math.min(1, v));
+    const moveY = clamp1((k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0) - g.ly);
+    const moveX = clamp1((k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0) + g.lx);
     return { playerId, tick, moveX, moveY, yaw: this.yaw, pitch: this.pitch, buttons, weapon: this.weapon };
   }
 }

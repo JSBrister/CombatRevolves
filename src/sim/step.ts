@@ -1186,7 +1186,7 @@ export function detonate(state: SimState, c: Vec3, owner: number, sourceId: numb
     p.grounded = false;
     p.groundNormal = null;
     const dmg = b.damage * f * (p.id === owner ? cfg.selfDamageScale : 1);
-    if (dmg > 0) damagePlayer(state, p, owner, dmg, dmg, cause);
+    if (dmg > 0) damagePlayer(state, p, owner, dmg, dmg, cause, true);
   }
   for (const v of state.vehicles) {
     if (!v.alive || v.id === sourceId) continue;
@@ -1214,9 +1214,10 @@ export function knockDir(away: Vec3, up: Vec3, liftBias: number): Vec3 {
 
 // =========================================================================== damage / vitals
 
-export function damagePlayer(state: SimState, p: Player, attacker: number, damage: number, shieldDamage: number, cause: string) {
+export function damagePlayer(state: SimState, p: Player, attacker: number, damage: number, shieldDamage: number, cause: string, blast = false) {
   if (!p.alive) return;
-  if (!state.config.friendlyFire && attacker !== p.id) {
+  // teammates: only with friendly fire on (or, "explosions only", from a blast)
+  if (!state.config.friendlyFire && !(blast && state.config.friendlyBlasts) && attacker !== p.id) {
     const a = state.players.find((q) => q.id === attacker);
     if (a && a.team === p.team) return;
   }

@@ -160,7 +160,8 @@ export const defaultConfig = (): SimConfig => ({
   meleeKnockback: 18, // m/s kick: enough to knock someone off the ring
   meleeRange: 2.2, // m in front of you
   meleeCooldown: 0.8, // s
-  friendlyFire: true, // campaign turns this off so enemies don't shoot each other
+  friendlyFire: true,
+  friendlyBlasts: false, // campaign turns this off so enemies don't shoot each other
 });
 
 /** Fills in the fields a weapon doesn't use. */

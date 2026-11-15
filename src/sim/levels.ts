@@ -344,6 +344,7 @@ export interface GameSetup {
   bots?: number[];
   bases?: boolean; // with teams, give each team a base (where the level allows); default true
   ctf?: boolean; // capture the flag (teams with bases)
+  friendlyFire?: 'off' | 'on' | 'explosions'; // teams: can you hurt your own side (default off)
   spinControl?: boolean; // spin control (2 teams with bases)
   /** Pickups and loadout (unset: the usual). */
   bannedItems?: ItemKind[];
@@ -371,7 +372,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}, s
   const teamPlay = teams >= 2;
   const state = createState({
     seed: def.seed,
-    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign && !teamPlay, teams: teamPlay ? teams : 0, teamBases: teamPlay && ((setup.bases ?? true) || !!setup.ctf || !!setup.spinControl), ctf: teamPlay && !!setup.ctf && !setup.spinControl, spinControl: teams === 2 && !!setup.spinControl, scoreLimit: campaign ? 0 : Math.max(0, setup.scoreLimit ?? 0),
+    config: { ...baseConfig, ...world, ...def.config, friendlyFire: !campaign && (!teamPlay || setup.friendlyFire === 'on'), friendlyBlasts: teamPlay && setup.friendlyFire === 'explosions', teams: teamPlay ? teams : 0, teamBases: teamPlay && ((setup.bases ?? true) || !!setup.ctf || !!setup.spinControl), ctf: teamPlay && !!setup.ctf && !setup.spinControl, spinControl: teams === 2 && !!setup.spinControl, scoreLimit: campaign ? 0 : Math.max(0, setup.scoreLimit ?? 0),
       ...(campaign ? {} : {
         ...(setup.bannedItems ? { bannedItems: [...setup.bannedItems] } : {}),
         ...(setup.startWeapons ? { startWeapons: [...setup.startWeapons] } : {}),

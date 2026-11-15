@@ -8,7 +8,7 @@ import { ITEM_NAMES } from './models';
 export interface PlayerPrefs { name: string; color: number } // color -1 = default blue
 export interface ItemPrefs { banned: ItemKind[]; start: WeaponId[]; sticky: number; bounce: number; jetpack: boolean; grapple: boolean }
 export const ITEM_DEFAULTS: ItemPrefs = { banned: [], start: ['rifle', 'pistol'], sticky: 4, bounce: 4, jetpack: false, grapple: true };
-export interface MatchPrefs { teams: number; myTeam: number; bots: (number | null)[]; bases: boolean; ctf: boolean; spin: boolean; spinLimit: number; scoreLimit: number; ctfLimit: number; timeLimit: number; items: ItemPrefs; showItems: boolean } // limits: 0 = none; timeLimit in minutes // bots: null = the level's own number
+export interface MatchPrefs { friendlyFire: 'off' | 'on' | 'explosions'; teams: number; myTeam: number; bots: (number | null)[]; bases: boolean; ctf: boolean; spin: boolean; spinLimit: number; scoreLimit: number; ctfLimit: number; timeLimit: number; items: ItemPrefs; showItems: boolean } // limits: 0 = none; timeLimit in minutes // bots: null = the level's own number
 
 export const PLAYER_COLORS = [-1, 0x2fb8c8, 0xe07a2a, 0xd84aa0, 0x8a5ad8, 0xe8e6dc, 0x40c080, 0xc8a040];
 
@@ -18,7 +18,7 @@ const load = <T,>(key: string, fallback: T): T => {
 const save = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* not remembered: fine for now */ } };
 
 export const player: PlayerPrefs = load('cr-player', { name: '', color: -1 });
-export const match: MatchPrefs = load('cr-match', { teams: 0, myTeam: 0, bots: [null, null, null, null], bases: true, ctf: false, spin: false, spinLimit: 100, scoreLimit: 15, ctfLimit: 3, timeLimit: 0, items: { ...ITEM_DEFAULTS }, showItems: false });
+export const match: MatchPrefs = load('cr-match', { friendlyFire: 'off', teams: 0, myTeam: 0, bots: [null, null, null, null], bases: true, ctf: false, spin: false, spinLimit: 100, scoreLimit: 15, ctfLimit: 3, timeLimit: 0, items: { ...ITEM_DEFAULTS }, showItems: false });
 match.items = { ...ITEM_DEFAULTS, ...match.items }; // (older saved settings had none)
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
@@ -121,6 +121,10 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
   tog.className = 'mini';
   tog.textContent = `Items${changed ? ' (changed)' : ''} ${match.showItems ? '▾' : '▸'}`;
   tog.addEventListener('click', () => { match.showItems = !match.showItems; save('cr-match', match); buildMatchPanel(el, onChange); });
+  if (match.teams >= 2) {
+    row('Friendly fire', select([['off', 'Off'], ['on', 'On'], ['explosions', 'Explosions only']], match.friendlyFire ?? 'off', (v) => { match.friendlyFire = v as MatchPrefs['friendlyFire']; }))
+      .title = 'Can you hurt your own team? ("Explosions only": your grenades and rockets can, your shots can\'t)';
+  }
   if (match.teams >= 2 && !match.ctf && !match.spin) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
@@ -212,7 +216,7 @@ export function setupFor(def: LevelDef): GameSetup {
   const teams = match.teams >= 2 ? match.teams : 0;
   if (teams) {
     const auto = splitBots(def.bots ?? 0, teams, match.myTeam);
-    return { ...s, teams, myTeam: match.myTeam, bases: match.bases || match.ctf || match.spin, ctf: match.ctf && !match.spin, spinControl: match.spin && teams === 2, bots: auto.map((a, t) => match.bots[t] ?? a) };
+    return { ...s, teams, friendlyFire: match.friendlyFire ?? 'off', myTeam: match.myTeam, bases: match.bases || match.ctf || match.spin, ctf: match.ctf && !match.spin, spinControl: match.spin && teams === 2, bots: auto.map((a, t) => match.bots[t] ?? a) };
   }
   return { ...s, ...(match.bots[0] !== null && match.bots[0] !== undefined ? { bots: [match.bots[0]] } : {}) };
 }

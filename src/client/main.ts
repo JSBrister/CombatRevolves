@@ -410,6 +410,7 @@ function previewKind(): BoltKind | ThrownKind | null {
 function frame(now: number) {
   const dtReal = Math.min(0.1, (now - last) / 1000);
   last = now;
+  input.pollPad(dtReal, screen === 'playing');
   // (a network game never pauses, and runs a shade fast or slow to stay in step with the server)
   if (net) acc += dtReal * net.client.timeScale;
   else if (!view.paused) acc += dtReal * view.timeScale;
@@ -546,7 +547,7 @@ function frame(now: number) {
     const st = net.client.stats;
     ni.textContent = `online · ping ${st.rtt.toFixed(0)} ms · ${st.pending} inputs ahead · last correction ${(st.lastCorrection * 100).toFixed(1)} cm`;
   }
-  hud.update(rstate, me, { yaw: input.yaw + (vf ? Math.PI : 0), timeScale: view.timeScale, paused: view.paused, freefly: view.freefly, sprintOn: input.sprintOn, showScores: input.keys.has('Tab') });
+  hud.update(rstate, me, { yaw: input.yaw + (vf ? Math.PI : 0), timeScale: view.timeScale, paused: view.paused, freefly: view.freefly, sprintOn: input.sprintOn, showScores: input.scoresHeld });
   requestAnimationFrame(frame);
 }
 
@@ -580,9 +581,15 @@ function show(next: Screen) {
   $('btn-change').classList.toggle('hidden', !net);
   $('btn-restart').textContent = net ? 'Restart match' : 'Restart level';
   $('btn-menu').textContent = net ? 'Leave the server' : 'Quit to menu';
-  input.keys.clear();
-  input.mouseButtons = 0;
+  input.release();
 }
+
+// Start on a gamepad: the menu, and back (a pad doesn't need the mouse captured)
+input.onPadButton = (b) => {
+  if (b !== 'start') return;
+  if (screen === 'playing') { if (document.pointerLockElement === canvas) document.exitPointerLock(); else show('paused'); }
+  else if (screen === 'paused') { sfx.unlock(); show('playing'); }
+};
 
 function requestPlay() {
   sfx.unlock();

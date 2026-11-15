@@ -3106,3 +3106,30 @@ describe('54. spin control and the half ring', () => {
     expect(game('s-tower').s.objective).toBeNull();
   });
 });
+
+describe('55. friendly fire', () => {
+  const pair = (ff?: 'off' | 'on' | 'explosions') => {
+    const { state: s, localId } = startLevel(levelById('s-standard')!, {}, { teams: 2, myTeam: 0, bots: [1, 0], friendlyFire: ff });
+    const me = s.players.find((p) => p.id === localId)!, mate = s.players.find((p) => p.team === 0 && p.id !== localId)!;
+    return { s, me, mate };
+  };
+  const hp = (p: Player) => p.health + p.shield;
+  it('off (the default): teammates can\'t hurt each other, shots or blasts', () => {
+    const { s, me, mate } = pair();
+    damagePlayer(s, mate, me.id, 30, 30, 'rifle');
+    damagePlayer(s, mate, me.id, 30, 30, 'grenade', true);
+    expect(hp(mate)).toBe(mate.maxHealth + mate.maxShield);
+  });
+  it('on: they can', () => {
+    const { s, me, mate } = pair('on');
+    damagePlayer(s, mate, me.id, 30, 30, 'rifle');
+    expect(hp(mate)).toBeLessThan(mate.maxHealth + mate.maxShield);
+  });
+  it('explosions only: a teammate\'s blast hurts, their shot doesn\'t (a real grenade, end to end)', () => {
+    const { s, me, mate } = pair('explosions');
+    damagePlayer(s, mate, me.id, 30, 30, 'rifle');
+    expect(hp(mate)).toBe(mate.maxHealth + mate.maxShield);
+    detonate(s, addScaled(mate.pos, localBasis(mate.pos).up, -0.5), me.id, -1, { radius: 4, damage: 40, knockback: 5 }, 'grenade');
+    expect(hp(mate)).toBeLessThan(mate.maxHealth + mate.maxShield);
+  });
+});

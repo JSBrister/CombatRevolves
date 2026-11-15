@@ -157,7 +157,8 @@ export interface SimConfig {
   meleeKnockback: number; // m/s kick
   meleeRange: number; // m in front of you
   meleeCooldown: number; // s
-  friendlyFire: boolean; // false: teammates can't hurt each other (campaign enemies)
+  friendlyFire: boolean;
+  friendlyBlasts: boolean; // with friendlyFire off: explosions still hurt teammates ("explosions only") // false: teammates can't hurt each other (campaign enemies)
 }
 
 /** Spin rate (rad/s): sqrt(g/R) gives g at the floor; 0 when the world doesn't spin (Earth). */
