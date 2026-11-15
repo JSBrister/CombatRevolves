@@ -2,7 +2,7 @@
 // the previous and current tick.
 
 import * as THREE from 'three';
-import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, convertDir, convertPoint, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_FLAG, WEAPON_HAMMER, WEAPON_LACONIC, WEAPON_PISTOL, TEAM_COLORS } from '../sim';
+import { type Player, type Prediction, type SimEvent, type SimState, type Vec3, DT, convertDir, convertPoint, gyroAxis, localBasis, PLAYER_HALF_SEG, PLAYER_RADIUS, WEAPON_FLAG, WEAPON_HAMMER, WEAPON_LACONIC, WEAPON_PISTOL, TEAM_COLORS } from '../sim';
 import { makeBike, makeFlag, makeGun, makePickup, waveFlag } from './models';
 import { disposeTree } from './dispose';
 import { LAYER_INERTIAL_ONLY, LAYER_ROT_TRAILS, LAYER_SELF, type RingScene } from './scene';
@@ -33,6 +33,7 @@ const MUZZLE_TIP: Record<number, number> = { [WEAPON_PISTOL]: 0.27, [WEAPON_LACO
 const BOLT_COLORS: Record<string, number> = {
   rifle: 0x55c8ff, redRifle: 0xff4a3a, pistol: 0x8dff5a, overcharge: 0x5dff7a, fuelRod: 0x9dff3a, cannon: 0xff3df0, laconic: 0xff2a1a,
   hover: 0xff5ee8, grenade: 0x7fb6ff, bounceGrenade: 0xffd23a, rocket: 0xffa03a, seeker: 0xff6ad8, pellet: 0xffb050, chaos: 0xffffff, bullet: 0xfff2b0,
+  gyro: 0x6affd0, gyroBolt: 0x6affd0,
 };
 
 /** Fading polyline trail stored as a ring buffer. */
@@ -90,6 +91,8 @@ interface ProjView {
   marker: THREE.Sprite; // big dot for the inertial overview camera
   baseSize: number;
   dying: number; // frames left for the trail to fade after the projectile is gone
+  rotor?: THREE.Object3D; // gyro sentry: the gyroscope inside (its axle turned to the sim's every frame)
+  wheel?: THREE.Object3D; // ...and its spinning disc
 }
 
 interface PlayerView {
@@ -407,7 +410,7 @@ export class EntityViews {
     const seen = new Set<number>();
     const projs: { id: number; pos: Vec3; kind: string; radius: number; color?: number }[] = [
       ...state.bolts.map((b) => ({ id: b.id, pos: b.pos, kind: b.kind, radius: b.radius, color: b.kind === 'chaos' ? speedColor(b.speed) : undefined })),
-      ...state.grenades.map((g) => ({ id: g.id, pos: g.pos, kind: g.variant === 'bounce' ? 'bounceGrenade' : 'grenade', radius: g.radius })),
+      ...state.grenades.map((g) => ({ id: g.id, pos: g.pos, kind: g.variant === 'bounce' ? 'bounceGrenade' : g.variant === 'gyro' ? 'gyro' : 'grenade', radius: g.radius })),
     ];
     for (const p of projs) {
       seen.add(p.id);
@@ -430,10 +433,42 @@ export class EntityViews {
     }
   }
 
+  /** A gyro sentry: a clear ball in a wire cube (so it doesn't roll), a gyroscope spinning inside. */
+  private createGyro(id: number, radius: number, color: number): ProjView {
+    const r = Math.max(radius, 0.22);
+    const sprite = this.makeGlow(color, r * 3);
+    const core = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), new THREE.MeshStandardMaterial({ color: 0xcfefff, transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.1, depthWrite: false }));
+    const frame = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(r * 2.05, r * 2.05, r * 2.05)), new THREE.LineBasicMaterial({ color: 0xc8ccd4 }));
+    const steel = new THREE.MeshStandardMaterial({ color: 0xd0d4dc, metalness: 0.8, roughness: 0.3 });
+    const glow = new THREE.MeshBasicMaterial({ color });
+    const rotor = new THREE.Group();
+    const axle = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.06, r * 0.06, r * 1.9, 8), steel);
+    const tips = [1, -1].map((s) => { const t = new THREE.Mesh(new THREE.SphereGeometry(r * 0.1, 8, 6), glow); t.position.y = s * r * 0.95; return t; });
+    const wheel = new THREE.Group();
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(r * 0.62, r * 0.08, 8, 24), steel);
+    rim.rotation.x = Math.PI / 2;
+    wheel.add(rim);
+    for (let i = 0; i < 3; i++) { const sp = new THREE.Mesh(new THREE.BoxGeometry(r * 1.24, r * 0.05, r * 0.05), steel); sp.rotation.y = (i * Math.PI) / 3; wheel.add(sp); }
+    rotor.add(axle, ...tips, wheel);
+    // (a gimbal ring round it, for the look of the thing)
+    const gimbal = new THREE.Mesh(new THREE.TorusGeometry(r * 0.85, r * 0.03, 6, 28), steel);
+    rotor.add(gimbal);
+    core.add(frame, rotor);
+    const marker = this.makeGlow(color, Math.max(1.5, this.rs.starRadius / 1500), LAYER_INERTIAL_ONLY);
+    const max = Math.max(4, Math.round(this.trailTicks / 2));
+    const trail = new Trail(max, new THREE.Color(color), LAYER_ROT_TRAILS, this.root);
+    const inTrail = new Trail(max, new THREE.Color(color), LAYER_INERTIAL_ONLY, this.rs.inertial);
+    this.root.add(sprite, core, marker);
+    const v: ProjView = { sprite, core, trail, inTrail, marker, baseSize: sprite.scale.x, dying: -1, rotor, wheel };
+    this.projs.set(id, v);
+    return v;
+  }
+
   private createProj(id: number, kind: string, radius: number, tint?: number): ProjView {
     const color = tint ?? BOLT_COLORS[kind] ?? 0xffffff;
     const sprite = this.makeGlow(color, radius * ((kind === 'grenade' || kind === 'bounceGrenade') ? 7 : kind === 'cannon' || kind === 'laconic' ? 9 : 6));
     const rocket = kind === 'rocket' || kind === 'seeker';
+    if (kind === 'gyro') return this.createGyro(id, radius, color);
     const core = rocket
       // a rocket body along local +Y (turned to the nose every frame); its glow is the exhaust
       ? new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.35, radius * 0.6, radius * (kind === 'rocket' ? 6 : 4), 10), new THREE.MeshStandardMaterial({ color: kind === 'rocket' ? 0xd8d0c0 : 0xff9ae8, emissive: kind === 'rocket' ? 0x222018 : 0x601848, metalness: 0.6, roughness: 0.4 }))
@@ -638,9 +673,9 @@ export class EntityViews {
 
     // projectiles
     const pulse = 0.85 + 0.15 * Math.sin(performance.now() * 0.03);
-    const live = new Map<number, { pos: Vec3; stuck: boolean; dir?: Vec3 | null; burning?: boolean }>();
+    const live = new Map<number, { pos: Vec3; stuck: boolean; dir?: Vec3 | null; burning?: boolean; axis?: Vec3; live?: boolean }>();
     for (const b of state.bolts) live.set(b.id, { pos: b.pos, stuck: false, dir: b.dir, burning: state.tick < b.burnUntil });
-    for (const g of state.grenades) live.set(g.id, { pos: g.pos, stuck: g.stuck !== null });
+    for (const g of state.grenades) live.set(g.id, { pos: g.pos, stuck: g.stuck !== null, axis: g.variant === 'gyro' ? gyroAxis(state, g) : undefined, live: g.variant === 'gyro' && state.tick >= g.spawnTick + Math.round(state.config.gyroDelay / DT) });
     for (const [id, v] of this.projs) {
       const l = live.get(id);
       if (l) {
@@ -661,6 +696,16 @@ export class EntityViews {
           v.core.scale.setScalar(1);
           v.sprite.position.addScaledVector(nose, -0.5);
           v.sprite.material.opacity = l.burning ? 0.7 + 0.3 * Math.random() : 0.15;
+        }
+        if (v.rotor && l.axis) {
+          // gyro sentry: the cube sits square to the floor; the gyroscope's axle holds still against the stars
+          const up = localBasis(pos).up;
+          v.core.quaternion.setFromUnitVectors(Y, new THREE.Vector3(...up));
+          v.core.scale.setScalar(1);
+          const ax = new THREE.Vector3(...l.axis).applyQuaternion(v.core.quaternion.clone().invert());
+          v.rotor.quaternion.setFromUnitVectors(Y, ax);
+          v.wheel!.rotation.y = performance.now() * 0.04;
+          v.sprite.material.opacity = l.live ? 0.35 + 0.25 * Math.sin(performance.now() * 0.025) : 0.1;
         }
         v.trail.update(pos);
         v.inTrail.update();

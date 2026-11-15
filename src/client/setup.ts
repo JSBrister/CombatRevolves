@@ -6,8 +6,8 @@ import { ITEM_KINDS, LOADOUT_WEAPONS, TEAM_COLORS, TEAM_NAMES, WEAPON_IDS, WEAPO
 import { ITEM_NAMES } from './models';
 
 export interface PlayerPrefs { name: string; color: number } // color -1 = default blue
-export interface ItemPrefs { banned: ItemKind[]; start: WeaponId[]; sticky: number; bounce: number; jetpack: boolean; grapple: boolean }
-export const ITEM_DEFAULTS: ItemPrefs = { banned: [], start: ['rifle', 'pistol'], sticky: 4, bounce: 4, jetpack: false, grapple: true };
+export interface ItemPrefs { banned: ItemKind[]; start: WeaponId[]; sticky: number; bounce: number; gyro: number; jetpack: boolean; grapple: boolean }
+export const ITEM_DEFAULTS: ItemPrefs = { banned: [], start: ['rifle', 'pistol'], sticky: 4, bounce: 4, gyro: 0, jetpack: false, grapple: true };
 export interface MatchPrefs { friendlyFire: 'off' | 'on' | 'explosions'; teams: number; myTeam: number; bots: (number | null)[]; bases: boolean; ctf: boolean; spin: boolean; spinLimit: number; scoreLimit: number; ctfLimit: number; timeLimit: number; items: ItemPrefs; showItems: boolean } // limits: 0 = none; timeLimit in minutes // bots: null = the level's own number
 
 export const PLAYER_COLORS = [-1, 0x2fb8c8, 0xe07a2a, 0xd84aa0, 0x8a5ad8, 0xe8e6dc, 0x40c080, 0xc8a040];
@@ -138,7 +138,7 @@ export function buildMatchPanel(el: HTMLElement, onChange: () => void) {
 
 function itemsChanged(): boolean {
   const it = match.items, d = ITEM_DEFAULTS;
-  return it.banned.length > 0 || it.start.join() !== d.start.join() || it.sticky !== d.sticky || it.bounce !== d.bounce || it.jetpack !== d.jetpack || it.grapple !== d.grapple;
+  return it.banned.length > 0 || it.start.join() !== d.start.join() || it.sticky !== d.sticky || it.bounce !== d.bounce || it.gyro !== d.gyro || it.jetpack !== d.jetpack || it.grapple !== d.grapple;
 }
 
 /** Checkboxes: what pickups are on the field, and what everyone starts with. */
@@ -178,11 +178,11 @@ function itemsPanel(changed: () => void): HTMLElement {
       it.start = next.length ? LOADOUT_WEAPONS.filter((x) => next.includes(x)) : it.start; // (at least one weapon)
     }));
   }
-  const count = (label: string, value: number, set: (n: number) => void) => {
+  const count = (label: string, value: number, set: (n: number) => void, max = 4) => {
     const l = document.createElement('label');
     l.className = 'chk';
     const s = document.createElement('select');
-    for (let n = 0; n <= 4; n++) { const o = document.createElement('option'); o.value = String(n); o.textContent = String(n); s.appendChild(o); }
+    for (let n = 0; n <= max; n++) { const o = document.createElement('option'); o.value = String(n); o.textContent = String(n); s.appendChild(o); }
     s.value = String(value);
     s.addEventListener('change', () => { set(+s.value); changed(); });
     l.append(s, ' ' + label);
@@ -190,6 +190,7 @@ function itemsPanel(changed: () => void): HTMLElement {
   };
   start.appendChild(count('sticky grenades', it.sticky, (n) => { it.sticky = n; }));
   start.appendChild(count('bouncing grenades', it.bounce, (n) => { it.bounce = n; }));
+  start.appendChild(count('gyro sentries', it.gyro, (n) => { it.gyro = n; }, 2));
   start.appendChild(check('Jetpack', it.jetpack, (v) => { it.jetpack = v; }));
   start.appendChild(check('Grappling hook', it.grapple, (v) => { it.grapple = v; }));
   const reset = document.createElement('button');
@@ -211,7 +212,7 @@ export function setupFor(def: LevelDef): GameSetup {
   if (def.mode !== 'sandbox') return s;
   s.scoreLimit = match.teams >= 2 && match.spin ? match.spinLimit : match.teams >= 2 && match.ctf ? match.ctfLimit : match.scoreLimit;
   const it = match.items;
-  Object.assign(s, { bannedItems: [...it.banned], startWeapons: [...it.start], startSticky: it.sticky, startBounce: it.bounce, startJetpack: it.jetpack, startGrapple: it.grapple });
+  Object.assign(s, { bannedItems: [...it.banned], startWeapons: [...it.start], startSticky: it.sticky, startBounce: it.bounce, startGyro: it.gyro, startJetpack: it.jetpack, startGrapple: it.grapple });
   s.timeLimit = match.timeLimit * 60;
   const teams = match.teams >= 2 ? match.teams : 0;
   if (teams) {

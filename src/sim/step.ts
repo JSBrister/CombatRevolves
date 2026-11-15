@@ -8,14 +8,14 @@ import { apart, convertBody, convertDir, frameOf, frameOmega } from './twin';
 import { advanceFree, fictitiousAccel, integrate, localBasis, planetPullAt, setDisk, setPlanet, setSpinAlpha, viewVectors } from './physics';
 import { rngInt, rngNext } from './rng';
 import {
-  BTN_FIRE, BTN_GRAPPLE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, WEAPON_FLAG, spinNow, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
+  BTN_FIRE, BTN_GRAPPLE, BTN_GYRO, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_SPRINT, DT, WEAPON_FLAG, spinNow, WEAPON_HOVER, WEAPON_IDS, WEAPON_LACONIC, BTN_MELEE, BTN_RELOAD,
   omegaOf,
   type Bolt, type BoltKind, type Flag, type Grenade, type GrenadeKind, type InputCmd, type ItemKind, type Level, type ThrownKind,
   type Outcome, type Player, type Prop, type SimConfig, type SimState, type Vehicle, type WeaponId, type WeaponStats,
 } from './types';
-import { type Vec3, add, addScaled, clone, cross, dist, dot, len, norm, rhoOf, scale, sub } from './vec';
+import { type Vec3, add, addScaled, clone, cross, dist, dot, len, norm, rhoOf, rotZ, scale, sub } from './vec';
 import {
-  MAX_GRENADES, PLAYER_MASS, addPickup, giveLoadout, startWeaponIds, allocId, capsuleHalfSeg, capsuleRadius, dummyHome, eyeOffset, standHeight,
+  MAX_GRENADES, MAX_GYROS, PLAYER_MASS, addPickup, giveLoadout, startWeaponIds, allocId, capsuleHalfSeg, capsuleRadius, dummyHome, eyeOffset, standHeight,
 } from './world';
 import { BIKE_MASS, damageVehicle, dismount, handleUse, updateVehicles } from './vehicles';
 
@@ -35,6 +35,7 @@ const PISTOL_CHARGE_DELAY = 30; // ticks of holding before the overcharge starts
 export const BOLT_WEAPON: Record<BoltKind, WeaponId> = {
   rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', overcharge: 'pistol', fuelRod: 'launcher', cannon: 'cannon', laconic: 'laconic',
   rocket: 'rocket', seeker: 'seeker', pellet: 'scatter', chaos: 'chaos', bullet: 'revolver', hover: 'hover',
+  gyroBolt: 'redRifle', // (a gyro sentry's: its own stats below, the red rifle's knockback and handling)
 };
 const WEAPON_BOLT: Record<Exclude<WeaponId, 'hammer' | 'flag'>, BoltKind> = {
   rifle: 'rifle', redRifle: 'redRifle', pistol: 'pistol', launcher: 'fuelRod', cannon: 'cannon', laconic: 'laconic', rocket: 'rocket', seeker: 'seeker', scatter: 'pellet', chaos: 'chaos', revolver: 'bullet', hover: 'hover',
@@ -46,11 +47,12 @@ export const isRocket = (kind: BoltKind) => kind === 'rocket' || kind === 'seeke
 export function boltStats(cfg: SimConfig, kind: BoltKind) {
   const w = cfg.weapons[BOLT_WEAPON[kind]];
   if (kind === 'overcharge') return { muzzle: w.ocMuzzle, damage: w.ocDamage, shieldDamage: w.ocShieldDamage, radius: 0.45, lifetime: w.lifetime };
+  if (kind === 'gyroBolt') return { muzzle: cfg.gyroBoltSpeed, damage: cfg.gyroDamage, shieldDamage: cfg.gyroDamage, radius: 0.1, lifetime: 2 };
   return { muzzle: w.muzzle, damage: w.damage, shieldDamage: w.shieldDamage, radius: w.radius, lifetime: w.lifetime };
 }
 
 export function muzzleSpeed(cfg: SimConfig, kind: BoltKind | ThrownKind): number {
-  if (kind === 'grenade' || kind === 'bounceGrenade') return cfg.muzzleGrenade;
+  if (kind === 'grenade' || kind === 'bounceGrenade' || kind === 'gyro') return cfg.muzzleGrenade;
   return boltStats(cfg, kind).muzzle;
 }
 
@@ -93,14 +95,24 @@ export function spawnBolt(state: SimState, owner: number, kind: BoltKind, pos: V
   return b;
 }
 
+/** How far round the frame a point is in has turned since the start (the twin rings' second ring turns the other way). */
+const frameTheta = (state: SimState, pos: Vec3) => (frameOf(state.config, pos) ? -state.frameAngle : state.frameAngle);
+
+/** A gyro sentry's axle now, in the (turning) frame it's in: fixed against the stars, so it sweeps round once a spin. */
+export function gyroAxis(state: SimState, g: Grenade): Vec3 {
+  return g.axis ? rotZ(g.axis, -frameTheta(state, g.pos)) : [1, 0, 0];
+}
+
 export function spawnGrenade(state: SimState, owner: number, pos: Vec3, vel: Vec3, variant: GrenadeKind = 'sticky'): Grenade {
   const g: Grenade = {
     id: allocId(state), type: 'grenade', variant, owner, pos: clone(pos), vel: clone(vel), launchVel: clone(vel),
     radius: GRENADE_RADIUS, armed: owner < 0, stuck: null, contactNormal: null,
     // sticky: fuse starts when it sticks; bouncing: fuse starts at the throw
-    fuseTick: variant === 'bounce' ? state.tick + secs(state.config.bounceFuse) : -1,
-    spawnTick: state.tick, expireTick: state.tick + secs(state.config.projectileLifetime),
+    fuseTick: variant === 'bounce' ? state.tick + secs(state.config.bounceFuse) : variant === 'gyro' ? state.tick + secs(state.config.gyroDelay) : -1,
+    spawnTick: state.tick, expireTick: state.tick + secs(variant === 'gyro' ? state.config.gyroLife : state.config.projectileLifetime),
   };
+  // a gyro sentry's axle starts along the throw and then holds still against the stars
+  if (variant === 'gyro') g.axis = rotZ(norm(sub(vel, owner >= 0 ? state.players.find((q) => q.id === owner)?.vel ?? [0, 0, 0] : [0, 0, 0])), frameTheta(state, pos));
   state.grenades.push(g);
   return g;
 }
@@ -706,6 +718,12 @@ function updateWeapons(state: SimState, p: Player, omega: number) {
     p.bounceGrenades--;
     p.grenadeReadyTick = tick + secs(0.6);
     state.events.push({ type: 'fire', owner: p.id, kind: 'bounceGrenade', pos: from });
+  } else if (released & BTN_GYRO && p.gyros > 0 && tick >= p.grenadeReadyTick) {
+    const from = muzzlePoint(p, p.yaw, p.pitch, true);
+    spawnGrenade(state, p.id, from, launchVelocity(cfg, p, 'gyro', from), 'gyro');
+    p.gyros--;
+    p.grenadeReadyTick = tick + secs(0.6);
+    state.events.push({ type: 'fire', owner: p.id, kind: 'gyro', pos: from });
   }
   void omega;
 }
@@ -1072,12 +1090,15 @@ function updateGrenades(state: SimState, omega: number) {
         const v = state.vehicles.find((q) => q.id === st.id);
         if (v && v.alive) { g.pos = add(v.pos, st.offset); g.vel = clone(v.vel); } else g.stuck = null;
       }
-    } else if (g.variant === 'bounce') {
+    } else if (g.variant === 'bounce' || g.variant === 'gyro') {
       if (g.spawnTick !== tick) {
         const p0 = clone(g.pos);
         const gf = frameOf(cfg, g.pos);
         setSdfFrame(gf, state.frameAngle);
-        const impact = moveSphereBody(state.level, cfg, frameOmega(omega, gf), g, cfg.bounceRestitution);
+        const gyro = g.variant === 'gyro';
+        const impact = moveSphereBody(state.level, cfg, frameOmega(omega, gf), g, gyro ? 0.15 : cfg.bounceRestitution);
+        // (the gyro's cube frame doesn't roll: on the floor it soon stops dead)
+        if (gyro && g.contactNormal) { const vn = dot(g.vel, g.contactNormal); g.vel = addScaled(scale(g.vel, 0.85), g.contactNormal, vn * 0.15); }
         if (cfg.twin && frameOf(cfg, g.pos) !== gf) convertBody(g.pos, g.vel, gf, frameOf(cfg, g.pos), state.frameAngle + omega * DT, omega);
         if (impact > 1) state.events.push({ type: 'grenadeBounce', id: g.id, pos: clone(g.pos), speed: impact });
         // ...then bounce off players and props (relative to their motion)
@@ -1134,6 +1155,22 @@ function updateGrenades(state: SimState, omega: number) {
         despawnIfSpaced(state, g.pos, g.vel, () => (dead = true));
         if (dead) continue;
       }
+    }
+    if (g.variant === 'gyro') {
+      // a gyro sentry: once warmed up, a weak laser bolt from each end of its axle, every so often, until it's spent
+      if (tick >= g.expireTick) { state.events.push({ type: 'gyroSpent', id: g.id, pos: clone(g.pos) }); continue; }
+      if (tick >= g.fuseTick) {
+        g.fuseTick = tick + Math.max(1, secs(cfg.gyroInterval));
+        const ax = gyroAxis(state, g);
+        for (const s of [1, -1]) {
+          const d = scale(ax, s);
+          const b = spawnBolt(state, g.owner, 'gyroBolt', addScaled(g.pos, d, g.radius + 0.25), addScaled(g.vel, d, cfg.gyroBoltSpeed));
+          b.armed = true; // (it can hit whoever threw it: mind where the axle's pointing)
+        }
+        state.events.push({ type: 'fire', owner: g.owner, kind: 'gyroBolt', pos: clone(g.pos) });
+      }
+      keep.push(g);
+      continue;
     }
     if (g.fuseTick >= 0 && tick >= g.fuseTick) explode = true;
     if (tick >= g.expireTick) continue;
@@ -1270,6 +1307,7 @@ function dropItems(state: SimState, p: Player) {
   if (p.hasGrapple && !cfg.startGrapple) drops.push({ item: 'grapple', amount: 1 });
   if (p.grenades > 0) drops.push({ item: 'sticky', amount: p.grenades });
   if (p.bounceGrenades > 0) drops.push({ item: 'bounce', amount: p.bounceGrenades });
+  if (p.gyros > (cfg.startGyro ?? 0)) drops.push({ item: 'gyro', amount: p.gyros });
   if (!drops.length) return;
   // find the floor below (down = away from the axis)
   const b = localBasis(p.pos);
@@ -1316,6 +1354,10 @@ export function applyItem(cfg: SimConfig, p: Player, item: ItemKind, amount: num
     case 'bounce':
       if (p.bounceGrenades >= MAX_GRENADES) return false;
       p.bounceGrenades = full ? MAX_GRENADES : Math.min(MAX_GRENADES, p.bounceGrenades + amount);
+      return true;
+    case 'gyro':
+      if (p.gyros >= MAX_GYROS) return false;
+      p.gyros = Math.min(MAX_GYROS, p.gyros + (full ? 1 : amount));
       return true;
     case 'grapple':
       if (p.hasGrapple) return false;

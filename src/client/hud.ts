@@ -153,7 +153,7 @@ export class Hud {
     jet.style.display = me.hasJetpack ? '' : 'none';
     (jet.firstElementChild as HTMLElement).style.width = `${me.jetFuel * 100}%`;
     const pips = (n: number) => '◆'.repeat(n) + '◇'.repeat(Math.max(0, 4 - n));
-    $('grenades').innerHTML = `<span class="sticky">G ${pips(me.grenades)}</span>  <span class="bounce">F ${pips(me.bounceGrenades)}</span>`;
+    $('grenades').innerHTML = `<span class="sticky">G ${pips(me.grenades)}</span>  <span class="bounce">F ${pips(me.bounceGrenades)}</span>${me.gyros > 0 ? `  <span class="gyro">T ${'◆'.repeat(me.gyros)}</span>` : ''}`;
     const ch = $('charge');
     ch.style.opacity = me.charge > 0 ? '1' : '0';
     (ch.firstElementChild as HTMLElement).style.width = `${me.charge * 100}%`;
@@ -174,7 +174,7 @@ export class Hud {
     const name = (id: number) => tag(state.players.find((p) => p.id === id));
     if (e.type === 'hit' && e.attacker === localId && e.target !== localId) this.hitUntil = performance.now() + 150;
     if (e.type === 'kill') {
-      const how = e.cause === 'spaced' ? 'knocked off the ring' : e.cause === 'impact' ? 'splat' : e.cause;
+      const how = e.cause === 'spaced' ? 'knocked off the ring' : e.cause === 'impact' ? 'splat' : e.cause === 'gyroBolt' ? 'gyro sentry' : e.cause;
       const text = e.killer === e.victim
         ? `${name(e.victim)} <i>${e.cause === 'spaced' ? 'fell off the ring' : 'outplayed themselves (' + how + ')'}</i>`
         : `${name(e.killer)} <i>[${how}]</i> ${name(e.victim)}`;

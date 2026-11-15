@@ -312,7 +312,7 @@ export const LEVELS: LevelDef[] = [
 ];
 
 /** Settings that describe the world itself: reset for every level. */
-export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'wheelHub', 'wheelSpokes', 'tower', 'teams', 'teamBases', 'ctf', 'spinControl', 'scoreLimit', 'timeLimit', 'bannedItems', 'startWeapons', 'startSticky', 'startBounce', 'startJetpack', 'startGrapple', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
+export const WORLD_KEYS = ['R', 'g', 'spin', 'world', 'planetSpin', 'outerShell', 'launchPads', 'diskBowl', 'wheelHub', 'wheelSpokes', 'tower', 'teams', 'teamBases', 'ctf', 'spinControl', 'scoreLimit', 'timeLimit', 'bannedItems', 'startWeapons', 'startSticky', 'startBounce', 'startGyro', 'startJetpack', 'startGrapple', 'twin', 'twinGap', 'gravity', 'arena', 'halfWidth', 'wallHeight', 'dragType', 'dragCoeff', 'terrainSphere', 'hills', 'hillHeight', 'mountains', 'mountainHeight', 'bases', 'ridgeHeight', 'ridgePlateau', 'tube', 'tubeRadius', 'floorHoles', 'deckHeight', 'spinChange', 'spinPeriod', 'windows', 'biomes', 'floorTexture', 'planetPull', 'planetAngle'] as const;
 
 export const levelById = (id: string) => LEVELS.find((l) => l.id === id);
 
@@ -351,6 +351,7 @@ export interface GameSetup {
   startWeapons?: WeaponId[];
   startSticky?: number;
   startBounce?: number;
+  startGyro?: number;
   startJetpack?: boolean;
   startGrapple?: boolean;
   scoreLimit?: number; // first to this score (captures, in capture the flag) wins; 0 or unset: no limit
@@ -378,6 +379,7 @@ export function startLevel(def: LevelDef, baseConfig: Partial<SimConfig> = {}, s
         ...(setup.startWeapons ? { startWeapons: [...setup.startWeapons] } : {}),
         ...(setup.startSticky !== undefined ? { startSticky: setup.startSticky } : {}),
         ...(setup.startBounce !== undefined ? { startBounce: setup.startBounce } : {}),
+        ...(setup.startGyro !== undefined ? { startGyro: setup.startGyro } : {}),
         ...(setup.startJetpack !== undefined ? { startJetpack: setup.startJetpack } : {}),
         ...(setup.startGrapple !== undefined ? { startGrapple: setup.startGrapple } : {}),
       }), timeLimit: campaign ? 0 : Math.max(0, setup.timeLimit ?? 0) },

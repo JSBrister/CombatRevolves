@@ -392,7 +392,7 @@ export function generateDisk(cfg: SimConfig, rng: { rng: number }, withObstacles
       else if (kind < 0.9) stand(angle, rho, heading, rngRange(rng, 1, 2), rngRange(rng, 0.4, 0.8) * k, rngRange(rng, 1, 2));
       else stand(angle, rho, heading, 1.6, rngRange(rng, 4, 8) * k, 1.6, 'struct');
     }
-    const items: ItemKind[] = ['health', 'sticky', 'redRifle', 'bounce', 'launcher', 'scatter', 'cannon', 'rocket', 'health', 'revolver', 'seeker', 'jetpack'];
+    const items: ItemKind[] = ['health', 'sticky', 'redRifle', 'bounce', 'launcher', 'scatter', 'cannon', 'rocket', 'gyro', 'revolver', 'seeker', 'jetpack'];
     for (let i = 0; i < items.length; i++) {
       const angle = i * 2.39996, rho = R * Math.sqrt((i + 0.5) / items.length) * 0.85;
       if (near(angle, rho, 4)) continue;
@@ -532,7 +532,7 @@ export function generatePlanet(cfg: SimConfig, rng: { rng: number }, withObstacl
       }
     }
     // pickups on a spiral round the planet (evenly spread)
-    const items: ItemKind[] = ['health', 'sticky', 'redRifle', 'bounce', 'launcher', 'scatter', 'jetpack', 'cannon', 'rocket', 'health', 'chaos', 'revolver', 'seeker', 'laconic'];
+    const items: ItemKind[] = ['health', 'sticky', 'redRifle', 'bounce', 'launcher', 'scatter', 'jetpack', 'cannon', 'rocket', 'gyro', 'chaos', 'revolver', 'seeker', 'laconic'];
     const m = items.length;
     for (let i = 0; i < m; i++) {
       const lat = Math.asin(-0.85 + (1.7 * (i + 0.5)) / m), lon = i * 2.39996; // golden angle

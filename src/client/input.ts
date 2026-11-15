@@ -2,7 +2,7 @@
 // exclusively through these commands, exactly like bots and (later) remote
 // clients.
 
-import { BTN_AIM, BTN_FIRE, BTN_GRAPPLE, BTN_GRENADE, BTN_GRENADE2, BTN_JUMP, BTN_MELEE, BTN_RELOAD, BTN_SPRINT, BTN_USE, PLAYER_WEAPON_SLOTS, type InputCmd } from '../sim';
+import { BTN_AIM, BTN_FIRE, BTN_GRAPPLE, BTN_GRENADE, BTN_GRENADE2, BTN_GYRO, BTN_JUMP, BTN_MELEE, BTN_RELOAD, BTN_SPRINT, BTN_USE, PLAYER_WEAPON_SLOTS, type InputCmd } from '../sim';
 
 export class InputSampler {
   keys = new Set<string>();
@@ -42,6 +42,7 @@ export class InputSampler {
       if (e.code === 'Space') this.latched |= BTN_JUMP;
       if (e.code === 'KeyG') this.latched |= BTN_GRENADE;
       if (e.code === 'KeyF') this.latched |= BTN_GRENADE2;
+      if (e.code === 'KeyT') this.latched |= BTN_GYRO;
       if (e.code === 'KeyR') this.latched |= BTN_RELOAD;
       if (e.code === 'KeyQ') this.latched |= BTN_MELEE;
       if (e.code === 'KeyE') this.latched |= BTN_USE;
@@ -116,6 +117,7 @@ export class InputSampler {
     if (pressed(1)) this.latched |= BTN_MELEE;
     if (pressed(2)) this.latched |= BTN_RELOAD;
     if (pressed(12)) this.latched |= BTN_USE;
+    if (pressed(13)) this.latched |= BTN_GYRO;
     this.padHeld = b;
     // look: the right stick turns you (a curve on top of the dead zone)
     if (this.enabled && !this.freeLook) {
@@ -136,6 +138,7 @@ export class InputSampler {
     if (this.sprintOn) buttons |= BTN_SPRINT;
     if (k.has('KeyG')) buttons |= BTN_GRENADE;
     if (k.has('KeyF')) buttons |= BTN_GRENADE2;
+    if (k.has('KeyT')) buttons |= BTN_GYRO;
     if (k.has('KeyR')) buttons |= BTN_RELOAD;
     if (k.has('KeyQ')) buttons |= BTN_MELEE;
     if (k.has('KeyC') || this.mouseButtons & 2) buttons |= BTN_GRAPPLE; // (C, or the middle mouse button)
@@ -151,6 +154,7 @@ export class InputSampler {
     if (gb[1]) buttons |= BTN_MELEE; // B: melee (toss the flag)
     if (gb[2]) buttons |= BTN_RELOAD; // X: reload
     if (gb[12]) buttons |= BTN_USE; // d-pad up: get on/off a bike
+    if (gb[13]) buttons |= BTN_GYRO; // d-pad down: gyro sentry
     const clamp1 = (v: number) => Math.max(-1, Math.min(1, v));
     const moveY = clamp1((k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0) - g.ly);
     const moveX = clamp1((k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0) + g.lx);

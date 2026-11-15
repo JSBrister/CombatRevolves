@@ -264,6 +264,7 @@ fGive.add({ f: () => {
   addVehicle(state, addScaled(addScaled(p.pos, v.forward, 3.5), v.up, -0.2), input.yaw);
 } }, 'f').name('Hover-bike (in front of you)');
 fGive.add({ f: () => { give('sticky')(); give('bounce')(); } }, 'f').name('Grenades (refill)');
+fGive.add({ f: give('gyro') }, 'f').name('Gyro sentry');
 fGive.add({ f: () => { const p = me_(); if (p) { p.health = p.maxHealth; p.shield = p.maxShield; } } }, 'f').name('Health + shields');
 fGive.add({ f: () => { for (const p of state.players) if (p.id !== localId && p.alive) damagePlayer(state, p, localId, 1e6, 1e6, 'debug'); } }, 'f').name('Kill everyone else');
 for (const f of [fRing, fW, fP, fG, fK]) f.close();

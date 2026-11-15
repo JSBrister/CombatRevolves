@@ -58,6 +58,8 @@ export class Sfx {
     const a = Sfx.att(d);
     if (kind === 'rifle') this.tone('square', 900, 260, 0.09, 0.18 * a);
     else if (kind === 'redRifle') this.tone('square', 1300, 420, 0.07, 0.16 * a);
+    else if (kind === 'gyroBolt') this.tone('sine', 2400, 1900, 0.05, 0.06 * a);
+    else if (kind === 'gyro') this.tone('triangle', 500, 900, 0.15, 0.12 * a);
     else if (kind === 'fuelRod') { this.tone('sawtooth', 160, 60, 0.4, 0.35 * a); this.noise(0.25, 0.2 * a, 900); }
     else if (kind === 'cannon') { this.tone('sawtooth', 700, 120, 0.3, 0.35 * a); this.noise(0.15, 0.25 * a, 3000); }
     else if (kind === 'laconic') { this.tone('sawtooth', 220, 180, 0.05, 0.12 * a); this.tone('square', 1800, 1500, 0.04, 0.05 * a); }

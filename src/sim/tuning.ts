@@ -27,6 +27,7 @@ export const defaultConfig = (): SimConfig => ({
   startWeapons: ['rifle', 'pistol'], // the loadout everyone (re)spawns with
   startSticky: 4,
   startBounce: 4,
+  startGyro: 0,
   startJetpack: false,
   startGrapple: false,
   grappleSpeed: 80,
@@ -93,6 +94,11 @@ export const defaultConfig = (): SimConfig => ({
   projectileLifetime: 60, // max life of any bolt or grenade (s)
   grenadeFuse: 1.2, // sticky: seconds after it sticks
   bounceFuse: 2.5, // bouncing: seconds after the throw
+  gyroDelay: 2.5,
+  gyroInterval: 0.25,
+  gyroLife: 12,
+  gyroDamage: 4,
+  gyroBoltSpeed: 70,
   bounceRestitution: 0.6, // bouncing grenade bounciness
   grenadeMaxFlight: 12, // a sticky that never sticks goes off after this (s)
 

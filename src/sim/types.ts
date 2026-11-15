@@ -18,6 +18,7 @@ export interface SimConfig {
   startWeapons: WeaponId[]; // what everyone (re)spawns with, magazines full
   startSticky: number; // sticky grenades at (re)spawn (at most 4)
   startBounce: number; // bouncing grenades at (re)spawn (at most 4)
+  startGyro: number; // gyro sentries at (re)spawn (at most 2)
   startJetpack: boolean; // spawn with a full jetpack
   startGrapple: boolean; // spawn with a grappling hook
   grappleSpeed: number; // how fast the hook flies out (m/s, plus your own velocity)
@@ -91,6 +92,11 @@ export interface SimConfig {
   projectileLifetime: number; // seconds
   grenadeFuse: number; // sticky: seconds after sticking
   bounceFuse: number; // bouncing: seconds after the throw
+  gyroDelay: number; // gyro sentry: seconds from the throw to its first shot
+  gyroInterval: number; // seconds between its shots (one from each end of the axle)
+  gyroLife: number; // seconds from the throw until it's spent
+  gyroDamage: number; // each laser bolt's damage
+  gyroBoltSpeed: number; // m/s, relative to the sentry
   bounceRestitution: number;
   grenadeMaxFlight: number; // seconds before an unstuck grenade pops anyway
 
@@ -211,6 +217,7 @@ export const BTN_GRENADE2 = 32; // bouncing grenade: hold to aim, release to thr
 export const BTN_RELOAD = 64;
 export const BTN_MELEE = 128;
 export const BTN_USE = 256; // get on / off a vehicle
+export const BTN_GYRO = 1024; // throw a gyro sentry (on release)
 export const BTN_GRAPPLE = 512; // grappling hook: hold to fire it and hang on; let go to drop
 
 // Weapons are addressed by a fixed slot index (also the number keys), in a
@@ -360,6 +367,7 @@ export interface Player {
   lastJumpTick: number;
   grenades: number; // sticky
   bounceGrenades: number;
+  gyros: number; // gyro sentries
   grenadeReadyTick: number;
   prevButtons: number;
   lastInput: InputCmd;
@@ -371,11 +379,11 @@ export interface Player {
   deaths: number;
 }
 
-export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'rocket' | 'seeker' | 'pellet' | 'chaos' | 'bullet' | 'hover';
+export type BoltKind = 'rifle' | 'redRifle' | 'pistol' | 'overcharge' | 'fuelRod' | 'cannon' | 'laconic' | 'rocket' | 'seeker' | 'pellet' | 'chaos' | 'bullet' | 'hover' | 'gyroBolt';
 
-export type ItemKind = 'health' | 'sticky' | 'bounce' | 'grapple' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rocket' | 'seeker' | 'scatter' | 'chaos' | 'revolver' | 'rifle' | 'pistol' | 'jetpack';
+export type ItemKind = 'health' | 'sticky' | 'bounce' | 'grapple' | 'redRifle' | 'launcher' | 'cannon' | 'laconic' | 'hammer' | 'rocket' | 'seeker' | 'scatter' | 'chaos' | 'revolver' | 'rifle' | 'pistol' | 'jetpack' | 'gyro';
 /** Every kind of pickup, in the order menus list them. */
-export const ITEM_KINDS: ItemKind[] = ['health', 'sticky', 'bounce', 'jetpack', 'grapple', 'rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer'];
+export const ITEM_KINDS: ItemKind[] = ['health', 'sticky', 'bounce', 'gyro', 'jetpack', 'grapple', 'rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer'];
 /** The weapons you can be given to start with (all but the flag and the debug hover gun). */
 export const LOADOUT_WEAPONS: WeaponId[] = ['rifle', 'pistol', 'revolver', 'redRifle', 'chaos', 'scatter', 'cannon', 'launcher', 'rocket', 'seeker', 'laconic', 'hammer'];
 
@@ -413,8 +421,8 @@ export interface Bolt {
   speed: number;
 }
 
-export type GrenadeKind = 'sticky' | 'bounce';
-export type ThrownKind = 'grenade' | 'bounceGrenade';
+export type GrenadeKind = 'sticky' | 'bounce' | 'gyro';
+export type ThrownKind = 'grenade' | 'bounceGrenade' | 'gyro';
 
 export type StickTarget =
   | { kind: 'world' }
@@ -434,7 +442,9 @@ export interface Grenade {
   armed: boolean;
   stuck: StickTarget | null;
   contactNormal: Vec3 | null; // bouncing grenades rolling/resting on a surface
-  fuseTick: number; // sticky: -1 until stuck; bounce: set at throw
+  fuseTick: number; // sticky: -1 until stuck; bounce: set at throw; gyro: its next shot
+  /** Gyro sentry: its axle's direction in the stars' frame (a gyroscope holds it), set at the throw. */
+  axis?: Vec3;
   spawnTick: number;
   expireTick: number;
 }
@@ -618,6 +628,7 @@ export interface Level {
 
 export type SimEvent =
   | { type: 'fire'; owner: number; kind: BoltKind | ThrownKind; pos: Vec3 }
+  | { type: 'gyroSpent'; id: number; pos: Vec3 }
   | { type: 'grenadeBounce'; id: number; pos: Vec3; speed: number }
   | { type: 'impact'; pos: Vec3; kind: BoltKind; target: number; owner: number }
   | { type: 'hit'; target: number; attacker: number; damage: number; shieldBroken: boolean }

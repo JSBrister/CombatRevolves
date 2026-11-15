@@ -225,6 +225,22 @@ export function makePickup(item: ItemKind): THREE.Group {
       }
       break;
     }
+    case 'gyro': { // a clear ball in a wire cube, a gyroscope inside
+      const r = 0.24;
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 12), new THREE.MeshStandardMaterial({ color: 0xcfefff, transparent: true, opacity: 0.25, depthWrite: false }));
+      const cube = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(r * 2.05, r * 2.05, r * 2.05)), new THREE.LineBasicMaterial({ color: 0xc8ccd4 }));
+      const steel = mat(0xd0d4dc, 0x202428, 0.9);
+      const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, r * 1.9, 8), steel);
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(r * 0.62, 0.02, 8, 24), steel);
+      rim.rotation.x = Math.PI / 2;
+      const glow = mat(0x6affd0, 0x6affd0, 0.2);
+      const tips = [1, -1].map((s) => { const t = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), glow); t.position.y = s * r * 0.95; return t; });
+      const inner = new THREE.Group();
+      inner.add(axle, rim, ...tips);
+      inner.rotation.z = 0.5;
+      g.add(ball, cube, inner);
+      break;
+    }
     case 'grapple': { // a coil of rope and a three-pronged hook
       const steel = mat(0xc8ccd4, 0x202428, 0.9);
       const coil = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.06, 8, 20), mat(0xb08a4a, 0x201408, 0.1));
@@ -260,5 +276,5 @@ export function makePickup(item: ItemKind): THREE.Group {
 
 export const ITEM_NAMES: Record<ItemKind, string> = {
   health: 'Health', sticky: 'Sticky grenades', bounce: 'Bouncing grenades', redRifle: 'Overclocked Plasma Rifle',
-  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', hammer: 'Grav Mallet', rocket: 'Torch Rocket', seeker: 'Seeker Swarm', scatter: 'Scattergun', chaos: 'Roulette Repeater', revolver: 'Revolver', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack', grapple: 'Grappling Hook',
+  launcher: 'Fuel Rod Launcher', cannon: 'Plasma Bolt Cannon', laconic: 'Laconic Laser', hammer: 'Grav Mallet', rocket: 'Torch Rocket', seeker: 'Seeker Swarm', scatter: 'Scattergun', chaos: 'Roulette Repeater', revolver: 'Revolver', rifle: 'Plasma Rifle', pistol: 'Plasma Pistol', jetpack: 'Jetpack', grapple: 'Grappling Hook', gyro: 'Gyro Sentry',
 };

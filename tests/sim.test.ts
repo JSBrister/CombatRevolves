@@ -5,7 +5,7 @@ import {
   jacobi, knockDir, localBasis, omegaOf, propagateAnalytic, restore, snapshot, spawnBolt, spawnGrenade,
   step, viewVectors, muzzlePoint, levelSdf, sectorOf, distanceOffRing, BTN_GRENADE2,
   isLaconicBusy, predictTrajectory, solveAim, damageVehicle, dist, BTN_USE, launchVelocity, advanceFree, WEAPON_HAMMER, WEAPON_HOVER, WEAPON_CANNON, WEAPON_LACONIC, WEAPON_LAUNCHER, BTN_MELEE, BTN_RELOAD, aimAt, WEAPON_RED, applyItem, damagePlayer, addScaled, dot,
-  spinNow, BTN_GRAPPLE, ITEM_KINDS, STARTING_WEAPONS, WEAPON_IDS, TEAM_COLORS, matchScores, timeLeft, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
+  spinNow, BTN_GRAPPLE, BTN_GYRO, gyroAxis, rotZ, ITEM_KINDS, STARTING_WEAPONS, WEAPON_IDS, TEAM_COLORS, matchScores, timeLeft, WEAPON_FLAG, BTN_MELEE as BTN_Q, len, type Player, towerPoint, towerLayout, standHeight, LEVELS, levelById, startLevel, add, sub, scale, norm, addVehicle, WEAPON_ROCKET, terrainAt, floorRadius, WEAPON_SCATTER, WEAPON_CHAOS, defaultWeapons, WEAPON_REVOLVER, WEAPON_PISTOL, convertBody, setSdfFrame, clone, transportYaw, diskPoint, spinAt, spinFactor, type InputCmd, type SimState, type Vec3,
 } from '../src/sim';
 
 const empty = (config = {}, variedWalls = false) => createState({ obstacles: false, props: false, dummies: false, variedWalls, config });
@@ -3131,5 +3131,44 @@ describe('55. friendly fire', () => {
     expect(hp(mate)).toBe(mate.maxHealth + mate.maxShield);
     detonate(s, addScaled(mate.pos, localBasis(mate.pos).up, -0.5), me.id, -1, { radius: 4, damage: 40, knockback: 5 }, 'grenade');
     expect(hp(mate)).toBeLessThan(mate.maxHealth + mate.maxShield);
+  });
+});
+
+describe('56. gyro sentry', () => {
+  it('lands without rolling, waits, then fires weak bolts both ways along an axle that holds still against the stars', () => {
+    const s = empty();
+    const R = s.config.R;
+    const g = spawnGrenade(s, -1, [R - 1.5, 0, 0], [0, 3, 0.5], 'gyro');
+    const axis0 = norm([0, 3, 0.5]);
+    run(s, Math.round(1.5 / DT));
+    expect(s.bolts.filter((b) => b.kind === 'gyroBolt').length).toBe(0); // (still warming up)
+    expect(len(g.vel)).toBeLessThan(0.1); // landed and stopped (in the turning frame)
+    // the axle in the stars' frame is where it was thrown, though the station has turned under it
+    expect(Math.abs(s.frameAngle)).toBeGreaterThan(0.3);
+    const inertial = rotZ(gyroAxis(s, g), s.frameAngle);
+    expect(dot(inertial, axis0)).toBeGreaterThan(0.9999);
+    let n = 0;
+    while (!s.bolts.some((b) => b.kind === 'gyroBolt') && n++ < 240) run(s, 1);
+    expect(s.tick * DT).toBeGreaterThan(s.config.gyroDelay - 0.02); // (not before the delay)
+    const bolts = s.bolts.filter((b) => b.kind === 'gyroBolt');
+    expect(bolts.length).toBe(2);
+    expect(dot(norm(sub(bolts[0].vel, g.vel)), norm(sub(bolts[1].vel, g.vel)))).toBeLessThan(-0.999); // opposite ends
+    expect(bolts[0].damage).toBe(s.config.gyroDamage);
+    // ...and it's spent after its lifetime
+    run(s, Math.round((s.config.gyroLife - s.config.gyroDelay) / DT) + 2);
+    expect(s.grenades.includes(g)).toBe(false);
+  });
+  it('is thrown with its own button (on release), one at a time, and is a pickup', () => {
+    const s = empty();
+    const id = addPlayer(s, 'human', 'P');
+    const p = s.players.find((q) => q.id === id)!;
+    expect(p.gyros).toBe(0);
+    expect(applyItem(s.config, p, 'gyro', -1)).toBe(true);
+    expect(applyItem(s.config, p, 'gyro', -1)).toBe(true);
+    expect(applyItem(s.config, p, 'gyro', -1)).toBe(false); // (two at most)
+    run(s, 2, (st) => [cmdFor(st, id, { buttons: BTN_GYRO })]);
+    run(s, 1, (st) => [cmdFor(st, id)]);
+    expect(p.gyros).toBe(1);
+    expect(s.grenades.filter((g) => g.variant === 'gyro').length).toBe(1);
   });
 });

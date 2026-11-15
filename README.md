@@ -60,6 +60,8 @@ How it works (`src/net/`, tests in `tests/net.test.ts`):
 
 **Half Ring.** Half a ring (an `arena` of pi R on a spinning ring), sealed by bulkheads reaching nearly to the axis. Made for Spin Control: the teams start at the ends, the engine room is in the middle, and the pickups mirror end to end. Fine for a deathmatch too.
 
+**Gyro sentry** (**T**, d-pad down; a pickup, up to two; or in the starting kit). A clear ball in a wire cube (so it doesn't roll) with a gyroscope spinning inside, its axle along your throw. It lands and sits; 2.5 s after the throw it starts firing weak laser bolts (4 damage) from both ends of the axle, four pairs a second, for about ten seconds. The joke: a gyroscope holds its direction against the stars, not the station, so as the station turns under it the axle sweeps round once a spin (20 s on the standard ring), like a lighthouse. Point it along the spin axis and it holds still; throw it any other way and it will come round to whoever's standing nearby, you included. Its bolts are ordinary plasma, so they curve in the spin like everything else.
+
 **Kill cam** (on by default; a switch on the title screen). When you're killed, the last 2.5 seconds again, from a camera fixed to the stars: from there the shot that got you flew dead straight (its straight inertial trail shows too) and the station turned under it. It replays what was on your screen, so it works the same online; the game carries on meanwhile (you respawn as usual). Click to skip.
 
 **Winning.** The match setup has a score limit and a time limit, each of which can be off (with both off the match never ends; scores are kept anyway). In deathmatch a kill scores 1 and killing yourself (or falling off) loses 1; a team's score is its players' added up. First to the score limit wins; when time runs out the highest score wins, and level at the top is a draw. In capture the flag the score is captures.
@@ -68,9 +70,9 @@ How it works (`src/net/`, tests in `tests/net.test.ts`):
 
 
 **Controls:** WASD move · Shift toggle sprint (on by default) · Space jump (hold in the air with a jetpack) · mouse look ·
-left click fire · right click show trajectory · 1–9, 0, − and = weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade
+left click fire · right click show trajectory · 1–9, 0, − and = weapons you own · wheel next weapon · G sticky grenade · F bouncing grenade · T gyro sentry
 (hold to aim, release to throw) · R reload · Q melee · E get on/off a hover-bike · walk over items to pick them up · Tab scores · Esc pause.
-**Gamepad** (Xbox 360 layout, any pad the browser reports with the standard mapping): left stick move · right stick look · RT fire · LT sticky grenade · LB bouncing grenade · RB grappling hook · A jump/jetpack · B melee · X reload · Y or d-pad right next weapon, d-pad left previous · d-pad up get on/off a bike · left stick click sprint · right stick click show trajectory · Back scores · Start pause and resume (no mouse needed: the game runs without the pointer locked). No quick select: cycle instead.
+**Gamepad** (Xbox 360 layout, any pad the browser reports with the standard mapping): left stick move · right stick look · RT fire · LT sticky grenade · LB bouncing grenade · RB grappling hook · A jump/jetpack · B melee · X reload · Y or d-pad right next weapon, d-pad left previous · d-pad up get on/off a bike · d-pad down gyro sentry · left stick click sprint · right stick click show trajectory · Back scores · Start pause and resume (no mouse needed: the game runs without the pointer locked). No quick select: cycle instead.
 The debug panel (ring size 10–5000 m, forces, movement, every weapon's stats, time scale, inertial-frame overlay, free-fly camera,
 hover gun, bots) only appears while paused.
 

@@ -22,6 +22,7 @@ export const eyeOffset = (p: Player) => EYE_OFFSET * p.size;
 /** Height of the capsule centre above the floor when standing. */
 export const standHeight = (size: number) => PLAYER_STAND * size;
 export const MAX_GRENADES = 4; // of each type
+export const MAX_GYROS = 2;
 
 export interface WorldOptions {
   seed?: number;
@@ -146,7 +147,7 @@ export function addPlayer(state: SimState, kind: PlayerKind, name: string, spawn
     mag: WEAPON_IDS.map(() => 0), reloadUntil: 0, reloadWeapon: -1, infiniteAmmo: false,
     charge: 0, holdTicks: 0, needRelease: false, burstUntil: 0, meleeReadyTick: 0, vehicle: -1,
     fireReadyTick: 0, hasJetpack: false, hasGrapple: false, hook: { state: 0, pos: [0, 0, 0], vel: [0, 0, 0], len: 0, frame: 0 }, jetFuel: 0, jetting: false, lastGroundTick: -1e9, lastJumpTick: -1e9,
-    grenades: 0, bounceGrenades: 0, grenadeReadyTick: 0,
+    grenades: 0, bounceGrenades: 0, gyros: 0, grenadeReadyTick: 0,
     prevButtons: 0, lastInput: neutralInput(id, 0),
     kills: 0, deaths: 0, score: 0, carrying: -1, needles: 0, needleTick: -1e9,
   };
@@ -170,6 +171,7 @@ export function giveLoadout(cfg: SimConfig, p: Player) {
   p.weapon = p.owned[0];
   p.grenades = Math.max(0, Math.min(MAX_GRENADES, cfg.startSticky ?? MAX_GRENADES));
   p.bounceGrenades = Math.max(0, Math.min(MAX_GRENADES, cfg.startBounce ?? MAX_GRENADES));
+  p.gyros = Math.max(0, Math.min(MAX_GYROS, cfg.startGyro ?? 0));
   p.hasJetpack = !!cfg.startJetpack;
   p.jetFuel = p.hasJetpack ? 1 : 0;
   p.hasGrapple = !!cfg.startGrapple;
