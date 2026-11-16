@@ -47,7 +47,7 @@ export const isRocket = (kind: BoltKind) => kind === 'rocket' || kind === 'seeke
 export function boltStats(cfg: SimConfig, kind: BoltKind) {
   const w = cfg.weapons[BOLT_WEAPON[kind]];
   if (kind === 'overcharge') return { muzzle: w.ocMuzzle, damage: w.ocDamage, shieldDamage: w.ocShieldDamage, radius: 0.45, lifetime: w.lifetime };
-  if (kind === 'gyroBolt') return { muzzle: cfg.gyroBoltSpeed, damage: cfg.gyroDamage, shieldDamage: cfg.gyroDamage, radius: 0.1, lifetime: 2 };
+  if (kind === 'gyroBolt') return { muzzle: cfg.gyroBoltSpeed, damage: cfg.gyroDamage, shieldDamage: cfg.gyroDamage, radius: 0.1, lifetime: cfg.gyroBoltLife };
   return { muzzle: w.muzzle, damage: w.damage, shieldDamage: w.shieldDamage, radius: w.radius, lifetime: w.lifetime };
 }
 

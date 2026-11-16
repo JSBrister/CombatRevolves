@@ -97,6 +97,7 @@ export interface SimConfig {
   gyroLife: number; // seconds from the throw until it's spent
   gyroDamage: number; // each laser bolt's damage
   gyroBoltSpeed: number; // m/s, relative to the sentry
+  gyroBoltLife: number; // seconds before a bolt fizzles
   bounceRestitution: number;
   grenadeMaxFlight: number; // seconds before an unstuck grenade pops anyway
 

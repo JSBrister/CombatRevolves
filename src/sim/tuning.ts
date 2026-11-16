@@ -98,7 +98,8 @@ export const defaultConfig = (): SimConfig => ({
   gyroInterval: 0.25,
   gyroLife: 12,
   gyroDamage: 4,
-  gyroBoltSpeed: 70,
+  gyroBoltSpeed: 600, // fast enough to cross the ring and bother the other side
+  gyroBoltLife: 3,
   bounceRestitution: 0.6, // bouncing grenade bounciness
   grenadeMaxFlight: 12, // a sticky that never sticks goes off after this (s)
 
